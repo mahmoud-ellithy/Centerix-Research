@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Centerix.API/Centerix.API.csproj" />
+    <Project Path="src/Centerix.Application/Centerix.Application.csproj" />
+    <Project Path="src/Centerix.Domain/Centerix.Domain.csproj" />
+    <Project Path="src/Centerix.Infrastructure/Centerix.Infrastructure.csproj" />
+  </Folder>
+</Solution>

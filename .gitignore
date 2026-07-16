@@ -1,0 +1,97 @@
+# -------------------------------
+# .NET / Visual Studio
+# -------------------------------
+## Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+## Visual Studio working folders
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+## Visual Studio Code
+.vscode/
+
+## Rider
+.idea/
+
+## Build outputs
+*.dll
+*.exe
+*.pdb
+*.cache
+*.dbmdl
+*.dbproj.schemaview
+*.lock.json
+*.ide
+*.ide-journal
+
+## NuGet
+*.nupkg
+*.snupkg
+**/packages/*
+!**/packages/build/
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+## ASP.NET Scaffolding
+ScaffoldingReadMe.txt
+
+## .NET Core
+project.assets.json
+*.nuget.dgspec.json
+*.nuget.g.props
+*.nuget.g.targets
+
+## User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+## JetBrains
+.idea/
+
+## Build logs
+*.log
+msbuild.log
+msbuild.err
+msbuild.wrn
+
+# -------------------------------
+# OS files
+# -------------------------------
+.DS_Store
+Thumbs.db
+
+# -------------------------------
+# Environment / Secrets
+# -------------------------------
+*.env
+.env
+.env.local
+secrets.json
+appsettings.Local.json
+
+# -------------------------------
+# Test results
+# -------------------------------
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+TestResults/
+*.coverage
+*.coveragexml

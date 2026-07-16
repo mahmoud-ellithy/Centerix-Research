@@ -1,0 +1,96 @@
+using Centerix.Application.Common.Interfaces;
+using Centerix.Domain.Common;
+using Centerix.Domain.Platform.Plans;
+using Centerix.Domain.Platform.Features;
+using Centerix.Domain.Platform.Subscriptions;
+using Centerix.Domain.Platform.Billing;
+using Centerix.Domain.Platform.Leads;
+using Centerix.Domain.Platform.Auditing;
+using MediatR;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+using System.Linq.Expressions;
+using System.Reflection;
+
+namespace Centerix.Infrastructure.Data;
+
+public class AppDbContext : IdentityDbContext, IAppDbContext
+{
+    private readonly IMediator _mediator;
+    private readonly ICurrentTenant _currentTenant;
+    private string? _currentTenantId;
+
+    public AppDbContext(
+        DbContextOptions<AppDbContext> options,
+        IMediator mediator,
+        ICurrentTenant currentTenant) : base(options)
+    {
+        _mediator = mediator;
+        _currentTenant = currentTenant;
+        _currentTenantId = _currentTenant.IsResolved ? _currentTenant.TenantId : null;
+    }
+
+    public DbSet<Plan> Plans { get; set; } = default!;
+    public DbSet<Feature> Features { get; set; } = default!;
+    public DbSet<PlanFeature> PlanFeatures { get; set; } = default!;
+    public DbSet<TenantPlan> TenantPlans { get; set; } = default!;
+    public DbSet<TenantBilling> TenantBillings { get; set; } = default!;
+    public DbSet<PlatformAuditLog> PlatformAuditLogs { get; set; } = default!;
+    public DbSet<TenantCRMLead> TenantCRMLeads { get; set; } = default!;
+
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        await DispatchDomainEventsAsync(cancellationToken);
+        return await base.SaveChangesAsync(cancellationToken);
+    }
+
+    protected override void OnModelCreating(ModelBuilder builder)
+    {
+        base.OnModelCreating(builder);
+        builder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+        ApplyTenantQueryFilter(builder);
+    }
+
+    private void ApplyTenantQueryFilter(ModelBuilder builder)
+    {
+        if (string.IsNullOrEmpty(_currentTenantId))
+        {
+            return;
+        }
+
+        foreach (var entityType in builder.Model.GetEntityTypes())
+        {
+            if (typeof(IHasTenantId).IsAssignableFrom(entityType.ClrType) && !entityType.IsOwned())
+            {
+                var parameter = Expression.Parameter(entityType.ClrType, "e");
+                var property = Expression.Property(parameter, nameof(IHasTenantId.TenantId));
+                var constant = Expression.Constant(_currentTenantId);
+                var equal = Expression.Equal(property, constant);
+                var lambda = Expression.Lambda(equal, parameter);
+                builder.Entity(entityType.ClrType).HasQueryFilter(lambda);
+            }
+        }
+    }
+
+    private async Task DispatchDomainEventsAsync(CancellationToken cancellationToken)
+    {
+        var domainEntities = ChangeTracker.Entries()
+            .Where(e => e.Entity is Entity baseEntity && baseEntity.DomainEvents.Count != 0)
+            .Select(e => (Entity)e.Entity)
+            .ToList();
+
+        var domainEvents = domainEntities
+            .SelectMany(e => e.DomainEvents)
+            .ToList();
+
+        foreach (var domainEvent in domainEvents)
+        {
+            await _mediator.Publish(domainEvent, cancellationToken);
+        }
+
+        foreach (var entity in domainEntities)
+        {
+            entity.ClearDomainEvents();
+        }
+    }
+}

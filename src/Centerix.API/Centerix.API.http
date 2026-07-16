@@ -1,0 +1,6 @@
+@Centerix.API_HostAddress = http://localhost:5290
+
+GET {{Centerix.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
