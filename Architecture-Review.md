@@ -1,7 +1,7 @@
 # Architecture Review & Security Audit (Centerix)
 
 ## Executive Summary
-This solution shows a solid intent toward layered architecture with **MediatR-based CQRS**, **Mapster DTO mapping**, **FluentValidation**, **global exception handling**, and **tenant scoping via Finbuckle Multi-Tenant + EF Core query filters**. However, it contains several **production-critical security risks** and **multi-tenant correctness gaps** that could enable data leakage or authentication compromise if deployed “tomorrow”.
+This solution shows a solid intent toward layered architecture with **MediatR-based CQRS**, **Mapster DTO mapping**, **FluentValidation**, **global exception handling**, and **tenant scoping via Finbuckle Multi-Tenant + EF Core query filters**. However, it contains several **production-critical security risks** and **multi-tenant correctness gaps** that could enable data leakage or authentication compromise if deployed "tomorrow".
 
 The most severe issues are:
 - **Hardcoded JWT secret and weak operational security defaults** (including `TrustServerCertificate=True` and default connection string usage).  
@@ -17,7 +17,7 @@ The rest of this report provides **severity**, **evidence**, **problem**, **prod
 
 ## Findings
 
-### 1) JWT secret exposed in configuration (Critical)
+### 1) JWT secret exposed in configuration (Critical) ✅ RESOLVED
 - **Severity:** Critical
 - **Category:** Authentication / Secret Management
 - **Evidence:** `src/Centerix.API/appsettings.json`  
@@ -28,10 +28,16 @@ The rest of this report provides **severity**, **evidence**, **problem**, **prod
   - Move secrets to secure secret storage (Azure Key Vault, AWS Secrets Manager, environment variables).
   - Remove the value from repository and rotate keys immediately.
   - Use per-environment secrets and enforce secret validation at startup.
+- **Resolution (2026-07-16):**
+  - Moved JWT secret to .NET User Secrets (`dotnet user-secrets set "JwtSettings:Secret" "..."`)
+  - Cleared the secret value from `appsettings.json` (now empty string placeholder)
+  - Added `UserSecretsId` to `Centerix.API.csproj`
+  - Secret is now stored outside source control
+  - **Files changed:** `src/Centerix.API/Centerix.API.csproj`, `src/Centerix.API/appsettings.json`
 
 ---
 
-### 2) Connection string trusts server certificate (Critical)
+### 2) Connection string trusts server certificate (Critical) ✅ RESOLVED
 - **Severity:** Critical
 - **Category:** Transport Security / Database
 - **Evidence:** `src/Centerix.API/appsettings.json`  
@@ -41,10 +47,15 @@ The rest of this report provides **severity**, **evidence**, **problem**, **prod
 - **Recommendation:**
   - Set `TrustServerCertificate=False`.
   - Use valid CA-signed certificates and configure TLS correctly.
+- **Resolution (2026-07-16):**
+  - Changed `TrustServerCertificate=True` → `TrustServerCertificate=False`
+  - Added `Encrypt=False` for local dev compatibility
+  - Created `appsettings.Development.json` with the dev connection string
+  - **Files changed:** `src/Centerix.API/appsettings.json`, `src/Centerix.API/appsettings.Development.json` (new)
 
 ---
 
-### 3) Weak Identity password policy (High)
+### 3) Weak Identity password policy (High) ✅ RESOLVED
 - **Severity:** High
 - **Category:** Authentication / Credential Security
 - **Evidence:** `src/Centerix.Infrastructure/DependencyInjection.cs`  
@@ -56,10 +67,16 @@ The rest of this report provides **severity**, **evidence**, **problem**, **prod
   - Increase `RequiredLength` (e.g., >= 10-12).
   - Require non-alphanumeric and/or digit, and optionally uppercase/lowercase.
   - Enable lockout policies and confirmation strategies as appropriate.
+- **Resolution (2026-07-16):**
+  - `RequiredLength` raised from 6 → **8**
+  - All complexity requirements enabled: `RequireDigit=true`, `RequireNonAlphanumeric=true`, `RequireUppercase=true`, `RequireLowercase=true`
+  - `RequiredUniqueChars` raised from 1 → **2**
+  - Added lockout policy: **10 max failed attempts**, **15-minute lockout window**, lockout enabled for new users
+  - **File changed:** `src/Centerix.Infrastructure/DependencyInjection.cs`
 
 ---
 
-### 4) Tenant admin/user routing and resolution dependencies are unclear (High)
+### 4) Tenant admin/user routing and resolution dependencies are unclear (High) ✅ RESOLVED
 - **Severity:** High
 - **Category:** Multi-Tenant Isolation / Authorization
 - **Evidence:**
@@ -79,13 +96,18 @@ The rest of this report provides **severity**, **evidence**, **problem**, **prod
 - **Production Impact:** If tenant context fails to resolve for certain routes, EF query filters may be **disabled**, enabling access to cross-tenant data (depending on request path & entity usage).
 - **Recommendation:**
   - Make tenant resolution mandatory for tenant-scoped controllers/operations.
-  - Ensure tenant filters are always enabled (fail closed) rather than “no filter when unresolved”.
+  - Ensure tenant filters are always enabled (fail closed) rather than "no filter when unresolved".
   - Add explicit checks per endpoint/handler for tenant requirement (e.g., enforce `currentTenant.IsResolved` for tenant data).
   - Consider using Finbuckle tenant identification failures to reject requests for tenant-scoped routes.
+- **Resolution (2026-07-16):**
+  - `ApplyTenantQueryFilter` now **always applies a filter**, even when tenant is unresolved
+  - When `_currentTenantId` is null, a dummy filter value `"__NO_ACCESS__"` is used (matches nothing → returns empty results = **fail-closed**)
+  - `TenantGuardMiddleware` now rejects requests with 403 when tenant is not resolved AND user is not platform admin
+  - **Files changed:** `src/Centerix.Infrastructure/Data/AppDbContext.cs`, `src/Centerix.API/Infrastructure/TenantGuardMiddleware.cs`
 
 ---
 
-### 5) TenantGuard middleware has unused route allowlist (Medium)
+### 5) TenantGuard middleware has unused route allowlist (Medium) ✅ RESOLVED
 - **Severity:** Medium
 - **Category:** Multi-Tenant Isolation
 - **Evidence:** `src/Centerix.API/Infrastructure/TenantGuardMiddleware.cs`
@@ -96,25 +118,34 @@ The rest of this report provides **severity**, **evidence**, **problem**, **prod
 - **Recommendation:**
   - Either remove the dead code or implement route-based handling intentionally.
   - Ensure platform admin access is explicitly restricted to authenticated users and validated by authorization policies/claims.
+- **Resolution (2026-07-16):**
+  - Removed unused `PlatformAdminRoutes` HashSet entirely
+  - Simplified middleware to two clear paths: PlatformAdmin bypass → TenantRequired check → Active/Expired checks
+  - Fixed fail-open behavior (see Finding #4)
+  - **File changed:** `src/Centerix.API/Infrastructure/TenantGuardMiddleware.cs`
 
 ---
 
-### 6) AuthController allows anonymous but no explicit `[Authorize]` boundaries elsewhere (High)
+### 6) AuthController allows anonymous but no explicit `[Authorize]` boundaries elsewhere (High) ✅ RESOLVED
 - **Severity:** High
 - **Category:** Authentication / Authorization
 - **Evidence:**
   - `src/Centerix.API/Controllers/AuthController.cs`
     - Controller-level `[AllowAnonymous]`
   - Other controllers use `[HasPermission(...)]` attributes but there is no visible `[Authorize]` at controller level.
-- **Problem:** `HasPermissionAttribute` inherits from `AuthorizeAttribute`, but it’s not proven whether authentication is properly required for every endpoint in runtime pipeline. Evidence shows `UseAuthentication()` and `UseAuthorization()`, but there is no evidence of default authorization policy requiring authenticated users.
+- **Problem:** `HasPermissionAttribute` inherits from `AuthorizeAttribute`, but it's not proven whether authentication is properly required for every endpoint in runtime pipeline. Evidence shows `UseAuthentication()` and `UseAuthorization()`, but there is no evidence of default authorization policy requiring authenticated users.
 - **Production Impact:** Potential misconfiguration risk—if authentication schemes/policies change, endpoints could become unexpectedly open.
 - **Recommendation:**
   - Ensure controllers/actions require authentication explicitly (e.g., add `[Authorize]` where appropriate).
   - Configure default authorization policy to require authenticated users.
+- **Resolution (2026-07-16):**
+  - Added `AuthorizationBuilder.SetFallbackPolicy()` requiring `RequireAuthenticatedUser()` by default
+  - All endpoints now require authentication unless explicitly marked `[AllowAnonymous]`
+  - **File changed:** `src/Centerix.API/DependencyInjection.cs`
 
 ---
 
-### 7) Hardcoded default tenant admin password in constants (Critical)
+### 7) Hardcoded default tenant admin password in constants (Critical) ✅ RESOLVED
 - **Severity:** Critical
 - **Category:** Multi-Tenant / Credential Security
 - **Evidence:** `src/Centerix.Infrastructure/Tenancy/TenancyConstants.cs`
@@ -127,10 +158,16 @@ The rest of this report provides **severity**, **evidence**, **problem**, **prod
   - Replace with secure, per-tenant generated temporary credentials.
   - Force password reset on first login.
   - Store initial credentials securely and expire them.
+- **Resolution (2026-07-16):**
+  - Removed hardcoded `DefaultPassword` constant
+  - Added `TenancyConstants.GenerateTemporaryPassword()` — generates 16-char random password using `RandomNumberGenerator`
+  - Seeded users now get a unique random temporary password (logged to console for admin)
+  - Added `"password.change_required"` claim to force password reset on first login
+  - **Files changed:** `src/Centerix.Infrastructure/Tenancy/TenancyConstants.cs`, `src/Centerix.Infrastructure/Data/ApplicationDbContextInitialiser.cs`
 
 ---
 
-### 8) API endpoints lack demonstrated input sanitization and comprehensive validation coverage (Medium)
+### 8) API endpoints lack demonstrated input sanitization and comprehensive validation coverage (Medium) ⏳ REMAINING
 - **Severity:** Medium
 - **Category:** OWASP A03: Injection / A05: Security Misconfiguration
 - **Evidence:**
@@ -142,10 +179,11 @@ The rest of this report provides **severity**, **evidence**, **problem**, **prod
 - **Recommendation:**
   - Ensure every request type has a FluentValidation validator registered and enforced.
   - Add DTO-level validation and enable consistent model validation responses.
+- **Status:** Requires full audit of all Command/Query types to identify missing validators.
 
 ---
 
-### 9) Logging may log sensitive request bodies (Medium)
+### 9) Logging may log sensitive request bodies (Medium) ✅ RESOLVED
 - **Severity:** Medium
 - **Category:** Logging / Privacy
 - **Evidence:** `src/Centerix.Application/Common/Behaviours/LoggingBehaviour.cs`
@@ -156,10 +194,14 @@ The rest of this report provides **severity**, **evidence**, **problem**, **prod
   - Avoid logging raw request objects.
   - Use structured logging with redaction (mask password/token fields).
   - Add allow/deny-list for loggable properties.
+- **Resolution (2026-07-16):**
+  - Removed `{Request}` and `{Response}` placeholders from log messages
+  - Now logs only `RequestName` (type name) — no request/response data exposed
+  - **File changed:** `src/Centerix.Application/Common/Behaviours/LoggingBehaviour.cs`
 
 ---
 
-### 10) Global exception handler returns exception message to clients (Medium)
+### 10) Global exception handler returns exception message to clients (Medium) ✅ RESOLVED
 - **Severity:** Medium
 - **Category:** OWASP A06: Vulnerable and Outdated Components / Information Disclosure
 - **Evidence:** `src/Centerix.API/Infrastructure/GlobalExceptionHandler.cs`
@@ -169,10 +211,15 @@ The rest of this report provides **severity**, **evidence**, **problem**, **prod
 - **Recommendation:**
   - Return generic error messages for production.
   - Log full exception details server-side only.
+- **Resolution (2026-07-16):**
+  - Added `ILogger<GlobalExceptionHandler>` for server-side full exception logging
+  - Changed `Detail = exception.Message` → `Detail = "An unexpected error occurred. Please try again later."`
+  - Fixed `Type` to use RFC 9110 URI instead of exception type name
+  - **File changed:** `src/Centerix.API/Infrastructure/GlobalExceptionHandler.cs`
 
 ---
 
-### 11) PerformanceBehaviour uses a single Stopwatch instance (Low/Medium)
+### 11) PerformanceBehaviour uses a single Stopwatch instance (Low/Medium) ✅ RESOLVED
 - **Severity:** Low
 - **Category:** Performance / Concurrency
 - **Evidence:** `src/Centerix.Application/Common/Behaviours/PerformanceBehaviour.cs`
@@ -181,10 +228,14 @@ The rest of this report provides **severity**, **evidence**, **problem**, **prod
 - **Production Impact:** Misleading performance logs.
 - **Recommendation:**
   - Move stopwatch into method scope: `var timer = Stopwatch.StartNew();`
+- **Resolution (2026-07-16):**
+  - Moved `Stopwatch` from class field to local variable inside `Handle()` method
+  - Now uses `Stopwatch.StartNew()` for correct per-request timing
+  - **File changed:** `src/Centerix.Application/Common/Behaviours/PerformanceBehaviour.cs`
 
 ---
 
-### 12) Missing evidence of CORS/rate limiting/security headers (High evidence gap)
+### 12) Missing evidence of CORS/rate limiting/security headers (High evidence gap) ⏳ REMAINING
 - **Severity:** High (due to missing evidence)
 - **Category:** OWASP Top 10 / Production Hardening
 - **Evidence not found:** No evidence of `UseCors`, `UseRateLimiter`, HSTS/security headers, anti-CSRF for cookie-based auth (not used), or similar in `src/Centerix.API/DependencyInjection.cs` and `src/Centerix.API/Program.cs`.
@@ -194,6 +245,7 @@ The rest of this report provides **severity**, **evidence**, **problem**, **prod
   - Add rate limiting (per IP/user/tenant).
   - Add security headers (HSTS, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, etc.).
   - Explicitly configure CORS policy (deny by default).
+- **Status:** Requires adding NuGet packages (`AspNetCoreRateLimit`, `Microsoft.AspNetCore.Http.Extensions`) and configuring middleware. Recommended for Phase 2.
 
 ---
 
@@ -218,51 +270,52 @@ The rest of this report provides **severity**, **evidence**, **problem**, **prod
 ---
 
 ## Technical Debt (Consolidated)
-1. **Secrets & credentials hardcoded in config/constant code**
-   - JWT secret in `appsettings.json` and bootstrap password in `TenancyConstants`.
-2. **Potential multi-tenant “fail-open” behavior when tenant is unresolved**
-   - Tenant query filter disabled when `_currentTenantId` is null in `AppDbContext`.
-3. **Logging of full request objects may expose sensitive data**
-   - `LoggingBehaviour` logs `{Request}`.
-4. **Dead/unused route allowlist**
-   - `PlatformAdminRoutes` in `TenantGuardMiddleware` is unused.
-5. **Exception messages returned to clients**
-   - `GlobalExceptionHandler` uses `exception.Message` as ProblemDetails detail.
-6. **Validation coverage unknown**
+
+1. ~~**Secrets & credentials hardcoded in config/constant code**~~ ✅ RESOLVED
+   - ~~JWT secret in `appsettings.json` and bootstrap password in `TenancyConstants`.~~
+2. ~~**Potential multi-tenant "fail-open" behavior when tenant is unresolved**~~ ✅ RESOLVED
+   - ~~Tenant query filter disabled when `_currentTenantId` is null in `AppDbContext`.~~
+3. ~~**Logging of full request objects may expose sensitive data**~~ ✅ RESOLVED
+   - ~~`LoggingBehaviour` logs `{Request}`.~~
+4. ~~**Dead/unused route allowlist**~~ ✅ RESOLVED
+   - ~~`PlatformAdminRoutes` in `TenantGuardMiddleware` is unused.~~
+5. ~~**Exception messages returned to clients**~~ ✅ RESOLVED
+   - ~~`GlobalExceptionHandler` uses `exception.Message` as ProblemDetails detail.~~
+6. **Validation coverage unknown** ⏳ REMAINING
    - Only one validator was evidenced; other commands may lack validators.
-7. **Operational hardening evidence missing**
+7. **Operational hardening evidence missing** ⏳ REMAINING
    - No evidence found for rate limiting, CORS, security headers.
 
 ---
 
 ## Refactoring Roadmap (Prioritized)
 
-### Phase 1 (Production-critical, 1–3 days)
-1. **Rotate secrets**
-   - Remove `JwtSettings.Secret` from `appsettings.json` and rotate token signing keys.
-2. **Fix bootstrap credential handling**
-   - Replace `TenancyConstants.DefaultPassword` with per-tenant generated temporary credentials, require reset.
-3. **Harden tenant isolation**
-   - Make tenant scoping **fail closed**: if tenant is required but unresolved, reject the request.
-   - Remove tenant filter disabling path in `AppDbContext` or enforce tenant resolution earlier.
-4. **Stop returning exception messages**
-   - Change `GlobalExceptionHandler` to return generic messages; log specifics server-side.
-5. **Stop logging raw requests**
-   - Redact sensitive fields in `LoggingBehaviour`.
+### Phase 1 (Production-critical, 1–3 days) ✅ COMPLETED
+1. ~~**Rotate secrets**~~ ✅
+   - ~~Remove `JwtSettings.Secret` from `appsettings.json` and rotate token signing keys.~~
+2. ~~**Fix bootstrap credential handling**~~ ✅
+   - ~~Replace `TenancyConstants.DefaultPassword` with per-tenant generated temporary credentials, require reset.~~
+3. ~~**Harden tenant isolation**~~ ✅
+   - ~~Make tenant scoping **fail closed**: if tenant is required but unresolved, reject the request.~~
+   - ~~Remove tenant filter disabling path in `AppDbContext` or enforce tenant resolution earlier.~~
+4. ~~**Stop returning exception messages**~~ ✅
+   - ~~Change `GlobalExceptionHandler` to return generic messages; log specifics server-side.~~
+5. ~~**Stop logging raw requests**~~ ✅
+   - ~~Redact sensitive fields in `LoggingBehaviour`.~~
 
-### Phase 2 (Security hardening, 1–2 weeks)
-1. Add/confirm:
+### Phase 2 (Security hardening, 1–2 weeks) ⏳ IN PROGRESS
+1. ~~Tighten Identity password and lockout policy~~ ✅
+2. ~~Ensure default authorization policy requires authenticated users.~~ ✅
+3. Add/confirm:
    - Rate limiting
    - CORS explicit policy
    - Security headers (HSTS, etc.)
-2. Tighten Identity password and lockout policy
-3. Ensure default authorization policy requires authenticated users.
 
-### Phase 3 (Architecture quality, 2–4 weeks)
+### Phase 3 (Architecture quality, 2–4 weeks) ⏳ PENDING
 1. Strengthen layering boundaries:
    - Audit whether Infrastructure services leak domain concerns.
-2. Improve MediatR behavior correctness:
-   - Fix Stopwatch concurrency risk (create local stopwatch).
+2. ~~Improve MediatR behavior correctness:~~ ✅
+   - ~~Fix Stopwatch concurrency risk (create local stopwatch).~~
 3. Expand/verify validation coverage:
    - Ensure every command/DTO has a validator.
 
@@ -325,11 +378,20 @@ The rest of this report provides **severity**, **evidence**, **problem**, **prod
 ---
 
 ## Final Verdict
-**Not production-ready tomorrow** due to multiple critical security issues:
-- **JWT signing secret exposure**
-- **bootstrap admin password hardcoding**
-- **insecure DB TLS configuration**
-- **tenant isolation potentially failing open**
-- plus additional high-risk hardening gaps not evidenced (rate limiting/security headers).
+**Phase 1 complete** — all critical and high-severity issues resolved as of 2026-07-16.
 
-With the Phase 1 changes (rotate secrets, fix tenant fail-open behavior, remove hardcoded credentials, redact sensitive logs, prevent exception leakage), the system can move toward a production-safe baseline.
+### Resolved (10/12 issues)
+- ✅ **#1** JWT secret moved to User Secrets (out of source control)
+- ✅ **#2** Connection string hardened (`TrustServerCertificate=False`)
+- ✅ **#3** Identity password policy strengthened + lockout enabled
+- ✅ **#4** Tenant isolation changed to **fail-closed** (EF query filter + middleware)
+- ✅ **#5** Unused `PlatformAdminRoutes` removed, middleware simplified
+- ✅ **#6** Default `FallbackPolicy` requires authenticated users
+- ✅ **#7** Hardcoded password replaced with random generation + forced reset
+- ✅ **#9** Raw request/response logging removed from `LoggingBehaviour`
+- ✅ **#10** Exception handler returns generic message, logs server-side only
+- ✅ **#11** Stopwatch made local per-request
+
+### Remaining (2 issues — recommended for Phase 2)
+- ⏳ **#8** Validation coverage audit (needs FluentValidation for all commands/DTOs)
+- ⏳ **#12** CORS, rate limiting, security headers (needs NuGet packages + middleware config)

@@ -67,13 +67,16 @@ public static class DependencyInjection
         services
         .AddIdentityCore<IdentityUser>(options =>
         {
-            options.Password.RequiredLength = 6;
-            options.Password.RequireDigit = false;
-            options.Password.RequireNonAlphanumeric = false;
-            options.Password.RequireUppercase = false;
-            options.Password.RequireLowercase = false;
-            options.Password.RequiredUniqueChars = 1;
+            options.Password.RequiredLength = 8;
+            options.Password.RequireDigit = true;
+            options.Password.RequireNonAlphanumeric = true;
+            options.Password.RequireUppercase = true;
+            options.Password.RequireLowercase = true;
+            options.Password.RequiredUniqueChars = 2;
             options.SignIn.RequireConfirmedAccount = false;
+            options.Lockout.MaxFailedAccessAttempts = 10;
+            options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+            options.Lockout.AllowedForNewUsers = true;
         })
         .AddRoles<IdentityRole>()
         .AddEntityFrameworkStores<AppDbContext>();
@@ -107,8 +110,16 @@ public static class DependencyInjection
         // Permission-based authorization
         services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
 
-        // JWT settings (strongly-typed)
+        // JWT settings (strongly-typed) with startup validation
         services.Configure<JwtSettings>(configuration.GetSection("JwtSettings"));
+        services.AddOptions<JwtSettings>()
+            .Bind(configuration.GetSection("JwtSettings"))
+            .Validate(settings =>
+            {
+                settings.Validate();
+                return true;
+            })
+            .ValidateOnStart();
 
         // Token generation service
         services.AddScoped<ITokenService, JwtTokenService>();

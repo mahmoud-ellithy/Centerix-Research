@@ -111,10 +111,13 @@ public class ApplicationDbContextInitialiser(
                 NormalizedUserName = tenantInfo.Email.ToUpperInvariant()
             };
 
+            var temporaryPassword = TenancyConstants.GenerateTemporaryPassword();
             var passwordHasher = new PasswordHasher<IdentityUser>();
-            adminUser.PasswordHash = passwordHasher.HashPassword(adminUser, TenancyConstants.DefaultPassword);
+            adminUser.PasswordHash = passwordHasher.HashPassword(adminUser, temporaryPassword);
+            logger.LogInformation("Generated temporary password for {Email}. Force password change required on first login.", tenantInfo.Email);
 
             await _userManager.CreateAsync(adminUser);
+            await _userManager.AddClaimAsync(adminUser, new Claim("password.change_required", "true"));
         }
 
         if (!await _userManager.IsInRoleAsync(adminUser, adminRole))

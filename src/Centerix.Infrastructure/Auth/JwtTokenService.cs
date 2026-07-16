@@ -13,6 +13,25 @@ public class JwtSettings
     public string Issuer { get; set; } = string.Empty;
     public string Audience { get; set; } = string.Empty;
     public int ExpirationInMinutes { get; set; } = 60;
+    
+    /// <summary>
+    /// Validates that required JWT settings are properly configured.
+    /// Should be called at application startup.
+    /// </summary>
+    public void Validate()
+    {
+        if (string.IsNullOrWhiteSpace(Secret))
+            throw new InvalidOperationException("JWT Secret is not configured. Set 'JwtSettings:Secret' in environment variables or User Secrets.");
+        
+        if (Secret.Length < 32)
+            throw new InvalidOperationException("JWT Secret must be at least 32 characters for security.");
+        
+        if (string.IsNullOrWhiteSpace(Issuer))
+            throw new InvalidOperationException("JWT Issuer is not configured. Set 'JwtSettings:Issuer'.");
+        
+        if (string.IsNullOrWhiteSpace(Audience))
+            throw new InvalidOperationException("JWT Audience is not configured. Set 'JwtSettings:Audience'.");
+    }
 }
 
 public interface ITokenService

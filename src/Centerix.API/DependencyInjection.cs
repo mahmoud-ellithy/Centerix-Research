@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 
 using Asp.Versioning;
 using Finbuckle.MultiTenant;
+using Microsoft.AspNetCore.Authorization;
 
 using Scalar.AspNetCore;
 
@@ -79,6 +80,11 @@ public static class DependencyInjection
         {
             options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
         });
+
+        services.AddAuthorizationBuilder()
+            .SetFallbackPolicy(new AuthorizationPolicyBuilder()
+                .RequireAuthenticatedUser()
+                .Build());
 
         return services;
     }

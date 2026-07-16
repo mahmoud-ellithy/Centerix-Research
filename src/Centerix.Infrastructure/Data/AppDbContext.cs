@@ -53,10 +53,9 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
 
     private void ApplyTenantQueryFilter(ModelBuilder builder)
     {
-        if (string.IsNullOrEmpty(_currentTenantId))
-        {
-            return;
-        }
+        // When tenant is resolved, filter by tenant ID.
+        // When tenant is NOT resolved, apply a filter that returns no results (fail-closed).
+        var tenantId = _currentTenantId ?? "__NO_ACCESS__";
 
         foreach (var entityType in builder.Model.GetEntityTypes())
         {
@@ -64,7 +63,7 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
             {
                 var parameter = Expression.Parameter(entityType.ClrType, "e");
                 var property = Expression.Property(parameter, nameof(IHasTenantId.TenantId));
-                var constant = Expression.Constant(_currentTenantId);
+                var constant = Expression.Constant(tenantId);
                 var equal = Expression.Equal(property, constant);
                 var lambda = Expression.Lambda(equal, parameter);
                 builder.Entity(entityType.ClrType).HasQueryFilter(lambda);

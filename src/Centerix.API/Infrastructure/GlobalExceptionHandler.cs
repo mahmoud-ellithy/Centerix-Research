@@ -1,17 +1,23 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 using Centerix.Application.Common.Interfaces;
 
 namespace Centerix.API.Infrastructure;
 
-public class GlobalExceptionHandler(IProblemDetailsService problemDetailsService, ILocalizer localizer) : IExceptionHandler
+public class GlobalExceptionHandler(
+    IProblemDetailsService problemDetailsService,
+    ILocalizer localizer,
+    ILogger<GlobalExceptionHandler> logger) : IExceptionHandler
 {
     public async ValueTask<bool> TryHandleAsync(
         HttpContext httpContext,
         Exception exception,
         CancellationToken cancellationToken)
     {
+        logger.LogError(exception, "Unhandled exception occurred during request processing.");
+
         httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
 
         return await problemDetailsService.TryWriteAsync(new ProblemDetailsContext
@@ -20,9 +26,9 @@ public class GlobalExceptionHandler(IProblemDetailsService problemDetailsService
             Exception = exception,
             ProblemDetails = new ProblemDetails
             {
-                Type = exception.GetType().Name,
+                Type = "https://tools.ietf.org/html/rfc9110#section-15.6.1",
                 Title = localizer.Translate("Error:Application"),
-                Detail = exception.Message,
+                Detail = "An unexpected error occurred. Please try again later.",
             }
         });
     }

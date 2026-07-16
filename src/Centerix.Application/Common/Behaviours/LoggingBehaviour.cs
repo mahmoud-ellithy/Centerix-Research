@@ -14,13 +14,11 @@ public class LoggingBehaviour<TRequest, TResponse>(
     {
         var requestName = typeof(TRequest).Name;
 
-        logger.LogInformation("Handling {RequestName}: {Request}",
-            requestName, request);
+        logger.LogInformation("Handling {RequestName}", requestName);
 
         var response = await next();
 
-        logger.LogInformation("Handled {RequestName} with response: {Response}",
-            requestName, response);
+        logger.LogInformation("Handled {RequestName}", requestName);
 
         return response;
     }

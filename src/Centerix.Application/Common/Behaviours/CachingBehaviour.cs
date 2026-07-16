@@ -17,9 +17,15 @@ public class CachingBehaviour<TRequest, TResponse>(
         RequestHandlerDelegate<TResponse> next,
         CancellationToken cancellationToken)
     {
+        // Fail-closed: skip caching when tenant is not resolved to prevent cross-tenant cache leakage
+        if (!currentTenant.IsResolved)
+        {
+            logger.LogWarning("Cache skipped for {RequestName}: tenant not resolved", typeof(TRequest).Name);
+            return await next();
+        }
+
         var requestName = typeof(TRequest).Name;
-        var tenantKey = currentTenant.IsResolved ? currentTenant.TenantId : "global";
-        var cacheKey = $"{tenantKey}:{requestName}:{request.GetCacheKey()}";
+        var cacheKey = $"{currentTenant.TenantId}:{requestName}:{request.GetCacheKey()}";
 
         logger.LogInformation("Checking cache for {RequestName} with key {CacheKey}",
             requestName, cacheKey);

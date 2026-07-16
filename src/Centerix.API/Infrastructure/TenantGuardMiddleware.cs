@@ -10,18 +10,25 @@ namespace Centerix.API.Infrastructure;
 
 public class TenantGuardMiddleware(RequestDelegate next)
 {
-    private static readonly HashSet<string> PlatformAdminRoutes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "/api/plans",
-        "/api/features",
-        "/api/tenants"
-    };
-
     public async Task InvokeAsync(HttpContext context, ICurrentUser currentUser, ICurrentTenant currentTenant)
     {
-        if (currentUser.IsPlatformAdmin || !currentTenant.IsResolved)
+        if (currentUser.IsPlatformAdmin)
         {
             await next(context);
+            return;
+        }
+
+        if (!currentTenant.IsResolved)
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            context.Response.ContentType = "application/problem+json";
+            await context.Response.WriteAsync(JsonSerializer.Serialize(new
+            {
+                type = "https://tools.ietf.org/html/rfc7231#section-6.5.3",
+                title = "Forbidden",
+                status = StatusCodes.Status403Forbidden,
+                detail = "Tenant context is required for this request."
+            }));
             return;
         }
 
