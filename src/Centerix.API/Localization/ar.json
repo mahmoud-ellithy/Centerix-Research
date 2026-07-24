@@ -60,5 +60,7 @@
   "Error:TenantDeactivatedDetail": "حساب المستأجر الخاص بك معطل",
   "Error:TenantExpired": "انتهت صلاحية المستأجر",
   "Error:TenantExpiredDetail": "انتهت صلاحية اشتراك المستأجر الخاص بك",
-  "Auth:InvalidCredentials": "البريد الإلكتروني أو كلمة المرور غير صحيحة"
+  "Auth:InvalidCredentials": "البريد الإلكتروني أو كلمة المرور غير صحيحة",
+  "Auth:AccountLocked": "الحساب مقفل بسبب محاولات تسجيل الدخول الفاشلة المتكررة.",
+  "Auth:AccountLockedDueToFailedAttempts": "تم قفل الحساب بسبب محاولات تسجيل الدخول الفاشلة المتكررة. يرجى المحاولة لاحقًا."
 }

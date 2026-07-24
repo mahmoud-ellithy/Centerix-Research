@@ -10,9 +10,12 @@ namespace Centerix.API.Infrastructure;
 
 public class TenantGuardMiddleware(RequestDelegate next)
 {
+    private static readonly HashSet<string> BypassPathPrefixes =
+        ["/scalar", "/openapi", "/swagger"];
+
     public async Task InvokeAsync(HttpContext context, ICurrentUser currentUser, ICurrentTenant currentTenant)
     {
-        if (currentUser.IsPlatformAdmin)
+        if (currentUser.IsPlatformAdmin || IsBypassPath(context.Request.Path))
         {
             await next(context);
             return;
@@ -61,5 +64,18 @@ public class TenantGuardMiddleware(RequestDelegate next)
         }
 
         await next(context);
+    }
+
+    private static bool IsBypassPath(PathString path)
+    {
+        foreach (var prefix in BypassPathPrefixes)
+        {
+            if (path.StartsWithSegments(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

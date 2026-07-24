@@ -3,6 +3,7 @@ using Centerix.Infrastructure.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Centerix.API.Controllers;
 
@@ -15,16 +16,58 @@ public class AuthController(
     ILocalizer localizer) : ApiController(localizer)
 {
     [HttpPost("login")]
+    [EnableRateLimiting("LoginPolicy")]
     public async Task<IActionResult> Login(LoginRequest request)
     {
         var user = await userManager.FindByEmailAsync(request.Email);
-        if (user == null || !await userManager.CheckPasswordAsync(user, request.Password))
+        if (user == null)
         {
+            // Don't reveal that user doesn't exist
             return Unauthorized(new
             {
                 error = localizer.Translate("Auth:InvalidCredentials")
             });
         }
+
+        // Check if user is locked out before attempting authentication
+        if (await userManager.IsLockedOutAsync(user))
+        {
+            var lockoutEnd = await userManager.GetLockoutEndDateAsync(user);
+            var remainingMinutes = lockoutEnd.HasValue 
+                ? Math.Ceiling((lockoutEnd.Value - DateTimeOffset.UtcNow).TotalMinutes) 
+                : 0;
+            
+            return StatusCode(StatusCodes.Status429TooManyRequests, new
+            {
+                error = localizer.Translate("Auth:AccountLocked"),
+                lockoutRemainingMinutes = remainingMinutes
+            });
+        }
+
+        // Attempt sign-in with lockout tracking enabled
+        var result = await userManager.CheckPasswordAsync(user, request.Password);
+        if (!result)
+        {
+            // Increment failed access count
+            await userManager.AccessFailedAsync(user);
+            
+            // Check if this attempt triggered lockout
+            if (await userManager.IsLockedOutAsync(user))
+            {
+                return StatusCode(StatusCodes.Status429TooManyRequests, new
+                {
+                    error = localizer.Translate("Auth:AccountLockedDueToFailedAttempts")
+                });
+            }
+
+            return Unauthorized(new
+            {
+                error = localizer.Translate("Auth:InvalidCredentials")
+            });
+        }
+
+        // Reset failed access count on successful login
+        await userManager.ResetAccessFailedCountAsync(user);
 
         var roles = await userManager.GetRolesAsync(user);
 

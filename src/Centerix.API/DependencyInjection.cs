@@ -86,6 +86,36 @@ public static class DependencyInjection
                 .RequireAuthenticatedUser()
                 .Build());
 
+        // Rate limiting for brute-force protection on login endpoint
+        services.AddRateLimiter(options =>
+        {
+            options.AddPolicy("LoginPolicy", httpContext =>
+                System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter(
+                    partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    factory: _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions
+                    {
+                        PermitLimit = 5,
+                        Window = TimeSpan.FromMinutes(1),
+                        SegmentsPerWindow = 4,
+                        QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
+                        QueueLimit = 0
+                    }));
+
+            options.OnRejected = async (context, cancellationToken) =>
+            {
+                context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                context.HttpContext.Response.ContentType = "application/json";
+
+                var response = new
+                {
+                    error = "Too many requests. Please try again later.",
+                    retryAfterSeconds = 60
+                };
+
+                await context.HttpContext.Response.WriteAsJsonAsync(response, cancellationToken);
+            };
+        });
+
         return services;
     }
 
@@ -93,6 +123,7 @@ public static class DependencyInjection
     {
         app.UseExceptionHandler();
         app.UseStatusCodePages();
+        app.UseRateLimiter();
         app.UseHttpsRedirection();
         app.UseSerilogRequestLogging();
         app.UseMiddleware<Centerix.API.Infrastructure.RequestLogContextMiddleware>();
