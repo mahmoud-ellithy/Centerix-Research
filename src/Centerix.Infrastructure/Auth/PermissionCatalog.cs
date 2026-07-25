@@ -39,5 +39,26 @@ public static class PermissionCatalog
         new("TenantCRMLeads", "Read",   "TenantCRMLeads.Read",   "Read CRM leads"),
         new("TenantCRMLeads", "Update", "TenantCRMLeads.Update", "Update a CRM lead"),
         new("TenantCRMLeads", "Delete", "TenantCRMLeads.Delete", "Delete a CRM lead"),
+
+        new("AttendanceLogs", "Create", "AttendanceLogs.Create", "Create an attendance log"),
+        new("AttendanceLogs", "Read",   "AttendanceLogs.Read",   "Read attendance logs"),
+
+        new("Students",       "Create", "Students.Create",       "Create a student"),
+        new("Students",       "Read",   "Students.Read",         "Read students"),
+        new("Students",       "Update", "Students.Update",       "Update a student"),
+        new("Students",       "Delete", "Students.Delete",       "Delete a student"),
+
+        new("AcademicStages", "Create", "AcademicStages.Create", "Create an academic stage"),
+        new("AcademicStages", "Read",   "AcademicStages.Read",   "Read academic stages"),
+        new("AcademicStages", "Update", "AcademicStages.Update", "Update an academic stage"),
+
+        new("AcademicYears",  "Create", "AcademicYears.Create",   "Create an academic year"),
+        new("AcademicYears",  "Read",   "AcademicYears.Read",     "Read academic years"),
+        new("AcademicYears",  "Update", "AcademicYears.Update",   "Update an academic year"),
+
+        new("Branches",       "Create", "Branches.Create",        "Create a branch"),
+        new("Branches",       "Read",   "Branches.Read",          "Read branches"),
+        new("Branches",       "Update", "Branches.Update",        "Update a branch"),
+        new("Branches",       "Delete", "Branches.Delete",        "Delete a branch"),
     ];
 }

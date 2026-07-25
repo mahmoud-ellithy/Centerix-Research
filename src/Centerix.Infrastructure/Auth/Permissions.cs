@@ -52,6 +52,42 @@ public static class Permissions
         public const string Delete = "TenantCRMLeads.Delete";
     }
 
+    public static class Students
+    {
+        public const string Create = "Students.Create";
+        public const string Read = "Students.Read";
+        public const string Update = "Students.Update";
+        public const string Delete = "Students.Delete";
+    }
+
+    public static class AttendanceLogs
+    {
+        public const string Create = "AttendanceLogs.Create";
+        public const string Read = "AttendanceLogs.Read";
+    }
+
+    public static class Branches
+    {
+        public const string Create = "Branches.Create";
+        public const string Read = "Branches.Read";
+        public const string Update = "Branches.Update";
+        public const string Delete = "Branches.Delete";
+    }
+
+    public static class AcademicStages
+    {
+        public const string Create = "AcademicStages.Create";
+        public const string Read = "AcademicStages.Read";
+        public const string Update = "AcademicStages.Update";
+    }
+
+    public static class AcademicYears
+    {
+        public const string Create = "AcademicYears.Create";
+        public const string Read = "AcademicYears.Read";
+        public const string Update = "AcademicYears.Update";
+    }
+
     /// <summary>
     /// All permission codes registered in the canonical catalog (see <see cref="PermissionCatalog"/>).
     /// </summary>
