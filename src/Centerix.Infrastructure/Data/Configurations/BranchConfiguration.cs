@@ -22,12 +22,10 @@ public class BranchConfiguration : IEntityTypeConfiguration<Branch>
             .IsRequired();
 
         builder.Property(b => b.Address)
-            .HasMaxLength(300)
-            .IsRequired();
+            .HasMaxLength(300);
 
         builder.Property(b => b.Phone)
-            .HasMaxLength(30)
-            .IsRequired();
+            .HasMaxLength(30);
 
         // ManagerId is a logical FK reference to AspNetUsers.Id. We don't enforce it as a
         // database constraint because AspNetUsers.Id is nvarchar(450) while ManagerId is a
@@ -43,7 +41,6 @@ public class BranchConfiguration : IEntityTypeConfiguration<Branch>
             .HasMaxLength(450)
             .IsRequired();
 
-        // Audit columns — keep native datetimeoffset mapping (matches the rest of the platform).
         builder.Property(b => b.CreatedAtUtc)
             .HasColumnName("CreatedAt");
 
@@ -53,7 +50,10 @@ public class BranchConfiguration : IEntityTypeConfiguration<Branch>
         builder.Property(b => b.DeletedAtUtc)
             .HasColumnName("DeletedAt");
 
-        // Global query filter: hide soft-deleted rows automatically.
+        builder.Property(b => b.CreatedBy).HasColumnName("CreatedBy");
+        builder.Property(b => b.LastModifiedBy).HasColumnName("ModifiedBy");
+        builder.Property(b => b.DeletedBy).HasColumnName("DeletedBy");
+
         builder.HasQueryFilter(b => b.DeletedAtUtc == null);
 
         builder.HasIndex(b => b.TenantId);

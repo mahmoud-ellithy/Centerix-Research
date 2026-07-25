@@ -16,11 +16,8 @@ public static class StudentErrors
     public static Error FullNameArRequired =>
         Error.Validation("Student.FullNameAr_Required", "Arabic full name is required");
 
-    public static Error FullNameEnRequired =>
-        Error.Validation("Student.FullNameEn_Required", "English full name is required");
-
-    public static Error DateOfBirthRequired =>
-        Error.Validation("Student.DateOfBirth_Required", "Date of birth is required");
+    public static Error FullNameEnTooLong =>
+        Error.Validation("Student.FullNameEn_TooLong", "English full name cannot exceed 200 characters");
 
     public static Error DateOfBirthInFuture =>
         Error.Validation("Student.DateOfBirth_Future", "Date of birth cannot be in the future");

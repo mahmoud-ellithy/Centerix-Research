@@ -19,6 +19,10 @@ public class RolePermissionConfiguration : IEntityTypeConfiguration<RolePermissi
         builder.Property(rp => rp.PermissionId)
             .IsRequired();
 
+        builder.Property(rp => rp.TenantId)
+            .HasMaxLength(450)
+            .IsRequired();
+
         builder.HasIndex(rp => rp.PermissionId);
 
         builder.HasIndex(rp => new { rp.TenantId, rp.RoleId });

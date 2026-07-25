@@ -29,6 +29,25 @@ public abstract class AuditableEntity<TId> : AuditableEntity, IHasTenantId
 }
 
 /// <summary>
+/// Base class for global / catalog auditable entities that are shared across ALL tenants
+/// (e.g. Plans, Features, Permissions).  Includes Id and audit fields but does NOT
+/// implement <see cref="IHasTenantId"/> and therefore is not scoped by the tenant filter.
+/// </summary>
+public abstract class GlobalAuditableEntity<TId> : AuditableEntity
+    where TId : notnull
+{
+    public TId Id { get; private set; }
+
+    protected GlobalAuditableEntity()
+    { }
+
+    protected GlobalAuditableEntity(TId id)
+    {
+        Id = id;
+    }
+}
+
+/// <summary>
 /// Extends <see cref="AuditableEntity"/> with soft-delete columns (<c>DeletedAtUtc</c>,
 /// <c>DeletedBy</c>). Entities that support tombstoning should inherit from this class
 /// and configure <c>HasQueryFilter(e => e.DeletedAtUtc == null)</c> in their EF Core

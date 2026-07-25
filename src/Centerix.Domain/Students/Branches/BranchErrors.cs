@@ -7,12 +7,6 @@ public static class BranchErrors
     public static Error NameRequired =>
         Error.Validation("Branch.Name_Required", "Branch name is required");
 
-    public static Error AddressRequired =>
-        Error.Validation("Branch.Address_Required", "Branch address is required");
-
-    public static Error PhoneRequired =>
-        Error.Validation("Branch.Phone_Required", "Branch phone is required");
-
     public static Error InvalidPhone =>
         Error.Validation("Branch.InvalidPhone", "Branch phone must be 7-15 digits and may start with '+'");
 

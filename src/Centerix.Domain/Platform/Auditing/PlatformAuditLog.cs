@@ -10,7 +10,6 @@ public class PlatformAuditLog : AuditableEntity<long>
     public string? OldValue { get; private set; }
     public string? NewValue { get; private set; }
     public string? IPAddress { get; private set; }
-    public DateTime CreatedAt { get; private set; }
 
     private PlatformAuditLog() { }
 
@@ -21,8 +20,7 @@ public class PlatformAuditLog : AuditableEntity<long>
         string? entityId,
         string? oldValue,
         string? newValue,
-        string? ipAddress,
-        DateTime createdAt)
+        string? ipAddress)
         : base(id)
     {
         Action = action;
@@ -31,7 +29,6 @@ public class PlatformAuditLog : AuditableEntity<long>
         OldValue = oldValue;
         NewValue = newValue;
         IPAddress = ipAddress;
-        CreatedAt = createdAt;
     }
 
     public static PlatformAuditLog Create(
@@ -41,9 +38,8 @@ public class PlatformAuditLog : AuditableEntity<long>
         string? entityId,
         string? oldValue,
         string? newValue,
-        string? ipAddress,
-        DateTime createdAt)
+        string? ipAddress)
     {
-        return new PlatformAuditLog(id, action, entityType, entityId, oldValue, newValue, ipAddress, createdAt);
+        return new PlatformAuditLog(id, action, entityType, entityId, oldValue, newValue, ipAddress);
     }
 }

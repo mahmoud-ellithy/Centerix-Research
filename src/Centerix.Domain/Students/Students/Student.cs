@@ -15,16 +15,16 @@ public class Student : SoftDeletableEntity<Guid>
     public int YearId { get; private set; }
 
     public string FullNameAr { get; private set; } = default!;
-    public string FullNameEn { get; private set; } = default!;
+    public string? FullNameEn { get; private set; }
 
-    public DateOnly DateOfBirth { get; private set; }
-    public Gender Gender { get; private set; }
+    public DateOnly? DateOfBirth { get; private set; }
+    public Gender? Gender { get; private set; }
 
-    public string Phone { get; private set; } = default!;
+    public string? Phone { get; private set; }
     public string QRCode { get; private set; } = default!;
 
-    public DiscountType DiscountType { get; private set; }
-    public decimal DiscountValue { get; private set; }
+    public DiscountType? DiscountType { get; private set; }
+    public decimal? DiscountValue { get; private set; }
 
     public StudentStatus Status { get; private set; }
     public DateOnly EnrolledAt { get; private set; }
@@ -44,13 +44,13 @@ public class Student : SoftDeletableEntity<Guid>
         int stageId,
         int yearId,
         string fullNameAr,
-        string fullNameEn,
-        DateOnly dateOfBirth,
-        Gender gender,
-        string phone,
+        string? fullNameEn,
+        DateOnly? dateOfBirth,
+        Gender? gender,
+        string? phone,
         string qrCode,
-        DiscountType discountType,
-        decimal discountValue,
+        DiscountType? discountType,
+        decimal? discountValue,
         StudentStatus status,
         DateOnly enrolledAt)
         : base(id)
@@ -76,13 +76,13 @@ public class Student : SoftDeletableEntity<Guid>
         int stageId,
         int yearId,
         string fullNameAr,
-        string fullNameEn,
-        DateOnly dateOfBirth,
-        Gender gender,
-        string phone,
+        string? fullNameEn,
+        DateOnly? dateOfBirth,
+        Gender? gender,
+        string? phone,
         string qrCode,
-        DiscountType discountType,
-        decimal discountValue,
+        DiscountType? discountType,
+        decimal? discountValue,
         StudentStatus status,
         DateOnly enrolledAt)
     {
@@ -99,10 +99,10 @@ public class Student : SoftDeletableEntity<Guid>
             stageId,
             yearId,
             fullNameAr.Trim(),
-            fullNameEn.Trim(),
+            string.IsNullOrWhiteSpace(fullNameEn) ? null : fullNameEn.Trim(),
             dateOfBirth,
             gender,
-            phone.Trim(),
+            string.IsNullOrWhiteSpace(phone) ? null : phone.Trim(),
             qrCode.Trim(),
             discountType,
             discountValue,
@@ -115,12 +115,12 @@ public class Student : SoftDeletableEntity<Guid>
         int stageId,
         int yearId,
         string fullNameAr,
-        string fullNameEn,
-        DateOnly dateOfBirth,
-        Gender gender,
-        string phone,
-        DiscountType discountType,
-        decimal discountValue,
+        string? fullNameEn,
+        DateOnly? dateOfBirth,
+        Gender? gender,
+        string? phone,
+        DiscountType? discountType,
+        decimal? discountValue,
         StudentStatus status)
     {
         if (IsDeleted())
@@ -137,10 +137,10 @@ public class Student : SoftDeletableEntity<Guid>
         StageId = stageId;
         YearId = yearId;
         FullNameAr = fullNameAr.Trim();
-        FullNameEn = fullNameEn.Trim();
+        FullNameEn = string.IsNullOrWhiteSpace(fullNameEn) ? null : fullNameEn.Trim();
         DateOfBirth = dateOfBirth;
         Gender = gender;
-        Phone = phone.Trim();
+        Phone = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
         DiscountType = discountType;
         DiscountValue = discountValue;
         Status = status;
@@ -166,7 +166,6 @@ public class Student : SoftDeletableEntity<Guid>
             return StudentErrors.AlreadyDeleted;
 
         DeletedAtUtc = DateTimeOffset.UtcNow;
-        // DeletedBy is stamped by AuditableEntityInterceptor from the current user name.
         Status = StudentStatus.Inactive;
 
         return Result.Updated;
@@ -177,12 +176,12 @@ public class Student : SoftDeletableEntity<Guid>
         int stageId,
         int yearId,
         string fullNameAr,
-        string fullNameEn,
-        DateOnly dateOfBirth,
-        Gender gender,
+        string? fullNameEn,
+        DateOnly? dateOfBirth,
+        Gender? gender,
         string qrCode,
-        DiscountType discountType,
-        decimal discountValue,
+        DiscountType? discountType,
+        decimal? discountValue,
         StudentStatus status)
     {
         if (branchId == Guid.Empty)
@@ -197,16 +196,13 @@ public class Student : SoftDeletableEntity<Guid>
         if (string.IsNullOrWhiteSpace(fullNameAr) || fullNameAr.Length > 200)
             return StudentErrors.FullNameArRequired;
 
-        if (string.IsNullOrWhiteSpace(fullNameEn) || fullNameEn.Length > 200)
-            return StudentErrors.FullNameEnRequired;
+        if (!string.IsNullOrWhiteSpace(fullNameEn) && fullNameEn.Length > 200)
+            return StudentErrors.FullNameEnTooLong;
 
-        if (dateOfBirth == default)
-            return StudentErrors.DateOfBirthRequired;
-
-        if (dateOfBirth > DateOnly.FromDateTime(DateTime.UtcNow))
+        if (dateOfBirth.HasValue && dateOfBirth.Value > DateOnly.FromDateTime(DateTime.UtcNow))
             return StudentErrors.DateOfBirthInFuture;
 
-        if (!Enum.IsDefined(gender))
+        if (gender.HasValue && !Enum.IsDefined(gender.Value))
             return StudentErrors.InvalidGender;
 
         if (string.IsNullOrWhiteSpace(qrCode))
@@ -215,13 +211,13 @@ public class Student : SoftDeletableEntity<Guid>
         if (qrCode.Length > 100)
             return StudentErrors.QRCodeTooLong;
 
-        if (!Enum.IsDefined(discountType))
+        if (discountType.HasValue && !Enum.IsDefined(discountType.Value))
             return StudentErrors.InvalidDiscountType;
 
-        if (discountValue < 0)
+        if (discountValue.HasValue && discountValue.Value < 0)
             return StudentErrors.InvalidDiscountValue;
 
-        if (discountType == DiscountType.Percentage && (discountValue < 0 || discountValue > 100))
+        if (discountType == global::Centerix.Domain.Students.Enums.DiscountType.Percentage && discountValue.HasValue && (discountValue.Value < 0 || discountValue.Value > 100))
             return StudentErrors.PercentageOutOfRange;
 
         if (!Enum.IsDefined(status))

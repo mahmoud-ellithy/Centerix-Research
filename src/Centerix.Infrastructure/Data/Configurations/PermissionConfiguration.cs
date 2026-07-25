@@ -30,6 +30,20 @@ public class PermissionConfiguration : IEntityTypeConfiguration<Permission>
         builder.Property(p => p.Description)
             .HasMaxLength(200);
 
+        builder.Property(p => p.CreatedAtUtc)
+            .HasColumnName("CreatedAt");
+
+        builder.Property(p => p.LastModifiedUtc)
+            .HasColumnName("ModifiedAt");
+
+        builder.Property(p => p.CreatedBy)
+            .HasColumnName("CreatedBy")
+            .HasMaxLength(450);
+
+        builder.Property(p => p.LastModifiedBy)
+            .HasColumnName("ModifiedBy")
+            .HasMaxLength(450);
+
         builder.HasMany(p => p.RolePermissions)
             .WithOne(rp => rp.Permission)
             .HasForeignKey(rp => rp.PermissionId)

@@ -1,0 +1,1329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Centerix - Entity Relationship Diagram</title>
+    <style>
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-card: #1e293b;
+            --bg-card-header: #334155;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent-blue: #3b82f6;
+            --accent-cyan: #06b6d4;
+            --accent-green: #10b981;
+            --accent-purple: #8b5cf6;
+            --accent-orange: #f59e0b;
+            --accent-red: #ef4444;
+            --accent-pink: #ec4899;
+            --border-color: #334155;
+            --line-color: #475569;
+            --pk-color: #fbbf24;
+            --fk-color: #60a5fa;
+            --nav-color: #34d399;
+            --enum-color: #c084fc;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* Header */
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 56px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            z-index: 1000;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .header h1 span {
+            color: var(--accent-blue);
+        }
+
+        .header-badge {
+            background: var(--accent-blue);
+            color: white;
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 500;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .header-btn {
+            background: var(--bg-card-header);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.15s;
+        }
+
+        .header-btn:hover {
+            background: var(--accent-blue);
+            color: white;
+            border-color: var(--accent-blue);
+        }
+
+        .header-btn.active {
+            background: var(--accent-blue);
+            color: white;
+            border-color: var(--accent-blue);
+        }
+
+        /* Canvas */
+        .canvas-container {
+            position: fixed;
+            top: 56px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            overflow: hidden;
+            cursor: grab;
+        }
+
+        .canvas-container:active {
+            cursor: grabbing;
+        }
+
+        .canvas {
+            position: absolute;
+            transform-origin: 0 0;
+            will-change: transform;
+        }
+
+        /* SVG Lines */
+        .relationships-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .relationships-layer line,
+        .relationships-layer path {
+            stroke: var(--line-color);
+            stroke-width: 1.5;
+            fill: none;
+        }
+
+        .relationships-layer .rel-label {
+            font-size: 10px;
+            fill: var(--text-muted);
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        /* Entity Cards */
+        .entity-card {
+            position: absolute;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            min-width: 240px;
+            z-index: 10;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            transition: box-shadow 0.2s;
+            cursor: move;
+        }
+
+        .entity-card:hover {
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            z-index: 20;
+        }
+
+        .entity-card.highlighted {
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+        }
+
+        .entity-header {
+            padding: 10px 14px;
+            border-radius: 7px 7px 0 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .entity-header .icon {
+            font-size: 14px;
+        }
+
+        .entity-header .schema {
+            font-size: 10px;
+            opacity: 0.7;
+            font-weight: 400;
+            margin-left: auto;
+        }
+
+        .entity-body {
+            padding: 4px 0;
+        }
+
+        .entity-row {
+            padding: 4px 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+            line-height: 1.6;
+        }
+
+        .entity-row:hover {
+            background: rgba(255,255,255,0.03);
+        }
+
+        .entity-row .marker {
+            font-size: 8px;
+            width: 14px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .entity-row .marker.pk { color: var(--pk-color); }
+        .entity-row .marker.fk { color: var(--fk-color); }
+        .entity-row .marker.nav { color: var(--nav-color); }
+        .entity-row .marker.enum { color: var(--enum-color); }
+        .entity-row .marker.inherited { color: var(--text-muted); }
+
+        .entity-row .col-name {
+            color: var(--text-primary);
+            min-width: 0;
+        }
+
+        .entity-row .col-type {
+            color: var(--text-muted);
+            margin-left: auto;
+            font-size: 11px;
+            white-space: nowrap;
+        }
+
+        .entity-row.pk-row .col-name {
+            color: var(--pk-color);
+            font-weight: 600;
+        }
+
+        .entity-row.fk-row .col-name {
+            color: var(--fk-color);
+        }
+
+        .entity-row.nav-row .col-name {
+            color: var(--nav-color);
+            font-style: italic;
+        }
+
+        .entity-row.enum-row .col-name {
+            color: var(--enum-color);
+        }
+
+        .entity-row.inherited-row {
+            opacity: 0.55;
+        }
+
+        .entity-footer {
+            padding: 6px 14px 8px;
+            border-top: 1px solid var(--border-color);
+            font-size: 10px;
+            color: var(--text-muted);
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .entity-footer .tag {
+            padding: 1px 6px;
+            border-radius: 3px;
+            background: rgba(255,255,255,0.06);
+            font-size: 9px;
+        }
+
+        .entity-footer .tag.tenant { background: rgba(6,182,212,0.15); color: var(--accent-cyan); }
+        .entity-footer .tag.soft-delete { background: rgba(239,68,68,0.15); color: var(--accent-red); }
+        .entity-footer .tag.audit { background: rgba(245,158,11,0.15); color: var(--accent-orange); }
+        .entity-footer .tag.identity { background: rgba(139,92,246,0.15); color: var(--accent-purple); }
+        .entity-footer .tag.join-table { background: rgba(236,72,153,0.15); color: var(--accent-pink); }
+
+        /* Color themes per domain */
+        .domain-students .entity-header { background: linear-gradient(135deg, #0e7490, #0891b2); }
+        .domain-platform .entity-header { background: linear-gradient(135deg, #4338ca, #6366f1); }
+        .domain-auth .entity-header { background: linear-gradient(135deg, #7c3aed, #8b5cf6); }
+        .domain-audit .entity-header { background: linear-gradient(135deg, #b45309, #d97706); }
+        .domain-identity .entity-header { background: linear-gradient(135deg, #6d28d9, #7c3aed); }
+        .domain-tenancy .entity-header { background: linear-gradient(135deg, #047857, #059669); }
+
+        /* Sidebar Legend */
+        .sidebar {
+            position: fixed;
+            top: 56px;
+            left: 0;
+            width: 220px;
+            bottom: 0;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            z-index: 500;
+            overflow-y: auto;
+            padding: 16px;
+            transform: translateX(-100%);
+            transition: transform 0.25s ease;
+        }
+
+        .sidebar.open {
+            transform: translateX(0);
+        }
+
+        .sidebar h3 {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+            flex-shrink: 0;
+        }
+
+        .sidebar .section {
+            margin-bottom: 20px;
+        }
+
+        .sidebar .entity-list-item {
+            padding: 5px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s;
+            margin-bottom: 2px;
+        }
+
+        .sidebar .entity-list-item:hover {
+            background: rgba(255,255,255,0.06);
+            color: var(--text-primary);
+        }
+
+        /* Zoom indicator */
+        .zoom-indicator {
+            position: fixed;
+            bottom: 16px;
+            right: 16px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            color: var(--text-muted);
+            z-index: 500;
+        }
+
+        /* Minimap */
+        .minimap {
+            position: fixed;
+            bottom: 16px;
+            left: 16px;
+            width: 200px;
+            height: 140px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            z-index: 500;
+            overflow: hidden;
+            display: none;
+        }
+
+        .minimap.visible {
+            display: block;
+        }
+
+        .minimap canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        .minimap .viewport {
+            position: absolute;
+            border: 1.5px solid var(--accent-blue);
+            background: rgba(59,130,246,0.08);
+            border-radius: 2px;
+        }
+
+        /* Search */
+        .search-box {
+            position: relative;
+        }
+
+        .search-box input {
+            background: var(--bg-card-header);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 6px 12px 6px 30px;
+            border-radius: 6px;
+            font-size: 12px;
+            width: 200px;
+            outline: none;
+        }
+
+        .search-box input:focus {
+            border-color: var(--accent-blue);
+        }
+
+        .search-box input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .search-box .search-icon {
+            position: absolute;
+            left: 9px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+
+        /* Tooltip */
+        .tooltip {
+            position: fixed;
+            background: var(--bg-card-header);
+            border: 1px solid var(--border-color);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            z-index: 2000;
+            pointer-events: none;
+            display: none;
+            max-width: 280px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }
+
+        .tooltip .tt-title {
+            color: var(--text-primary);
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .tooltip .tt-desc {
+            line-height: 1.5;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar { width: 180px; }
+            .search-box input { width: 140px; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+    <div class="header-left">
+        <h1><span>Centerix</span> ERD</h1>
+        <span class="header-badge">19 Entities</span>
+    </div>
+    <div class="header-right">
+        <div class="search-box">
+            <span class="search-icon">&#128269;</span>
+            <input type="text" id="searchInput" placeholder="Search entities...">
+        </div>
+        <button class="header-btn" id="toggleLegend" title="Toggle Legend">&#9776; Legend</button>
+        <button class="header-btn" id="fitBtn" title="Fit to Screen">&#8862; Fit</button>
+        <button class="header-btn" id="resetBtn" title="Reset View">&#8634; Reset</button>
+    </div>
+</div>
+
+<!-- Sidebar Legend -->
+<div class="sidebar" id="sidebar">
+    <div class="section">
+        <h3>Column Markers</h3>
+        <div class="legend-item"><span class="legend-dot" style="background: var(--pk-color);"></span> PK - Primary Key</div>
+        <div class="legend-item"><span class="legend-dot" style="background: var(--fk-color);"></span> FK - Foreign Key</div>
+        <div class="legend-item"><span class="legend-dot" style="background: var(--nav-color);"></span> Nav - Navigation Property</div>
+        <div class="legend-item"><span class="legend-dot" style="background: var(--enum-color);"></span> Enum - Enumeration Type</div>
+        <div class="legend-item"><span class="legend-dot" style="background: var(--text-muted); opacity:0.5;"></span> Inherited - From Base Class</div>
+    </div>
+    <div class="section">
+        <h3>Entity Domains</h3>
+        <div class="legend-item"><span class="legend-dot" style="background: linear-gradient(135deg, #0e7490, #0891b2);"></span> Students</div>
+        <div class="legend-item"><span class="legend-dot" style="background: linear-gradient(135deg, #4338ca, #6366f1);"></span> Platform</div>
+        <div class="legend-item"><span class="legend-dot" style="background: linear-gradient(135deg, #7c3aed, #8b5cf6);"></span> Auth</div>
+        <div class="legend-item"><span class="legend-dot" style="background: linear-gradient(135deg, #b45309, #d97706);"></span> Audit</div>
+        <div class="legend-item"><span class="legend-dot" style="background: linear-gradient(135deg, #6d28d9, #7c3aed);"></span> Identity</div>
+        <div class="legend-item"><span class="legend-dot" style="background: linear-gradient(135deg, #047857, #059669);"></span> Tenancy</div>
+    </div>
+    <div class="section">
+        <h3>Entity Tags</h3>
+        <div class="legend-item"><span class="legend-dot" style="background: rgba(6,182,212,0.4);"></span> Tenant-Scoped</div>
+        <div class="legend-item"><span class="legend-dot" style="background: rgba(239,68,68,0.4);"></span> Soft-Delete</div>
+        <div class="legend-item"><span class="legend-dot" style="background: rgba(236,72,153,0.4);"></span> Join Table</div>
+    </div>
+    <div class="section">
+        <h3>Relationships</h3>
+        <div class="legend-item" style="font-size:11px;">1:N - One-to-Many</div>
+        <div class="legend-item" style="font-size:11px;">M:N - Many-to-Many (via join)</div>
+        <div class="legend-item" style="font-size:11px;">Cascade - Delete cascades</div>
+        <div class="legend-item" style="font-size:11px;">Restrict - Delete prevented</div>
+    </div>
+    <div class="section">
+        <h3>Entities (19)</h3>
+        <div id="entityList"></div>
+    </div>
+</div>
+
+<!-- Canvas -->
+<div class="canvas-container" id="canvasContainer">
+    <div class="canvas" id="canvas">
+        <svg class="relationships-layer" id="svgLayer" width="5000" height="4000"></svg>
+    </div>
+</div>
+
+<!-- Zoom Indicator -->
+<div class="zoom-indicator" id="zoomIndicator">100%</div>
+
+<!-- Tooltip -->
+<div class="tooltip" id="tooltip">
+    <div class="tt-title"></div>
+    <div class="tt-desc"></div>
+</div>
+
+<script>
+// ==================== DATA ====================
+const entities = [
+    {
+        id: 'tenant', name: 'CenterixTenantInfo', displayName: 'Tenant', schema: 'Platform.Tenants',
+        domain: 'tenancy', x: 120, y: 60,
+        tags: ['tenant'],
+        columns: [
+            { name: 'Id', type: 'string', marker: 'pk' },
+            { name: 'Identifier', type: 'string' },
+            { name: 'Name', type: 'string' },
+            { name: 'ConnectionString', type: 'string?' },
+            { name: 'Email', type: 'string?' },
+            { name: 'FirstName', type: 'string?' },
+            { name: 'LastName', type: 'string?' },
+            { name: 'ValidUpTo', type: 'DateTime' },
+            { name: 'IsActive', type: 'bool' },
+            { name: 'Slug', type: 'string?' },
+            { name: 'Subdomain', type: 'string?' },
+            { name: 'DisplayName', type: 'string?' },
+            { name: 'LogoUrl', type: 'string?' },
+            { name: 'PrimaryColor', type: 'string?' },
+            { name: 'Country', type: 'string?' },
+            { name: 'Currency', type: 'string?' },
+            { name: 'Timezone', type: 'string?' },
+            { name: 'Status', type: 'byte' },
+            { name: 'TrialEndsAt', type: 'DateTime?' },
+            { name: 'CreatedAt', type: 'DateTime' },
+        ]
+    },
+    {
+        id: 'user', name: 'IdentityUser', displayName: 'User (Identity)', schema: 'AspNetUsers',
+        domain: 'identity', x: 120, y: 520,
+        tags: ['identity'],
+        columns: [
+            { name: 'Id', type: 'string', marker: 'pk' },
+            { name: 'UserName', type: 'string?' },
+            { name: 'NormalizedUserName', type: 'string?' },
+            { name: 'Email', type: 'string?' },
+            { name: 'NormalizedEmail', type: 'string?' },
+            { name: 'EmailConfirmed', type: 'bool' },
+            { name: 'PasswordHash', type: 'string?' },
+            { name: 'SecurityStamp', type: 'string?' },
+            { name: 'ConcurrencyStamp', type: 'string?' },
+            { name: 'PhoneNumber', type: 'string?' },
+            { name: 'PhoneNumberConfirmed', type: 'bool' },
+            { name: 'TwoFactorEnabled', type: 'bool' },
+            { name: 'LockoutEnd', type: 'DateTimeOffset?' },
+            { name: 'LockoutEnabled', type: 'bool' },
+            { name: 'AccessFailedCount', type: 'int' },
+        ]
+    },
+    {
+        id: 'role', name: 'ApplicationRole', displayName: 'Role (Identity)', schema: 'AspNetRoles',
+        domain: 'identity', x: 560, y: 60,
+        tags: ['identity'],
+        columns: [
+            { name: 'Id', type: 'string', marker: 'pk' },
+            { name: 'Name', type: 'string?' },
+            { name: 'NormalizedName', type: 'string?' },
+            { name: 'ConcurrencyStamp', type: 'string?' },
+            { name: 'Code', type: 'string?' },
+            { name: 'DisplayName', type: 'string?' },
+            { name: 'IsSystem', type: 'bool' },
+        ]
+    },
+    {
+        id: 'rolePermission', name: 'RolePermission', displayName: 'RolePermission', schema: 'Platform.RolePermissions',
+        domain: 'platform', x: 900, y: 60,
+        tags: ['tenant', 'join-table'],
+        columns: [
+            { name: 'RoleId', type: 'string', marker: 'pk' },
+            { name: 'PermissionId', type: 'int', marker: 'pk' },
+            { name: 'TenantId', type: 'string?' },
+            { name: 'Permission', type: 'Navigation', marker: 'nav' },
+        ]
+    },
+    {
+        id: 'permission', name: 'Permission', displayName: 'Permission', schema: 'Platform.Permissions',
+        domain: 'platform', x: 1240, y: 60,
+        tags: ['tenant'],
+        columns: [
+            { name: 'Id', type: 'int', marker: 'pk' },
+            { name: 'TenantId', type: 'string?' },
+            { name: 'Module', type: 'string' },
+            { name: 'Action', type: 'string' },
+            { name: 'Code', type: 'string' },
+            { name: 'Description', type: 'string?' },
+            { name: 'RolePermissions', type: 'Collection', marker: 'nav' },
+        ]
+    },
+    {
+        id: 'plan', name: 'Plan', displayName: 'Plan', schema: 'Platform.Plans',
+        domain: 'platform', x: 1560, y: 60,
+        tags: ['tenant'],
+        columns: [
+            { name: 'Id', type: 'int', marker: 'pk' },
+            { name: 'TenantId', type: 'string?' },
+            { name: 'Code', type: 'string' },
+            { name: 'DisplayName', type: 'string' },
+            { name: 'MonthlyPrice', type: 'decimal' },
+            { name: 'MaxStudents', type: 'int' },
+            { name: 'MaxUsers', type: 'int' },
+            { name: 'MaxBranches', type: 'int' },
+            { name: 'MaxTeachers', type: 'int' },
+            { name: 'StorageGB', type: 'int' },
+            { name: 'SMSQuota', type: 'int' },
+            { name: 'IsActive', type: 'bool' },
+            { name: 'PlanFeatures', type: 'Collection', marker: 'nav' },
+            { name: 'TenantPlans', type: 'Collection', marker: 'nav' },
+            { name: 'TenantBillings', type: 'Collection', marker: 'nav' },
+        ]
+    },
+    {
+        id: 'feature', name: 'Feature', displayName: 'Feature', schema: 'Platform.Features',
+        domain: 'platform', x: 1560, y: 440,
+        tags: ['tenant'],
+        columns: [
+            { name: 'Id', type: 'int', marker: 'pk' },
+            { name: 'TenantId', type: 'string?' },
+            { name: 'Code', type: 'string' },
+            { name: 'Description', type: 'string' },
+            { name: 'Module', type: 'string' },
+            { name: 'PlanFeatures', type: 'Collection', marker: 'nav' },
+        ]
+    },
+    {
+        id: 'planFeature', name: 'PlanFeature', displayName: 'PlanFeature', schema: 'Platform.PlanFeatures',
+        domain: 'platform', x: 1560, y: 680,
+        tags: ['tenant', 'join-table'],
+        columns: [
+            { name: 'Id', type: 'int', marker: 'pk' },
+            { name: 'TenantId', type: 'string?' },
+            { name: 'PlanId', type: 'int', marker: 'fk' },
+            { name: 'FeatureId', type: 'int', marker: 'fk' },
+            { name: 'IsEnabled', type: 'bool' },
+            { name: 'Plan', type: 'Navigation', marker: 'nav' },
+            { name: 'Feature', type: 'Navigation', marker: 'nav' },
+        ]
+    },
+    {
+        id: 'tenantPlan', name: 'TenantPlan', displayName: 'TenantPlan', schema: 'Platform.TenantPlans',
+        domain: 'platform', x: 1880, y: 60,
+        tags: ['tenant'],
+        columns: [
+            { name: 'Id', type: 'Guid', marker: 'pk' },
+            { name: 'TenantId', type: 'string?' },
+            { name: 'PlanId', type: 'int', marker: 'fk' },
+            { name: 'StartsAt', type: 'DateTime' },
+            { name: 'EndsAt', type: 'DateTime?' },
+            { name: 'AutoRenew', type: 'bool' },
+            { name: 'Status', type: 'SubscriptionStatus', marker: 'enum' },
+            { name: 'Plan', type: 'Navigation', marker: 'nav' },
+        ]
+    },
+    {
+        id: 'tenantBilling', name: 'TenantBilling', displayName: 'TenantBilling', schema: 'Platform.TenantBillings',
+        domain: 'platform', x: 2180, y: 60,
+        tags: ['tenant'],
+        columns: [
+            { name: 'Id', type: 'Guid', marker: 'pk' },
+            { name: 'TenantId', type: 'string?' },
+            { name: 'PlanId', type: 'int', marker: 'fk' },
+            { name: 'AmountEGP', type: 'decimal' },
+            { name: 'Method', type: 'string' },
+            { name: 'Status', type: 'BillingStatus', marker: 'enum' },
+            { name: 'PaidAt', type: 'DateTime?' },
+            { name: 'InvoiceRef', type: 'string?' },
+            { name: 'CreatedAt', type: 'DateTime' },
+            { name: 'Plan', type: 'Navigation', marker: 'nav' },
+        ]
+    },
+    {
+        id: 'tenantLead', name: 'TenantCRMLead', displayName: 'CRM Lead', schema: 'Platform.TenantCRMLeads',
+        domain: 'platform', x: 2480, y: 60,
+        tags: ['tenant'],
+        columns: [
+            { name: 'Id', type: 'Guid', marker: 'pk' },
+            { name: 'TenantId', type: 'string?' },
+            { name: 'CenterName', type: 'string' },
+            { name: 'ContactName', type: 'string' },
+            { name: 'Phone', type: 'string' },
+            { name: 'Source', type: 'string' },
+            { name: 'Stage', type: 'LeadStage', marker: 'enum' },
+            { name: 'AssignedTo', type: 'string?' },
+            { name: 'CreatedAt', type: 'DateTime' },
+        ]
+    },
+    {
+        id: 'platformAuditLog', name: 'PlatformAuditLog', displayName: 'Platform AuditLog', schema: 'Platform.PlatformAuditLogs',
+        domain: 'audit', x: 2480, y: 380,
+        tags: ['tenant', 'audit'],
+        columns: [
+            { name: 'Id', type: 'long', marker: 'pk' },
+            { name: 'TenantId', type: 'string?' },
+            { name: 'Action', type: 'string' },
+            { name: 'EntityType', type: 'string?' },
+            { name: 'EntityId', type: 'string?' },
+            { name: 'OldValue', type: 'string?' },
+            { name: 'NewValue', type: 'string?' },
+            { name: 'IPAddress', type: 'string?' },
+            { name: 'CreatedAt', type: 'DateTime' },
+        ]
+    },
+    {
+        id: 'auditLog', name: 'AuditLog', displayName: 'AuditLog', schema: 'Platform.AuditLogs',
+        domain: 'audit', x: 120, y: 880,
+        tags: ['tenant', 'audit'],
+        columns: [
+            { name: 'Id', type: 'long', marker: 'pk' },
+            { name: 'TenantId', type: 'string?' },
+            { name: 'Action', type: 'string' },
+            { name: 'EntityType', type: 'string?' },
+            { name: 'EntityId', type: 'string?' },
+            { name: 'UserId', type: 'string?', marker: 'fk' },
+            { name: 'IPAddress', type: 'string?' },
+            { name: 'OldValue', type: 'string?' },
+            { name: 'NewValue', type: 'string?' },
+            { name: 'PerformedAt', type: 'DateTime' },
+        ]
+    },
+    {
+        id: 'refreshToken', name: 'RefreshToken', displayName: 'RefreshToken', schema: 'Platform.RefreshTokens',
+        domain: 'auth', x: 560, y: 520,
+        tags: ['tenant'],
+        columns: [
+            { name: 'Id', type: 'Guid', marker: 'pk' },
+            { name: 'TenantId', type: 'string?' },
+            { name: 'UserId', type: 'string', marker: 'fk' },
+            { name: 'TokenHash', type: 'string' },
+            { name: 'DeviceInfo', type: 'string?' },
+            { name: 'IPAddress', type: 'string?' },
+            { name: 'ExpiresAtUtc', type: 'DateTime' },
+            { name: 'RevokedAtUtc', type: 'DateTime?' },
+            { name: 'ReplacedByTokenHash', type: 'string?' },
+            { name: 'IsExpired', type: 'bool (computed)' },
+            { name: 'IsRevoked', type: 'bool (computed)' },
+            { name: 'IsActive', type: 'bool (computed)' },
+        ]
+    },
+    {
+        id: 'branch', name: 'Branch', displayName: 'Branch', schema: 'Platform.Branches',
+        domain: 'students', x: 120, y: 1220,
+        tags: ['tenant', 'soft-delete'],
+        columns: [
+            { name: 'Id', type: 'Guid', marker: 'pk' },
+            { name: 'TenantId', type: 'string?' },
+            { name: 'Name', type: 'string' },
+            { name: 'Address', type: 'string' },
+            { name: 'Phone', type: 'string' },
+            { name: 'ManagerId', type: 'Guid?' },
+            { name: 'IsActive', type: 'bool' },
+        ]
+    },
+    {
+        id: 'academicStage', name: 'AcademicStage', displayName: 'Academic Stage', schema: 'Platform.AcademicStages',
+        domain: 'students', x: 560, y: 880,
+        tags: ['tenant'],
+        columns: [
+            { name: 'Id', type: 'int', marker: 'pk' },
+            { name: 'TenantId', type: 'string?' },
+            { name: 'Code', type: 'string' },
+            { name: 'DisplayName', type: 'string' },
+            { name: 'SortOrder', type: 'byte' },
+            { name: 'AcademicYears', type: 'Collection', marker: 'nav' },
+        ]
+    },
+    {
+        id: 'academicYear', name: 'AcademicYear', displayName: 'Academic Year', schema: 'Platform.AcademicYears',
+        domain: 'students', x: 900, y: 880,
+        tags: ['tenant'],
+        columns: [
+            { name: 'Id', type: 'int', marker: 'pk' },
+            { name: 'TenantId', type: 'string?' },
+            { name: 'StageId', type: 'int', marker: 'fk' },
+            { name: 'YearCode', type: 'string' },
+            { name: 'YearName', type: 'string' },
+            { name: 'Stage', type: 'Navigation', marker: 'nav' },
+        ]
+    },
+    {
+        id: 'student', name: 'Student', displayName: 'Student', schema: 'Platform.Students',
+        domain: 'students', x: 560, y: 1220,
+        tags: ['tenant', 'soft-delete'],
+        columns: [
+            { name: 'Id', type: 'Guid', marker: 'pk' },
+            { name: 'TenantId', type: 'string?' },
+            { name: 'BranchId', type: 'Guid', marker: 'fk' },
+            { name: 'StageId', type: 'int', marker: 'fk' },
+            { name: 'YearId', type: 'int', marker: 'fk' },
+            { name: 'FullNameAr', type: 'string' },
+            { name: 'FullNameEn', type: 'string' },
+            { name: 'DateOfBirth', type: 'DateOnly' },
+            { name: 'Gender', type: 'Gender', marker: 'enum' },
+            { name: 'Phone', type: 'string' },
+            { name: 'QRCode', type: 'string' },
+            { name: 'DiscountType', type: 'DiscountType', marker: 'enum' },
+            { name: 'DiscountValue', type: 'decimal' },
+            { name: 'Status', type: 'StudentStatus', marker: 'enum' },
+            { name: 'EnrolledAt', type: 'DateOnly' },
+            { name: 'Branch', type: 'Navigation', marker: 'nav' },
+            { name: 'Stage', type: 'Navigation', marker: 'nav' },
+            { name: 'Year', type: 'Navigation', marker: 'nav' },
+        ]
+    },
+    {
+        id: 'attendanceLog', name: 'AttendanceLog', displayName: 'Attendance Log', schema: 'Platform.AttendanceLogs',
+        domain: 'students', x: 1100, y: 1220,
+        tags: ['tenant'],
+        columns: [
+            { name: 'Id', type: 'long', marker: 'pk' },
+            { name: 'TenantId', type: 'string?' },
+            { name: 'StudentId', type: 'Guid', marker: 'fk' },
+            { name: 'GroupId', type: 'Guid' },
+            { name: 'SessionDate', type: 'DateOnly' },
+            { name: 'Status', type: 'AttendanceStatus', marker: 'enum' },
+            { name: 'CheckInTime', type: 'TimeOnly' },
+            { name: 'IsOffline', type: 'bool' },
+            { name: 'SyncedAt', type: 'DateTime' },
+            { name: 'Student', type: 'Navigation', marker: 'nav' },
+        ]
+    },
+];
+
+// Relationships: [fromId, toId, label, deleteBehavior, fromSide, toSide]
+// fromSide/toSide: 'right','left','top','bottom'
+const relationships = [
+    { from: 'rolePermission', to: 'role', label: 'N:1', delete: 'Cascade', fromSide: 'left', toSide: 'right' },
+    { from: 'rolePermission', to: 'permission', label: 'N:1', delete: 'Cascade', fromSide: 'right', toSide: 'left' },
+    { from: 'planFeature', to: 'plan', label: 'N:1', delete: 'Cascade', fromSide: 'top', toSide: 'bottom' },
+    { from: 'planFeature', to: 'feature', label: 'N:1', delete: 'Cascade', fromSide: 'right', toSide: 'left' },
+    { from: 'tenantPlan', to: 'plan', label: 'N:1', delete: 'Restrict', fromSide: 'left', toSide: 'bottom' },
+    { from: 'tenantBilling', to: 'plan', label: 'N:1', delete: 'Restrict', fromSide: 'left', toSide: 'right' },
+    { from: 'academicYear', to: 'academicStage', label: 'N:1', delete: 'Restrict', fromSide: 'left', toSide: 'right' },
+    { from: 'student', to: 'branch', label: 'N:1', delete: 'Restrict', fromSide: 'left', toSide: 'right' },
+    { from: 'student', to: 'academicStage', label: 'N:1', delete: 'Restrict', fromSide: 'top', toSide: 'bottom' },
+    { from: 'student', to: 'academicYear', label: 'N:1', delete: 'Restrict', fromSide: 'top', toSide: 'bottom' },
+    { from: 'attendanceLog', to: 'student', label: 'N:1', delete: 'Restrict', fromSide: 'left', toSide: 'right' },
+    { from: 'refreshToken', to: 'user', label: 'N:1', delete: 'Cascade', fromSide: 'left', toSide: 'right' },
+    { from: 'auditLog', to: 'user', label: 'N:1', delete: 'SetNull', fromSide: 'top', toSide: 'bottom' },
+];
+
+// ==================== CARD DIMENSIONS ====================
+const CARD_WIDTH = 260;
+const HEADER_HEIGHT = 36;
+const ROW_HEIGHT = 22;
+const FOOTER_HEIGHT = 30;
+
+function getCardHeight(entity) {
+    return HEADER_HEIGHT + (entity.columns.length * ROW_HEIGHT) + FOOTER_HEIGHT;
+}
+
+function getCardRect(entity) {
+    return { x: entity.x, y: entity.y, w: CARD_WIDTH, h: getCardHeight(entity) };
+}
+
+// ==================== RENDER CARDS ====================
+const canvas = document.getElementById('canvas');
+const svgLayer = document.getElementById('svgLayer');
+
+function renderCards() {
+    entities.forEach(ent => {
+        const card = document.createElement('div');
+        card.className = `entity-card domain-${ent.domain}`;
+        card.id = `card-${ent.id}`;
+        card.style.left = ent.x + 'px';
+        card.style.top = ent.y + 'px';
+        card.style.width = CARD_WIDTH + 'px';
+
+        // Header
+        const iconMap = {
+            students: '&#127891;', platform: '&#9881;', auth: '&#128274;',
+            audit: '&#128202;', identity: '&#128100;', tenancy: '&#127970;'
+        };
+        let headerHTML = `<div class="entity-header">
+            <span class="icon">${iconMap[ent.domain] || '&#9673;'}</span>
+            <span>${ent.displayName}</span>
+            <span class="schema">${ent.schema}</span>
+        </div>`;
+
+        // Body
+        let bodyHTML = '<div class="entity-body">';
+        ent.columns.forEach(col => {
+            const markerSymbols = {
+                pk: '&#9733;', fk: '&#10148;', nav: '&#8644;', enum: '&#9654;', inherited: '&#8226;'
+            };
+            const rowClass = col.marker ? `${col.marker}-row` : '';
+            bodyHTML += `<div class="entity-row ${rowClass}">
+                <span class="marker ${col.marker || ''}">${markerSymbols[col.marker] || ''}</span>
+                <span class="col-name">${col.name}</span>
+                <span class="col-type">${col.type}</span>
+            </div>`;
+        });
+        bodyHTML += '</div>';
+
+        // Footer tags
+        let footerHTML = '<div class="entity-footer">';
+        ent.tags.forEach(tag => {
+            const labelMap = { tenant: 'Tenant', 'soft-delete': 'Soft-Delete', audit: 'Audit', identity: 'Identity', 'join-table': 'Join Table' };
+            footerHTML += `<span class="tag ${tag}">${labelMap[tag] || tag}</span>`;
+        });
+        footerHTML += '</div>';
+
+        card.innerHTML = headerHTML + bodyHTML + footerHTML;
+        canvas.appendChild(card);
+
+        // Make draggable
+        makeDraggable(card, ent);
+    });
+}
+
+// ==================== SVG RELATIONSHIPS ====================
+function getAnchorPoint(entity, side) {
+    const rect = getCardRect(entity);
+    const cx = entity.x + rect.w / 2;
+    const cy = entity.y + rect.h / 2;
+
+    switch (side) {
+        case 'left': return { x: entity.x, y: cy };
+        case 'right': return { x: entity.x + rect.w, y: cy };
+        case 'top': return { x: cx, y: entity.y };
+        case 'bottom': return { x: cx, y: entity.y + rect.h };
+        default: return { x: cx, y: cy };
+    }
+}
+
+function drawRelationships() {
+    svgLayer.innerHTML = '';
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+
+    // Arrow markers
+    ['#475569', '#ef4444', '#10b981', '#f59e0b'].forEach((color, i) => {
+        const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+        const names = ['arrow', 'arrow-red', 'arrow-green', 'arrow-amber'];
+        marker.setAttribute('id', names[i]);
+        marker.setAttribute('markerWidth', '8');
+        marker.setAttribute('markerHeight', '8');
+        marker.setAttribute('refX', '7');
+        marker.setAttribute('refY', '4');
+        marker.setAttribute('orient', 'auto');
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', 'M0,0 L8,4 L0,8 Z');
+        path.setAttribute('fill', color);
+        marker.appendChild(path);
+        defs.appendChild(marker);
+    });
+    svgLayer.appendChild(defs);
+
+    relationships.forEach(rel => {
+        const fromEnt = entities.find(e => e.id === rel.from);
+        const toEnt = entities.find(e => e.id === rel.to);
+        if (!fromEnt || !toEnt) return;
+
+        const p1 = getAnchorPoint(fromEnt, rel.fromSide);
+        const p2 = getAnchorPoint(toEnt, rel.toSide);
+
+        // Curved path
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        let c1x, c1y, c2x, c2y;
+
+        if (rel.fromSide === 'left' || rel.fromSide === 'right') {
+            c1x = p1.x + dx * 0.5; c1y = p1.y;
+            c2x = p2.x - dx * 0.5; c2y = p2.y;
+        } else {
+            c1x = p1.x; c1y = p1.y + dy * 0.5;
+            c2x = p2.x; c2y = p2.y - dy * 0.5;
+        }
+
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', `M${p1.x},${p1.y} C${c1x},${c1y} ${c2x},${c2y} ${p2.x},${p2.y}`);
+
+        // Color by delete behavior
+        const colorMap = { Cascade: '#ef4444', Restrict: '#10b981', SetNull: '#f59e0b' };
+        const markerMap = { Cascade: 'url(#arrow-red)', Restrict: 'url(#arrow-green)', SetNull: 'url(#arrow-amber)' };
+        const strokeColor = colorMap[rel.delete] || '#475569';
+
+        path.setAttribute('stroke', strokeColor);
+        path.setAttribute('stroke-width', '1.5');
+        path.setAttribute('fill', 'none');
+        path.setAttribute('marker-end', markerMap[rel.delete] || 'url(#arrow)');
+        path.setAttribute('stroke-dasharray', rel.delete === 'SetNull' ? '5,3' : 'none');
+        path.setAttribute('class', `rel-line rel-${rel.from} rel-${rel.to}`);
+        path.setAttribute('data-from', rel.from);
+        path.setAttribute('data-to', rel.to);
+        svgLayer.appendChild(path);
+
+        // Label at midpoint
+        const mx = (p1.x + p2.x) / 2;
+        const my = (p1.y + p2.y) / 2;
+
+        // Background rect
+        const labelBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        const labelText = `${rel.label} ${rel.delete}`;
+        labelBg.setAttribute('x', mx - 32);
+        labelBg.setAttribute('y', my - 8);
+        labelBg.setAttribute('width', '64');
+        labelBg.setAttribute('height', '16');
+        labelBg.setAttribute('rx', '3');
+        labelBg.setAttribute('fill', '#1e293b');
+        labelBg.setAttribute('stroke', strokeColor);
+        labelBg.setAttribute('stroke-width', '0.5');
+        labelBg.setAttribute('class', `rel-label-bg rel-${rel.from} rel-${rel.to}`);
+        svgLayer.appendChild(labelBg);
+
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        label.setAttribute('x', mx);
+        label.setAttribute('y', my + 4);
+        label.setAttribute('text-anchor', 'middle');
+        label.setAttribute('fill', strokeColor);
+        label.setAttribute('font-size', '9');
+        label.setAttribute('font-family', 'Segoe UI, sans-serif');
+        label.setAttribute('font-weight', '500');
+        label.setAttribute('class', `rel-label-text rel-${rel.from} rel-${rel.to}`);
+        label.textContent = labelText;
+        svgLayer.appendChild(label);
+
+        // Cardinality dots
+        [{ p: p1, side: rel.fromSide, card: 'one' }, { p: p2, side: rel.toSide, card: 'many' }].forEach(({ p, side }) => {
+            const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            dot.setAttribute('cx', p.x);
+            dot.setAttribute('cy', p.y);
+            dot.setAttribute('r', '3');
+            dot.setAttribute('fill', strokeColor);
+            dot.setAttribute('stroke', '#1e293b');
+            dot.setAttribute('stroke-width', '1');
+            svgLayer.appendChild(dot);
+        });
+    });
+}
+
+// ==================== DRAG & DROP ====================
+function makeDraggable(card, entity) {
+    let isDragging = false;
+    let startX, startY, origX, origY;
+
+    card.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        origX = entity.x;
+        origY = entity.y;
+        card.style.zIndex = 100;
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const dx = (e.clientX - startX) / currentScale;
+        const dy = (e.clientY - startY) / currentScale;
+        entity.x = Math.round(origX + dx);
+        entity.y = Math.round(origY + dy);
+        card.style.left = entity.x + 'px';
+        card.style.top = entity.y + 'px';
+        drawRelationships();
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isDragging) {
+            isDragging = false;
+            card.style.zIndex = 10;
+        }
+    });
+}
+
+// ==================== PAN & ZOOM ====================
+let currentScale = 1;
+let panX = 0, panY = 0;
+let isPanning = false;
+let panStartX, panStartY, panOrigX, panOrigY;
+const canvasContainer = document.getElementById('canvasContainer');
+
+function updateTransform() {
+    canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${currentScale})`;
+    document.getElementById('zoomIndicator').textContent = Math.round(currentScale * 100) + '%';
+}
+
+canvasContainer.addEventListener('mousedown', (e) => {
+    if (e.target.closest('.entity-card')) return;
+    isPanning = true;
+    panStartX = e.clientX;
+    panStartY = e.clientY;
+    panOrigX = panX;
+    panOrigY = panY;
+    canvasContainer.style.cursor = 'grabbing';
+});
+
+document.addEventListener('mousemove', (e) => {
+    if (!isPanning) return;
+    panX = panOrigX + (e.clientX - panStartX);
+    panY = panOrigY + (e.clientY - panStartY);
+    updateTransform();
+});
+
+document.addEventListener('mouseup', () => {
+    isPanning = false;
+    canvasContainer.style.cursor = 'grab';
+});
+
+canvasContainer.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.08 : 0.08;
+    const newScale = Math.max(0.2, Math.min(2, currentScale + delta));
+
+    // Zoom toward cursor
+    const rect = canvasContainer.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    const scaleRatio = newScale / currentScale;
+    panX = mouseX - (mouseX - panX) * scaleRatio;
+    panY = mouseY - (mouseY - panY) * scaleRatio;
+    currentScale = newScale;
+
+    updateTransform();
+}, { passive: false });
+
+// ==================== CONTROLS ====================
+document.getElementById('toggleLegend').addEventListener('click', () => {
+    document.getElementById('sidebar').classList.toggle('open');
+});
+
+document.getElementById('fitBtn').addEventListener('click', fitToScreen);
+document.getElementById('resetBtn').addEventListener('click', () => {
+    currentScale = 1;
+    panX = 40;
+    panY = 20;
+    updateTransform();
+});
+
+function fitToScreen() {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    entities.forEach(ent => {
+        const rect = getCardRect(ent);
+        minX = Math.min(minX, ent.x);
+        minY = Math.min(minY, ent.y);
+        maxX = Math.max(maxX, ent.x + rect.w);
+        maxY = Math.max(maxY, ent.y + rect.h);
+    });
+
+    const contentW = maxX - minX + 80;
+    const contentH = maxY - minY + 80;
+    const screenW = window.innerWidth;
+    const screenH = window.innerHeight - 56;
+
+    currentScale = Math.min(screenW / contentW, screenH / contentH, 1);
+    panX = (screenW - contentW * currentScale) / 2 - minX * currentScale + 40;
+    panY = (screenH - contentH * currentScale) / 2 - minY * currentScale + 40;
+    updateTransform();
+}
+
+// ==================== SEARCH ====================
+const searchInput = document.getElementById('searchInput');
+searchInput.addEventListener('input', (e) => {
+    const query = e.target.value.toLowerCase().trim();
+    document.querySelectorAll('.entity-card').forEach(card => {
+        card.style.opacity = '1';
+        card.style.filter = '';
+    });
+    document.querySelectorAll('.rel-line, .rel-label-bg, .rel-label-text').forEach(el => {
+        el.style.opacity = '1';
+    });
+
+    if (!query) return;
+
+    const matchedIds = new Set();
+    entities.forEach(ent => {
+        const match = ent.name.toLowerCase().includes(query) ||
+            ent.displayName.toLowerCase().includes(query) ||
+            ent.schema.toLowerCase().includes(query) ||
+            ent.columns.some(c => c.name.toLowerCase().includes(query));
+
+        if (match) matchedIds.add(ent.id);
+    });
+
+    // Also highlight related entities
+    const relatedIds = new Set(matchedIds);
+    relationships.forEach(rel => {
+        if (matchedIds.has(rel.from)) relatedIds.add(rel.to);
+        if (matchedIds.has(rel.to)) relatedIds.add(rel.from);
+    });
+
+    entities.forEach(ent => {
+        if (!relatedIds.has(ent.id)) {
+            const card = document.getElementById(`card-${ent.id}`);
+            card.style.opacity = '0.15';
+            card.style.filter = 'grayscale(1)';
+        } else if (matchedIds.has(ent.id)) {
+            const card = document.getElementById(`card-${ent.id}`);
+            card.classList.add('highlighted');
+        }
+    });
+
+    relationships.forEach(rel => {
+        if (!relatedIds.has(rel.from) && !relatedIds.has(rel.to)) {
+            document.querySelectorAll(`.rel-${rel.from},.rel-${rel.to}`).forEach(el => {
+                if (!el.classList.contains(`rel-${rel.from}`) || !el.classList.contains(`rel-${rel.to}`)) {
+                    // keep only if both match
+                }
+                el.style.opacity = '0.08';
+            });
+        }
+    });
+
+    // Clean highlight class after delay
+    setTimeout(() => {
+        document.querySelectorAll('.entity-card.highlighted').forEach(c => c.classList.remove('highlighted'));
+    }, 2000);
+});
+
+// ==================== ENTITY LIST (sidebar) ====================
+function renderEntityList() {
+    const list = document.getElementById('entityList');
+    const domainGroups = {};
+    entities.forEach(ent => {
+        if (!domainGroups[ent.domain]) domainGroups[ent.domain] = [];
+        domainGroups[ent.domain].push(ent);
+    });
+
+    const domainLabels = {
+        students: 'Students', platform: 'Platform', auth: 'Auth',
+        audit: 'Audit', identity: 'Identity', tenancy: 'Tenancy'
+    };
+
+    Object.keys(domainGroups).forEach(domain => {
+        const label = document.createElement('div');
+        label.style.cssText = 'font-size:11px;color:var(--text-muted);margin-top:8px;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.3px;';
+        label.textContent = domainLabels[domain] || domain;
+        list.appendChild(label);
+
+        domainGroups[domain].forEach(ent => {
+            const item = document.createElement('div');
+            item.className = 'entity-list-item';
+            item.textContent = ent.displayName;
+            item.addEventListener('click', () => {
+                // Pan to entity
+                const screenW = window.innerWidth;
+                const screenH = window.innerHeight - 56;
+                currentScale = 1;
+                panX = screenW / 2 - ent.x - CARD_WIDTH / 2;
+                panY = screenH / 2 - ent.y - getCardHeight(ent) / 2;
+                updateTransform();
+
+                // Flash highlight
+                const card = document.getElementById(`card-${ent.id}`);
+                card.classList.add('highlighted');
+                setTimeout(() => card.classList.remove('highlighted'), 1500);
+            });
+            list.appendChild(item);
+        });
+    });
+}
+
+// ==================== INIT ====================
+renderCards();
+drawRelationships();
+renderEntityList();
+
+// Initial positioning
+setTimeout(() => {
+    panX = 40;
+    panY = 20;
+    updateTransform();
+}, 50);
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+    if (e.target === searchInput) return;
+    if (e.key === 'f' || e.key === 'F') fitToScreen();
+    if (e.key === '0') {
+        currentScale = 1;
+        panX = 40;
+        panY = 20;
+        updateTransform();
+    }
+    if (e.key === '/' || e.key === 's' || e.key === 'S') {
+        e.preventDefault();
+        searchInput.focus();
+    }
+});
+</script>
+
+</body>
+</html>

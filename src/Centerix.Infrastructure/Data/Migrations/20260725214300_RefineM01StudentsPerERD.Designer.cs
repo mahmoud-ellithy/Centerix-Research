@@ -4,6 +4,7 @@ using Centerix.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Centerix.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260725214300_RefineM01StudentsPerERD")]
+    partial class RefineM01StudentsPerERD
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -36,13 +39,10 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasColumnType("nvarchar(100)");
 
                     b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("CreatedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("CreatedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("CreatedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("EntityId")
                         .HasMaxLength(100)
@@ -57,13 +57,10 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasColumnType("nvarchar(45)");
 
                     b.Property<string>("LastModifiedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("ModifiedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTimeOffset>("LastModifiedUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("ModifiedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("NewValue")
                         .HasColumnType("nvarchar(max)");
@@ -76,7 +73,6 @@ namespace Centerix.Infrastructure.Data.Migrations
 
                     b.Property<string>("TenantId")
                         .IsRequired()
-                        .HasMaxLength(450)
                         .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("UserId")
@@ -99,13 +95,10 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("CreatedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("CreatedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("CreatedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("DeviceInfo")
                         .HasMaxLength(300)
@@ -119,13 +112,10 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasColumnType("nvarchar(45)");
 
                     b.Property<string>("LastModifiedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("ModifiedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTimeOffset>("LastModifiedUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("ModifiedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("ReplacedByTokenHash")
                         .HasColumnType("nvarchar(max)");
@@ -135,8 +125,7 @@ namespace Centerix.Infrastructure.Data.Migrations
 
                     b.Property<string>("TenantId")
                         .IsRequired()
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("TokenHash")
                         .IsRequired()
@@ -171,14 +160,14 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("CreatedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("CreatedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("CreatedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("EntityId")
                         .HasMaxLength(100)
@@ -193,13 +182,10 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasColumnType("nvarchar(45)");
 
                     b.Property<string>("LastModifiedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("ModifiedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTimeOffset>("LastModifiedUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("ModifiedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("NewValue")
                         .HasColumnType("nvarchar(max)");
@@ -209,12 +195,9 @@ namespace Centerix.Infrastructure.Data.Migrations
 
                     b.Property<string>("TenantId")
                         .IsRequired()
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "CreatedAtUtc");
 
                     b.ToTable("PlatformAuditLog", "Platform");
                 });
@@ -238,31 +221,28 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasColumnType("nvarchar(80)");
 
                     b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("CreatedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("CreatedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("CreatedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Description")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("LastModifiedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("ModifiedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTimeOffset>("LastModifiedUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("ModifiedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("Module")
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("TenantId")
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -282,8 +262,6 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasColumnType("int");
 
                     b.Property<string>("TenantId")
-                        .IsRequired()
-                        .HasMaxLength(450)
                         .HasColumnType("nvarchar(450)");
 
                     b.HasKey("RoleId", "PermissionId");
@@ -305,27 +283,24 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasPrecision(10, 2)
                         .HasColumnType("decimal(10,2)");
 
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("CreatedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("CreatedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("CreatedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("InvoiceRef")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("LastModifiedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("ModifiedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTimeOffset>("LastModifiedUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("ModifiedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("Method")
                         .IsRequired()
@@ -343,14 +318,11 @@ namespace Centerix.Infrastructure.Data.Migrations
 
                     b.Property<string>("TenantId")
                         .IsRequired()
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
                     b.HasIndex("PlanId");
-
-                    b.HasIndex("TenantId");
 
                     b.ToTable("TenantBilling", "Platform");
                 });
@@ -369,13 +341,10 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasColumnType("nvarchar(50)");
 
                     b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("CreatedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("CreatedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("CreatedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Description")
                         .IsRequired()
@@ -383,18 +352,18 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("LastModifiedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("ModifiedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTimeOffset>("LastModifiedUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("ModifiedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("Module")
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("TenantId")
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -411,8 +380,7 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("AssignedTo")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("CenterName")
                         .IsRequired()
@@ -424,23 +392,20 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasMaxLength(150)
                         .HasColumnType("nvarchar(150)");
 
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("CreatedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("CreatedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("CreatedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("LastModifiedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("ModifiedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTimeOffset>("LastModifiedUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("ModifiedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("Phone")
                         .IsRequired()
@@ -458,14 +423,9 @@ namespace Centerix.Infrastructure.Data.Migrations
 
                     b.Property<string>("TenantId")
                         .IsRequired()
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("TenantId");
-
-                    b.HasIndex("TenantId", "Stage");
 
                     b.ToTable("TenantCRMLeads", "Platform");
                 });
@@ -484,13 +444,10 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasColumnType("nvarchar(30)");
 
                     b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("CreatedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("CreatedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("CreatedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("DisplayName")
                         .IsRequired()
@@ -501,13 +458,10 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasColumnType("bit");
 
                     b.Property<string>("LastModifiedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("ModifiedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTimeOffset>("LastModifiedUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("ModifiedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<int>("MaxBranches")
                         .HasColumnType("int");
@@ -531,6 +485,9 @@ namespace Centerix.Infrastructure.Data.Migrations
                     b.Property<int>("StorageGB")
                         .HasColumnType("int");
 
+                    b.Property<string>("TenantId")
+                        .HasColumnType("nvarchar(max)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Code")
@@ -548,13 +505,10 @@ namespace Centerix.Infrastructure.Data.Migrations
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("CreatedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("CreatedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("CreatedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("FeatureId")
                         .HasColumnType("int");
@@ -563,16 +517,16 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasColumnType("bit");
 
                     b.Property<string>("LastModifiedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("ModifiedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTimeOffset>("LastModifiedUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("ModifiedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<int>("PlanId")
                         .HasColumnType("int");
+
+                    b.Property<string>("TenantId")
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -593,25 +547,19 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasColumnType("bit");
 
                     b.Property<DateTimeOffset>("CreatedAtUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("CreatedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("CreatedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("CreatedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime?>("EndsAt")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("LastModifiedBy")
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)")
-                        .HasColumnName("ModifiedBy");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTimeOffset>("LastModifiedUtc")
-                        .HasColumnType("datetimeoffset")
-                        .HasColumnName("ModifiedAt");
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<int>("PlanId")
                         .HasColumnType("int");
@@ -624,14 +572,11 @@ namespace Centerix.Infrastructure.Data.Migrations
 
                     b.Property<string>("TenantId")
                         .IsRequired()
-                        .HasMaxLength(450)
-                        .HasColumnType("nvarchar(450)");
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
                     b.HasIndex("PlanId");
-
-                    b.HasIndex("TenantId");
 
                     b.ToTable("TenantPlans", "Platform");
                 });

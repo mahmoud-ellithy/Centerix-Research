@@ -28,7 +28,22 @@ public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
             .HasMaxLength(45);
 
         builder.Property(rt => rt.TenantId)
+            .HasMaxLength(450)
             .IsRequired();
+
+        builder.Property(rt => rt.CreatedAtUtc)
+            .HasColumnName("CreatedAt");
+
+        builder.Property(rt => rt.LastModifiedUtc)
+            .HasColumnName("ModifiedAt");
+
+        builder.Property(rt => rt.CreatedBy)
+            .HasColumnName("CreatedBy")
+            .HasMaxLength(450);
+
+        builder.Property(rt => rt.LastModifiedBy)
+            .HasColumnName("ModifiedBy")
+            .HasMaxLength(450);
 
         // Lookups by hash (rotation, validation) and by user (revoke-all, sessions list).
         builder.HasIndex(rt => rt.TokenHash)

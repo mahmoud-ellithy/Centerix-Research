@@ -48,9 +48,11 @@ public class AttendanceLogConfiguration : IEntityTypeConfiguration<AttendanceLog
         builder.Property(a => a.SyncedAt)
             .HasColumnType("datetime2");
 
-        // Audit columns — keep native datetimeoffset mapping (matches the rest of the platform).
         builder.Property(a => a.CreatedAtUtc).HasColumnName("CreatedAt");
         builder.Property(a => a.LastModifiedUtc).HasColumnName("ModifiedAt");
+
+        builder.Property(a => a.CreatedBy).HasColumnName("CreatedBy");
+        builder.Property(a => a.LastModifiedBy).HasColumnName("ModifiedBy");
 
         builder.Property(a => a.RowVersion)
             .IsRowVersion();

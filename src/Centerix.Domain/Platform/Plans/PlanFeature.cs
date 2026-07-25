@@ -4,7 +4,7 @@ using Centerix.Domain.Common;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Features;
 
-public class PlanFeature : AuditableEntity<int>
+public class PlanFeature : GlobalAuditableEntity<int>
 {
     public int PlanId { get; private set; }
     public int FeatureId { get; private set; }

@@ -3,7 +3,7 @@ namespace Centerix.Domain.Platform.Authorization;
 using Centerix.Domain.Common;
 using Centerix.Domain.Common.Results;
 
-public class Permission : AuditableEntity<int>
+public class Permission : GlobalAuditableEntity<int>
 {
     public string Module { get; private set; } = default!;
     public string Action { get; private set; } = default!;

@@ -15,7 +15,6 @@ public class TenantCRMLead : AuditableEntity<Guid>
     public string Source { get; private set; } = default!;
     public LeadStage Stage { get; private set; }
     public string? AssignedTo { get; private set; }
-    public DateTime CreatedAt { get; private set; }
 
     private TenantCRMLead() { }
 
@@ -26,8 +25,7 @@ public class TenantCRMLead : AuditableEntity<Guid>
         string phone,
         string source,
         LeadStage stage,
-        string? assignedTo,
-        DateTime createdAt)
+        string? assignedTo)
         : base(id)
     {
         CenterName = centerName;
@@ -36,7 +34,6 @@ public class TenantCRMLead : AuditableEntity<Guid>
         Source = source;
         Stage = stage;
         AssignedTo = assignedTo;
-        CreatedAt = createdAt;
     }
 
     public static Result<TenantCRMLead> Create(
@@ -46,8 +43,7 @@ public class TenantCRMLead : AuditableEntity<Guid>
         string phone,
         string source,
         LeadStage stage,
-        string? assignedTo,
-        DateTime createdAt)
+        string? assignedTo)
     {
         if (string.IsNullOrWhiteSpace(centerName))
             return TenantCRMLeadErrors.CenterNameRequired;
@@ -64,7 +60,7 @@ public class TenantCRMLead : AuditableEntity<Guid>
         if (!Enum.IsDefined(stage))
             return TenantCRMLeadErrors.StageRequired;
 
-        return new TenantCRMLead(id, centerName, contactName, phone, source, stage, assignedTo, createdAt);
+        return new TenantCRMLead(id, centerName, contactName, phone, source, stage, assignedTo);
     }
 
     public Result<Updated> Update(

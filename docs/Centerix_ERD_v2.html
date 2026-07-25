@@ -1,0 +1,1262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Centerix — Entity Relationship Diagram</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --navy:    #0D2D6B;
+  --teal:    #0A7060;
+  --gold:    #C9971A;
+  --purple:  #5B2D8E;
+  --red:     #A61C00;
+  --green:   #1A6B3C;
+  --blue:    #1460BD;
+  --orange:  #C05000;
+  --slate:   #3D5A80;
+  --bg:      #0E1117;
+  --surface: #161B27;
+  --card:    #1C2333;
+  --border:  #2A3550;
+  --text:    #E2E8F4;
+  --muted:   #6B7FA3;
+  --mono:    'JetBrains Mono', monospace;
+  --sans:    'Syne', sans-serif;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ── TOP BAR ─────────────────────────────────────── */
+#topbar {
+  position: fixed; top:0; left:0; right:0; z-index:100;
+  height: 52px;
+  background: rgba(14,17,23,0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 24px;
+  padding: 0 20px;
+}
+#topbar .logo {
+  font-size: 18px; font-weight: 800; color: var(--text);
+  letter-spacing: -0.5px;
+}
+#topbar .logo span { color: var(--teal); }
+#topbar .subtitle {
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  padding: 3px 10px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 4px;
+}
+#topbar .controls { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.ctrl-btn {
+  padding: 5px 12px; border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--card); color: var(--text);
+  font-family: var(--mono); font-size: 11px;
+  cursor: pointer; transition: all .15s;
+}
+.ctrl-btn:hover { border-color: var(--teal); color: var(--teal); }
+#zoom-level {
+  font-family: var(--mono); font-size: 12px; color: var(--muted);
+  min-width: 46px; text-align: center;
+}
+
+/* ── LEGEND ──────────────────────────────────────── */
+#legend {
+  position: fixed; bottom: 16px; left: 16px; z-index: 100;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 16px;
+  font-family: var(--mono); font-size: 11px;
+}
+#legend .leg-title { color: var(--muted); margin-bottom: 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }
+.leg-item { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; color: var(--muted); }
+.leg-dot { width: 10px; height: 10px; border-radius: 2px; }
+
+/* ── HELP ────────────────────────────────────────── */
+#help {
+  position: fixed; bottom: 16px; right: 16px; z-index: 100;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 14px;
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  line-height: 1.9;
+}
+
+/* ── CANVAS ──────────────────────────────────────── */
+#canvas-wrap {
+  position: fixed; top: 52px; left: 0; right: 0; bottom: 0;
+  overflow: hidden; cursor: grab;
+}
+#canvas-wrap.dragging { cursor: grabbing; }
+
+#canvas {
+  position: absolute;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+/* ── SECTION LABEL ───────────────────────────────── */
+.section-label {
+  position: absolute;
+  font-family: var(--mono); font-size: 10px;
+  text-transform: uppercase; letter-spacing: 2px;
+  color: var(--muted); opacity: 0.6;
+  pointer-events: none;
+}
+
+/* ── TABLE CARD ──────────────────────────────────── */
+.tbl {
+  position: absolute;
+  background: var(--card);
+  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  min-width: 220px;
+  transition: box-shadow .2s, border-color .2s;
+  cursor: pointer;
+}
+.tbl:hover {
+  box-shadow: 0 0 0 2px var(--teal), 0 8px 32px rgba(10,112,96,0.2);
+  border-color: var(--teal);
+  z-index: 50 !important;
+}
+.tbl.platform-schema { border-color: #2A3D6B; }
+.tbl.platform-schema .tbl-head { background: var(--navy); }
+.tbl.security-schema .tbl-head { background: var(--red); }
+.tbl.student-domain  .tbl-head { background: var(--blue); }
+.tbl.teacher-domain  .tbl-head { background: var(--teal); }
+.tbl.schedule-domain .tbl-head { background: #1A5080; }
+.tbl.finance-domain  .tbl-head { background: #7A6010; }
+.tbl.academic-domain .tbl-head { background: var(--green); }
+.tbl.hr-domain       .tbl-head { background: var(--purple); }
+.tbl.comms-domain    .tbl-head { background: var(--slate); }
+.tbl.growth-domain   .tbl-head { background: var(--red); }
+.tbl.lms-domain      .tbl-head { background: var(--blue); }
+.tbl.parent-domain   .tbl-head { background: #B03A6B; }
+.tbl.storage-domain  .tbl-head { background: #4A6B3D; }
+.tbl.config-domain   .tbl-head { background: #806B1A; }
+.tbl.notes-domain    .tbl-head { background: #5A5A5A; }
+
+.tbl-head {
+  padding: 8px 12px 7px;
+  border-radius: 6px 6px 0 0;
+  display: flex; align-items: center; gap: 8px;
+}
+.tbl-schema {
+  font-family: var(--mono); font-size: 9px;
+  color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 1px;
+}
+.tbl-name {
+  font-family: var(--mono); font-size: 13px; font-weight: 700;
+  color: #fff; letter-spacing: -0.3px;
+}
+.tbl-badge {
+  margin-left: auto;
+  font-family: var(--mono); font-size: 9px;
+  padding: 2px 6px; border-radius: 3px;
+  background: rgba(255,255,255,0.15); color: rgba(255,255,255,0.7);
+}
+
+.tbl-body { padding: 6px 0 8px; }
+
+.col-row {
+  display: flex; align-items: center; gap: 0;
+  padding: 2.5px 12px;
+  font-family: var(--mono); font-size: 11px;
+}
+.col-row:hover { background: rgba(255,255,255,0.03); }
+
+.col-key {
+  width: 28px; flex-shrink: 0;
+  font-size: 9px; font-weight: 700;
+  text-align: center; opacity: 0.8;
+}
+.pk  { color: var(--gold); }
+.fk  { color: var(--teal); }
+.uk  { color: var(--purple); }
+
+.col-name { flex: 1; color: var(--text); }
+.col-type { color: var(--muted); font-size: 10px; margin-left: 6px; white-space: nowrap; }
+.col-req  { color: var(--red); font-size: 9px; margin-left: 4px; }
+
+.col-divider { height: 1px; background: var(--border); margin: 4px 12px; }
+
+/* ── RELATION LINES (SVG overlay) ────────────────── */
+#svg-overlay {
+  position: absolute; top: 0; left: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+.rel-line { stroke-width: 1.5; fill: none; opacity: 0.5; }
+.rel-line.pk-fk  { stroke: var(--teal); stroke-dasharray: none; }
+.rel-line.idx    { stroke: var(--muted); stroke-dasharray: 4 3; }
+
+/* ── MODULE BACKGROUNDS ──────────────────────────── */
+.module-bg {
+  position: absolute;
+  border-radius: 12px;
+  border: 1px dashed;
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="logo">Center<span>ix</span></div>
+  <div class="subtitle">Entity Relationship Diagram — v2.0 (Hardened)</div>
+  <div class="subtitle">SQL Server 2022 · 16 Domains · 90+ Tables</div>
+  <div class="controls">
+    <button class="ctrl-btn" onclick="zoomIn()">＋ Zoom In</button>
+    <span id="zoom-level">100%</span>
+    <button class="ctrl-btn" onclick="zoomOut()">－ Zoom Out</button>
+    <button class="ctrl-btn" onclick="resetView()">⊡ Reset</button>
+    <button class="ctrl-btn" onclick="fitAll()">⊞ Fit All</button>
+  </div>
+</div>
+
+<div id="canvas-wrap">
+  <div id="canvas">
+    <svg id="svg-overlay"></svg>
+    <!-- Tables injected by JS -->
+  </div>
+</div>
+
+<div id="legend">
+  <div class="leg-title">Legend</div>
+  <div class="leg-item"><div class="leg-dot" style="background:var(--navy)"></div> Platform Schema</div>
+  <div class="leg-item"><div class="leg-dot" style="background:var(--red)"></div> M-12 Security</div>
+  <div class="leg-item"><div class="leg-dot" style="background:var(--blue)"></div> M-01 Students</div>
+  <div class="leg-item"><div class="leg-dot" style="background:var(--teal)"></div> M-02 Teachers</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#1A5080"></div> M-03 Schedule</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#7A6010"></div> M-04 Finance</div>
+  <div class="leg-item"><div class="leg-dot" style="background:var(--green)"></div> M-05 Academic</div>
+  <div class="leg-item"><div class="leg-dot" style="background:var(--purple)"></div> M-06 HR</div>
+  <div class="leg-item"><div class="leg-dot" style="background:var(--slate)"></div> M-07 Comms</div>
+  <div class="leg-item"><div class="leg-dot" style="background:var(--red)"></div> M-08 Growth</div>
+  <div class="leg-item"><div class="leg-dot" style="background:var(--blue)"></div> M-09 LMS</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#B03A6B"></div> M-10 Parents</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#4A6B3D"></div> M-11 Storage</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#806B1A"></div> M-13 Config</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#5A5A5A"></div> M-14 Notes</div>
+  <div style="border-top:1px solid var(--border);margin:8px 0 6px"></div>
+  <div class="leg-item"><span style="color:var(--gold);font-size:11px;font-weight:700">PK</span> Primary Key</div>
+  <div class="leg-item"><span style="color:var(--teal);font-size:11px;font-weight:700">FK</span> Foreign Key</div>
+  <div class="leg-item"><span style="color:var(--purple);font-size:11px;font-weight:700">UK</span> Unique Key</div>
+</div>
+
+<div id="help">
+  🖱 Drag to pan &nbsp;|&nbsp; Scroll to zoom<br>
+  Click table to highlight relations
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// DATA — ALL TABLES
+// ═══════════════════════════════════════════════════════════
+const TABLES = [
+
+  // ── PLATFORM SCHEMA ──────────────────────────────────────
+  { id:'Tenants', schema:'platform', domain:'platform-schema', x:60, y:80, badge:'Core',
+    cols:[
+      {key:'PK',name:'TenantId',      type:'UNIQUEIDENTIFIER', req:true},
+      {key:'UK',name:'Slug',          type:'NVARCHAR(60)',      req:true},
+      {key:'UK',name:'Subdomain',     type:'NVARCHAR(100)',     req:true},
+      {key:'',  name:'DisplayName',   type:'NVARCHAR(200)',     req:true},
+      {key:'',  name:'LogoUrl',       type:'NVARCHAR(500)'},
+      {key:'',  name:'PrimaryColor',  type:'NCHAR(7)'},
+      {key:'',  name:'Country',       type:'NCHAR(2)',          req:true},
+      {key:'',  name:'Currency',      type:'NCHAR(3)',          req:true},
+      {key:'',  name:'Timezone',      type:'NVARCHAR(60)',      req:true},
+      {key:'',  name:'Status',        type:'TINYINT',           req:true},
+      {key:'',  name:'TrialEndsAt',   type:'DATETIME2'},
+      {key:'',  name:'CreatedAt',     type:'DATETIME2',         req:true},
+    ]},
+
+  { id:'Plans', schema:'platform', domain:'platform-schema', x:360, y:80, badge:'Billing',
+    cols:[
+      {key:'PK',name:'PlanId',         type:'INT IDENTITY',  req:true},
+      {key:'UK',name:'Code',           type:'NVARCHAR(30)',  req:true},
+      {key:'',  name:'DisplayName',    type:'NVARCHAR(100)', req:true},
+      {key:'',  name:'MonthlyPrice',   type:'DECIMAL(10,2)', req:true},
+      {key:'',  name:'MaxStudents',    type:'INT',           req:true},
+      {key:'',  name:'MaxUsers',       type:'INT',           req:true},
+      {key:'',  name:'MaxBranches',    type:'INT',           req:true},
+      {key:'',  name:'MaxTeachers',    type:'INT',           req:true},
+      {key:'',  name:'StorageGB',      type:'INT',           req:true},
+      {key:'',  name:'SMSQuota',       type:'INT',           req:true},
+      {key:'',  name:'IsActive',       type:'BIT',           req:true},
+    ]},
+
+  { id:'Features', schema:'platform', domain:'platform-schema', x:660, y:80, badge:'Flags',
+    cols:[
+      {key:'PK',name:'FeatureId',   type:'INT IDENTITY', req:true},
+      {key:'UK',name:'Code',        type:'NVARCHAR(80)', req:true},
+      {key:'',  name:'Description', type:'NVARCHAR(300)'},
+      {key:'',  name:'Module',      type:'NVARCHAR(10)', req:true},
+    ]},
+
+  { id:'PlanFeatures', schema:'platform', domain:'platform-schema', x:480, y:340, badge:'Junction',
+    cols:[
+      {key:'PK',name:'PlanFeatureId', type:'INT IDENTITY', req:true},
+      {key:'FK',name:'PlanId',        type:'INT',          req:true},
+      {key:'FK',name:'FeatureId',     type:'INT',          req:true},
+      {key:'',  name:'IsEnabled',     type:'BIT',          req:true},
+    ]},
+
+  { id:'TenantPlans', schema:'platform', domain:'platform-schema', x:60, y:370, badge:'Subscription',
+    cols:[
+      {key:'PK',name:'TenantPlanId', type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'TenantId',     type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'PlanId',       type:'INT',              req:true},
+      {key:'',  name:'StartsAt',     type:'DATETIME2',        req:true},
+      {key:'',  name:'EndsAt',       type:'DATETIME2',        req:true},
+      {key:'',  name:'AutoRenew',    type:'BIT',              req:true},
+      {key:'',  name:'Status',       type:'TINYINT',          req:true},
+    ]},
+
+  { id:'TenantBilling', schema:'platform', domain:'platform-schema', x:60, y:620, badge:'Billing',
+    cols:[
+      {key:'PK',name:'BillingId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'TenantId',   type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'PlanId',     type:'INT',              req:true},
+      {key:'',  name:'AmountEGP',  type:'DECIMAL(10,2)',    req:true},
+      {key:'',  name:'Method',     type:'NVARCHAR(30)',     req:true},
+      {key:'',  name:'Status',     type:'TINYINT',          req:true},
+      {key:'',  name:'PaidAt',     type:'DATETIME2'},
+      {key:'',  name:'InvoiceRef', type:'NVARCHAR(100)'},
+      {key:'',  name:'CreatedAt',  type:'DATETIME2',        req:true},
+    ]},
+
+  { id:'TenantCRMLeads', schema:'platform', domain:'platform-schema', x:660, y:340, badge:'CRM',
+    cols:[
+      {key:'PK',name:'LeadId',      type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'TenantId',    type:'UNIQUEIDENTIFIER'},
+      {key:'',  name:'CenterName',  type:'NVARCHAR(200)',    req:true},
+      {key:'',  name:'ContactName', type:'NVARCHAR(150)',    req:true},
+      {key:'',  name:'Phone',       type:'NVARCHAR(30)'},
+      {key:'',  name:'Source',      type:'NVARCHAR(50)',     req:true},
+      {key:'',  name:'Stage',       type:'NVARCHAR(30)',     req:true},
+      {key:'',  name:'AssignedTo',  type:'UNIQUEIDENTIFIER'},
+      {key:'',  name:'CreatedAt',   type:'DATETIME2',        req:true},
+    ]},
+
+  { id:'PlatformAuditLog', schema:'platform', domain:'platform-schema', x:380, y:620, badge:'Audit',
+    cols:[
+      {key:'PK',name:'LogId',      type:'BIGINT IDENTITY',  req:true},
+      {key:'FK',name:'TenantId',   type:'UNIQUEIDENTIFIER'},
+      {key:'',  name:'Action',     type:'NVARCHAR(100)',     req:true},
+      {key:'',  name:'EntityType', type:'NVARCHAR(60)'},
+      {key:'',  name:'EntityId',   type:'NVARCHAR(100)'},
+      {key:'',  name:'OldValue',   type:'NVARCHAR(MAX)'},
+      {key:'',  name:'NewValue',   type:'NVARCHAR(MAX)'},
+      {key:'',  name:'IPAddress',  type:'NVARCHAR(45)'},
+      {key:'',  name:'CreatedAt',  type:'DATETIME2',         req:true},
+    ]},
+
+  // ── M-12 SECURITY ─────────────────────────────────────────
+  { id:'Users', schema:'{schema}', domain:'security-schema', x:1060, y:80, badge:'M-12',
+    cols:[
+      {key:'PK',name:'UserId',          type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'TenantId',        type:'UNIQUEIDENTIFIER', req:true},
+      {key:'UK',name:'Email',           type:'NVARCHAR(200)'},
+      {key:'',  name:'Phone',           type:'NVARCHAR(30)'},
+      {key:'',  name:'FullName',        type:'NVARCHAR(200)',    req:true},
+      {key:'',  name:'PasswordHash',    type:'NVARCHAR(500)'},
+      {key:'',  name:'UserType',        type:'NVARCHAR(20)',     req:true},
+      {key:'',  name:'LinkedEntityId',  type:'UNIQUEIDENTIFIER'},
+      {key:'',  name:'Is2FAEnabled',    type:'BIT',              req:true},
+      {key:'',  name:'FailedLoginCount',type:'TINYINT',          req:true},
+      {key:'',  name:'LockedUntil',     type:'DATETIME2'},
+      {key:'',  name:'LastLoginAt',     type:'DATETIME2'},
+      {key:'',  name:'IsActive',        type:'BIT',              req:true},
+    ]},
+
+  { id:'Roles', schema:'{schema}', domain:'security-schema', x:1310, y:80, badge:'M-12',
+    cols:[
+      {key:'PK',name:'RoleId',      type:'INT IDENTITY', req:true},
+      {key:'UK',name:'Code',        type:'NVARCHAR(40)', req:true},
+      {key:'',  name:'DisplayName', type:'NVARCHAR(100)',req:true},
+      {key:'',  name:'IsSystem',    type:'BIT',          req:true},
+    ]},
+
+  { id:'Permissions', schema:'{schema}', domain:'security-schema', x:1560, y:80, badge:'M-12',
+    cols:[
+      {key:'PK',name:'PermissionId', type:'INT IDENTITY',  req:true},
+      {key:'',  name:'Module',       type:'NVARCHAR(10)',  req:true},
+      {key:'',  name:'Action',       type:'NVARCHAR(30)',  req:true},
+      {key:'UK',name:'Code',         type:'NVARCHAR(80)',  req:true},
+    ]},
+
+  { id:'UserRoles', schema:'{schema}', domain:'security-schema', x:1160, y:350, badge:'Junction',
+    cols:[
+      {key:'FK',name:'UserId', type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'RoleId', type:'INT',              req:true},
+    ]},
+
+  { id:'RolePermissions', schema:'{schema}', domain:'security-schema', x:1410, y:350, badge:'Junction',
+    cols:[
+      {key:'FK',name:'RoleId',       type:'INT', req:true},
+      {key:'FK',name:'PermissionId', type:'INT', req:true},
+    ]},
+
+  { id:'RefreshTokens', schema:'{schema}', domain:'security-schema', x:1060, y:520, badge:'M-12 Fixed',
+    cols:[
+      {key:'PK',name:'TokenId',             type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'UserId',              type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'SessionId',           type:'UNIQUEIDENTIFIER', req:true},
+      {key:'UK',name:'TokenHash',           type:'NVARCHAR(200)',    req:true},
+      {key:'',  name:'DeviceInfo',          type:'NVARCHAR(200)'},
+      {key:'',  name:'IPAddress',           type:'NVARCHAR(45)'},
+      {key:'',  name:'ExpiresAtUtc',        type:'DATETIME2',        req:true},
+      {key:'',  name:'RevokedAtUtc',        type:'DATETIME2'},
+      {key:'',  name:'RevocationReason',    type:'NVARCHAR(20)'},
+      {key:'FK',name:'ReplacedByTokenId',   type:'UNIQUEIDENTIFIER'},
+      {key:'',  name:'LastUsedAtUtc',       type:'DATETIME2'},
+      {key:'',  name:'CreatedAtUtc',        type:'DATETIME2',        req:true},
+    ]},
+
+  { id:'AuditLog', schema:'{schema}', domain:'security-schema', x:1310, y:520, badge:'M-12 Fixed',
+    cols:[
+      {key:'PK',name:'LogId',      type:'BIGINT IDENTITY', req:true},
+      {key:'FK',name:'UserId',     type:'UNIQUEIDENTIFIER'},
+      {key:'',  name:'Action',     type:'NVARCHAR(100)',   req:true},
+      {key:'',  name:'EntityName', type:'NVARCHAR(60)',    req:true},
+      {key:'',  name:'EntityId',   type:'NVARCHAR(100)',   req:true},
+      {key:'',  name:'OldValues',  type:'NVARCHAR(MAX)'},
+      {key:'',  name:'NewValues',  type:'NVARCHAR(MAX)'},
+      {key:'',  name:'IPAddress',  type:'NVARCHAR(45)'},
+      {key:'',  name:'CreatedAt',  type:'DATETIME2',       req:true},
+    ]},
+
+  { id:'LoginHistory', schema:'{schema}', domain:'security-schema', x:1560, y:520, badge:'M-12 New',
+    cols:[
+      {key:'PK',name:'LoginHistoryId', type:'BIGINT IDENTITY',  req:true},
+      {key:'FK',name:'UserId',         type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'LoginAtUtc',     type:'DATETIME2',        req:true},
+      {key:'',  name:'IPAddress',      type:'NVARCHAR(45)',     req:true},
+      {key:'',  name:'DeviceInfo',     type:'NVARCHAR(200)'},
+      {key:'',  name:'UserAgent',      type:'NVARCHAR(300)'},
+      {key:'',  name:'Success',        type:'BIT',              req:true},
+      {key:'',  name:'FailureReason',  type:'NVARCHAR(50)'},
+    ]},
+
+  // ── M-01 STUDENTS ─────────────────────────────────────────
+  { id:'Branches', schema:'{schema}', domain:'student-domain', x:60, y:980, badge:'M-01',
+    cols:[
+      {key:'PK',name:'BranchId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'Name',      type:'NVARCHAR(200)',    req:true},
+      {key:'',  name:'Address',   type:'NVARCHAR(300)'},
+      {key:'',  name:'Phone',     type:'NVARCHAR(30)'},
+      {key:'FK',name:'ManagerId', type:'UNIQUEIDENTIFIER'},
+      {key:'',  name:'IsActive',  type:'BIT',              req:true},
+      {key:'',  name:'CreatedAt', type:'DATETIME2',        req:true},
+      {key:'',  name:'DeletedAt', type:'DATETIME2'},
+    ]},
+
+  { id:'AcademicStages', schema:'{schema}', domain:'student-domain', x:340, y:980, badge:'M-01',
+    cols:[
+      {key:'PK',name:'StageId',     type:'INT IDENTITY',  req:true},
+      {key:'UK',name:'Code',        type:'NVARCHAR(30)',  req:true},
+      {key:'',  name:'DisplayName', type:'NVARCHAR(100)', req:true},
+      {key:'',  name:'SortOrder',   type:'TINYINT',       req:true},
+    ]},
+
+  { id:'AcademicYears', schema:'{schema}', domain:'student-domain', x:580, y:980, badge:'M-01',
+    cols:[
+      {key:'PK',name:'YearId',   type:'INT IDENTITY', req:true},
+      {key:'FK',name:'StageId',  type:'INT',          req:true},
+      {key:'UK',name:'YearCode', type:'NVARCHAR(20)', req:true},
+      {key:'',  name:'YearName', type:'NVARCHAR(60)', req:true},
+    ]},
+
+  { id:'Students', schema:'{schema}', domain:'student-domain', x:200, y:1220, badge:'M-01 Core',
+    cols:[
+      {key:'PK',name:'StudentId',    type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'BranchId',     type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'StageId',      type:'INT',              req:true},
+      {key:'FK',name:'YearId',       type:'INT',              req:true},
+      {key:'',  name:'FullNameAr',   type:'NVARCHAR(200)',    req:true},
+      {key:'',  name:'FullNameEn',   type:'NVARCHAR(200)'},
+      {key:'',  name:'DateOfBirth',  type:'DATE'},
+      {key:'',  name:'Gender',       type:'NCHAR(1)'},
+      {key:'',  name:'Phone',        type:'NVARCHAR(30)'},
+      {key:'UK',name:'QRCode',       type:'NVARCHAR(100)',    req:true},
+      {key:'',  name:'DiscountType', type:'NVARCHAR(10)'},
+      {key:'',  name:'DiscountValue',type:'DECIMAL(10,2)'},
+      {key:'',  name:'Status',       type:'NVARCHAR(15)',     req:true},
+      {key:'',  name:'EnrolledAt',   type:'DATE',             req:true},
+      {key:'',  name:'CreatedAt',    type:'DATETIME2',        req:true},
+      {key:'FK',name:'CreatedBy',    type:'UNIQUEIDENTIFIER'},
+      {key:'',  name:'ModifiedAt',   type:'DATETIME2'},
+      {key:'FK',name:'ModifiedBy',   type:'UNIQUEIDENTIFIER'},
+      {key:'',  name:'DeletedAt',    type:'DATETIME2'},
+      {key:'FK',name:'DeletedBy',    type:'UNIQUEIDENTIFIER'},
+      {key:'',  name:'RowVersion',   type:'ROWVERSION',       req:true},
+    ]},
+
+  { id:'AttendanceLogs', schema:'{schema}', domain:'student-domain', x:60, y:1560, badge:'M-01',
+    cols:[
+      {key:'PK',name:'AttendanceId', type:'BIGINT IDENTITY',  req:true},
+      {key:'FK',name:'StudentId',    type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'GroupId',      type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'SessionDate',  type:'DATE',             req:true},
+      {key:'',  name:'Status',       type:'NVARCHAR(10)',     req:true},
+      {key:'',  name:'CheckInTime',  type:'TIME'},
+      {key:'',  name:'IsOffline',    type:'BIT',              req:true},
+      {key:'',  name:'SyncedAt',     type:'DATETIME2'},
+      {key:'',  name:'CreatedAt',    type:'DATETIME2',        req:true},
+      {key:'',  name:'RowVersion',   type:'ROWVERSION',       req:true},
+    ]},
+
+  // ── M-02 TEACHERS ─────────────────────────────────────────
+  { id:'Subjects', schema:'{schema}', domain:'teacher-domain', x:880, y:980, badge:'M-02',
+    cols:[
+      {key:'PK',name:'SubjectId', type:'INT IDENTITY', req:true},
+      {key:'',  name:'Name',      type:'NVARCHAR(100)',req:true},
+      {key:'FK',name:'StageId',   type:'INT'},
+    ]},
+
+  { id:'Teachers', schema:'{schema}', domain:'teacher-domain', x:1080, y:980, badge:'M-02 Core',
+    cols:[
+      {key:'PK',name:'TeacherId',      type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'UserId',         type:'UNIQUEIDENTIFIER'},
+      {key:'',  name:'FullName',       type:'NVARCHAR(200)',    req:true},
+      {key:'',  name:'Phone',          type:'NVARCHAR(30)',     req:true},
+      {key:'',  name:'Qualification',  type:'NVARCHAR(200)'},
+      {key:'',  name:'YearsExp',       type:'TINYINT'},
+      {key:'',  name:'Status',         type:'NVARCHAR(15)',     req:true},
+      {key:'',  name:'JoinedAt',       type:'DATE',             req:true},
+      {key:'',  name:'CreatedAt',      type:'DATETIME2',        req:true},
+      {key:'FK',name:'CreatedBy',      type:'UNIQUEIDENTIFIER'},
+      {key:'',  name:'ModifiedAt',     type:'DATETIME2'},
+      {key:'',  name:'DeletedAt',      type:'DATETIME2'},
+    ]},
+
+  { id:'TeacherSalaryConfig', schema:'{schema}', domain:'teacher-domain', x:1340, y:980, badge:'M-02',
+    cols:[
+      {key:'PK',name:'ConfigId',    type:'INT IDENTITY',     req:true},
+      {key:'FK',name:'TeacherId',   type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'GroupId',     type:'UNIQUEIDENTIFIER'},
+      {key:'',  name:'SalaryType',  type:'NVARCHAR(10)',     req:true},
+      {key:'',  name:'Value',       type:'DECIMAL(8,2)',     req:true},
+      {key:'',  name:'EffectiveFrom',type:'DATE',            req:true},
+    ]},
+
+  { id:'SalaryPayments', schema:'{schema}', domain:'teacher-domain', x:1340, y:1240, badge:'M-02',
+    cols:[
+      {key:'PK',name:'PaymentId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'TeacherId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'PeriodMonth',type:'TINYINT',          req:true},
+      {key:'',  name:'PeriodYear', type:'SMALLINT',         req:true},
+      {key:'',  name:'GrossAmount',type:'DECIMAL(10,2)',    req:true},
+      {key:'',  name:'NetAmount',  type:'DECIMAL(10,2)',    req:true},
+      {key:'',  name:'Status',     type:'NVARCHAR(10)',     req:true},
+      {key:'',  name:'PaidAt',     type:'DATETIME2'},
+    ]},
+
+  { id:'TeacherRatings', schema:'{schema}', domain:'teacher-domain', x:1080, y:1240, badge:'M-02',
+    cols:[
+      {key:'PK',name:'RatingId',   type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'TeacherId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'StudentId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'GroupId',    type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'Stars',      type:'TINYINT',          req:true},
+      {key:'',  name:'Comment',    type:'NVARCHAR(500)'},
+      {key:'',  name:'PeriodMonth',type:'TINYINT',          req:true},
+      {key:'',  name:'PeriodYear', type:'SMALLINT',         req:true},
+    ]},
+
+  // ── M-03 SCHEDULE ─────────────────────────────────────────
+  { id:'Rooms', schema:'{schema}', domain:'schedule-domain', x:60, y:1800, badge:'M-03',
+    cols:[
+      {key:'PK',name:'RoomId',    type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'BranchId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'Name',      type:'NVARCHAR(100)',    req:true},
+      {key:'',  name:'Capacity',  type:'SMALLINT',         req:true},
+      {key:'',  name:'Facilities',type:'NVARCHAR(200)'},
+      {key:'',  name:'IsActive',  type:'BIT',              req:true},
+    ]},
+
+  { id:'Groups', schema:'{schema}', domain:'schedule-domain', x:320, y:1800, badge:'M-03 Core',
+    cols:[
+      {key:'PK',name:'GroupId',      type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'BranchId',     type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'TeacherId',    type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'SubjectId',    type:'INT',              req:true},
+      {key:'FK',name:'StageId',      type:'INT',              req:true},
+      {key:'FK',name:'RoomId',       type:'UNIQUEIDENTIFIER'},
+      {key:'',  name:'Name',         type:'NVARCHAR(150)',    req:true},
+      {key:'',  name:'PricePerMonth',type:'DECIMAL(10,2)',    req:true},
+      {key:'',  name:'MaxStudents',  type:'SMALLINT',         req:true},
+      {key:'',  name:'IsActive',     type:'BIT',              req:true},
+      {key:'',  name:'IsArchived',   type:'BIT',              req:true},
+    ]},
+
+  { id:'GroupSchedule', schema:'{schema}', domain:'schedule-domain', x:620, y:1800, badge:'M-03',
+    cols:[
+      {key:'PK',name:'ScheduleId', type:'INT IDENTITY',     req:true},
+      {key:'FK',name:'GroupId',    type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'DayOfWeek',  type:'TINYINT',          req:true},
+      {key:'',  name:'StartTime',  type:'TIME',             req:true},
+      {key:'',  name:'EndTime',    type:'TIME',             req:true},
+    ]},
+
+  { id:'StudentGroups', schema:'{schema}', domain:'schedule-domain', x:320, y:2060, badge:'M-03',
+    cols:[
+      {key:'PK',name:'StudentGroupId', type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'StudentId',      type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'GroupId',        type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'JoinedAt',       type:'DATE',             req:true},
+      {key:'',  name:'LeftAt',         type:'DATE'},
+      {key:'',  name:'Status',         type:'NVARCHAR(10)',     req:true},
+      {key:'',  name:'RowVersion',     type:'ROWVERSION',       req:true},
+    ]},
+
+  { id:'Waitlist', schema:'{schema}', domain:'schedule-domain', x:620, y:2060, badge:'M-03',
+    cols:[
+      {key:'PK',name:'WaitlistId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'GroupId',     type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'StudentId',   type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'RequestedAt', type:'DATETIME2',        req:true},
+      {key:'',  name:'Priority',    type:'SMALLINT',         req:true},
+      {key:'',  name:'Status',      type:'NVARCHAR(10)',     req:true},
+    ]},
+
+  // ── M-04 FINANCE ──────────────────────────────────────────
+  { id:'FeeTypes', schema:'{schema}', domain:'finance-domain', x:900, y:1800, badge:'M-04',
+    cols:[
+      {key:'PK',name:'FeeTypeId',   type:'INT IDENTITY', req:true},
+      {key:'',  name:'Name',        type:'NVARCHAR(100)',req:true},
+      {key:'',  name:'IsRecurring', type:'BIT',          req:true},
+    ]},
+
+  { id:'StudentFees', schema:'{schema}', domain:'finance-domain', x:1080, y:1800, badge:'M-04',
+    cols:[
+      {key:'PK',name:'FeeId',     type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'StudentId', type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'GroupId',   type:'UNIQUEIDENTIFIER'},
+      {key:'FK',name:'FeeTypeId', type:'INT',              req:true},
+      {key:'',  name:'Amount',    type:'DECIMAL(10,2)',    req:true},
+      {key:'',  name:'Discount',  type:'DECIMAL(10,2)',    req:true},
+      {key:'',  name:'NetAmount', type:'DECIMAL(10,2)',    req:true},
+      {key:'',  name:'DueDate',   type:'DATE',             req:true},
+      {key:'',  name:'Status',    type:'NVARCHAR(10)',     req:true},
+      {key:'',  name:'CreatedAt', type:'DATETIME2',        req:true},
+      {key:'',  name:'RowVersion',type:'ROWVERSION',       req:true},
+    ]},
+
+  { id:'Payments', schema:'{schema}', domain:'finance-domain', x:1340, y:1800, badge:'M-04',
+    cols:[
+      {key:'PK',name:'PaymentId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'FeeId',      type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'StudentId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'Amount',     type:'DECIMAL(10,2)',    req:true},
+      {key:'',  name:'Method',     type:'NVARCHAR(20)',     req:true},
+      {key:'',  name:'GatewayRef', type:'NVARCHAR(200)'},
+      {key:'',  name:'ReceiptNo',  type:'NVARCHAR(50)'},
+      {key:'',  name:'PaidAt',     type:'DATETIME2',        req:true},
+      {key:'FK',name:'CreatedBy',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'RowVersion', type:'ROWVERSION',       req:true},
+    ]},
+
+  { id:'ExpenseCategories', schema:'{schema}', domain:'finance-domain', x:1340, y:2060, badge:'M-04 New',
+    cols:[
+      {key:'PK',name:'CategoryId',  type:'INT IDENTITY', req:true},
+      {key:'UK',name:'Code',        type:'NVARCHAR(30)', req:true},
+      {key:'',  name:'DisplayName', type:'NVARCHAR(80)', req:true},
+    ]},
+
+  { id:'Expenses', schema:'{schema}', domain:'finance-domain', x:1080, y:2060, badge:'M-04',
+    cols:[
+      {key:'PK',name:'ExpenseId',   type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'BranchId',    type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'CategoryId',  type:'INT',              req:true},
+      {key:'',  name:'Amount',      type:'DECIMAL(10,2)',    req:true},
+      {key:'',  name:'Description', type:'NVARCHAR(300)'},
+      {key:'',  name:'ExpenseDate', type:'DATE',             req:true},
+    ]},
+
+  // ── M-05 ACADEMIC ─────────────────────────────────────────
+  { id:'Assessments', schema:'{schema}', domain:'academic-domain', x:60, y:2320, badge:'M-05',
+    cols:[
+      {key:'PK',name:'AssessmentId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'GroupId',       type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'Title',         type:'NVARCHAR(200)',    req:true},
+      {key:'',  name:'Type',          type:'NVARCHAR(15)',     req:true},
+      {key:'',  name:'MaxScore',      type:'DECIMAL(6,2)',     req:true},
+      {key:'',  name:'AssessmentDate',type:'DATE',             req:true},
+    ]},
+
+  { id:'AssessmentResults', schema:'{schema}', domain:'academic-domain', x:330, y:2320, badge:'M-05',
+    cols:[
+      {key:'PK',name:'ResultId',     type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'AssessmentId', type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'StudentId',    type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'Score',        type:'DECIMAL(6,2)'},
+      {key:'',  name:'Grade',        type:'NVARCHAR(5)'},
+      {key:'',  name:'Notes',        type:'NVARCHAR(300)'},
+    ]},
+
+  { id:'QuestionBank', schema:'{schema}', domain:'academic-domain', x:600, y:2320, badge:'M-05',
+    cols:[
+      {key:'PK',name:'QuestionId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'SubjectId',   type:'INT',              req:true},
+      {key:'',  name:'QuestionText',type:'NVARCHAR(MAX)',    req:true},
+      {key:'',  name:'Type',        type:'NVARCHAR(15)',     req:true},
+      {key:'',  name:'Options',     type:'NVARCHAR(MAX)'},
+      {key:'',  name:'CorrectAnswer',type:'NVARCHAR(MAX)',   req:true},
+      {key:'',  name:'Difficulty',  type:'TINYINT',          req:true},
+      {key:'',  name:'TimesUsed',   type:'INT',              req:true},
+      {key:'',  name:'CorrectRate', type:'DECIMAL(5,2)'},
+    ]},
+
+  { id:'ExamSessions', schema:'{schema}', domain:'academic-domain', x:900, y:2320, badge:'M-05',
+    cols:[
+      {key:'PK',name:'ExamId',      type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'GroupId',     type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'Title',       type:'NVARCHAR(200)',    req:true},
+      {key:'',  name:'StartAt',     type:'DATETIME2',        req:true},
+      {key:'',  name:'EndAt',       type:'DATETIME2',        req:true},
+      {key:'',  name:'DurationMin', type:'SMALLINT',         req:true},
+      {key:'',  name:'Status',      type:'NVARCHAR(10)',     req:true},
+    ]},
+
+  // ── M-06 HR ───────────────────────────────────────────────
+  { id:'Employees', schema:'{schema}', domain:'hr-domain', x:60, y:2640, badge:'M-06',
+    cols:[
+      {key:'PK',name:'EmployeeId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'UserId',      type:'UNIQUEIDENTIFIER'},
+      {key:'FK',name:'BranchId',    type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'FullName',    type:'NVARCHAR(200)',    req:true},
+      {key:'',  name:'JobTitle',    type:'NVARCHAR(100)'},
+      {key:'',  name:'ContractType',type:'NVARCHAR(20)'},
+      {key:'',  name:'JoinedAt',    type:'DATE',             req:true},
+      {key:'',  name:'Status',      type:'NVARCHAR(15)',     req:true},
+      {key:'',  name:'CreatedAt',   type:'DATETIME2',        req:true},
+      {key:'',  name:'DeletedAt',   type:'DATETIME2'},
+    ]},
+
+  { id:'LeaveTypes', schema:'{schema}', domain:'hr-domain', x:60, y:2900, badge:'M-06 New',
+    cols:[
+      {key:'PK',name:'LeaveTypeId', type:'INT IDENTITY', req:true},
+      {key:'UK',name:'Code',        type:'NVARCHAR(30)', req:true},
+      {key:'',  name:'DisplayName', type:'NVARCHAR(80)', req:true},
+      {key:'',  name:'MaxDaysYear', type:'TINYINT'},
+    ]},
+
+  { id:'LeaveRequests', schema:'{schema}', domain:'hr-domain', x:330, y:2640, badge:'M-06',
+    cols:[
+      {key:'PK',name:'RequestId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'EmployeeId', type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'LeaveTypeId',type:'INT',              req:true},
+      {key:'',  name:'StartDate',  type:'DATE',             req:true},
+      {key:'',  name:'EndDate',    type:'DATE',             req:true},
+      {key:'',  name:'Days',       type:'TINYINT',          req:true},
+      {key:'',  name:'Status',     type:'NVARCHAR(10)',     req:true},
+    ]},
+
+  // ── M-07 COMMS ────────────────────────────────────────────
+  { id:'NotificationLogs', schema:'{schema}', domain:'comms-domain', x:620, y:2640, badge:'M-07',
+    cols:[
+      {key:'PK',name:'LogId',      type:'BIGINT IDENTITY', req:true},
+      {key:'FK',name:'TemplateId', type:'INT'},
+      {key:'',  name:'Recipient',  type:'NVARCHAR(100)',   req:true},
+      {key:'',  name:'Channel',    type:'NVARCHAR(15)',    req:true},
+      {key:'',  name:'Body',       type:'NVARCHAR(1000)',  req:true},
+      {key:'',  name:'Status',     type:'NVARCHAR(10)',    req:true},
+      {key:'',  name:'SentAt',     type:'DATETIME2',       req:true},
+    ]},
+
+  { id:'Announcements', schema:'{schema}', domain:'comms-domain', x:880, y:2640, badge:'M-07',
+    cols:[
+      {key:'PK',name:'AnnouncementId', type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'Title',          type:'NVARCHAR(200)',    req:true},
+      {key:'',  name:'Body',           type:'NVARCHAR(MAX)',    req:true},
+      {key:'',  name:'TargetType',     type:'NVARCHAR(15)',     req:true},
+      {key:'',  name:'TargetId',       type:'UNIQUEIDENTIFIER'},
+      {key:'',  name:'ScheduledAt',    type:'DATETIME2'},
+      {key:'',  name:'PublishedAt',    type:'DATETIME2'},
+    ]},
+
+  // ── M-08 GROWTH ───────────────────────────────────────────
+  { id:'LeadSources', schema:'{schema}', domain:'growth-domain', x:60, y:3180, badge:'M-08 New',
+    cols:[
+      {key:'PK',name:'SourceId',    type:'INT IDENTITY', req:true},
+      {key:'UK',name:'Code',        type:'NVARCHAR(30)', req:true},
+      {key:'',  name:'DisplayName', type:'NVARCHAR(80)', req:true},
+    ]},
+
+  { id:'CRMLeads', schema:'{schema}', domain:'growth-domain', x:60, y:2940, badge:'M-08',
+    cols:[
+      {key:'PK',name:'LeadId',    type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'StudentId', type:'UNIQUEIDENTIFIER'},
+      {key:'FK',name:'SourceId',  type:'INT'},
+      {key:'',  name:'FullName',  type:'NVARCHAR(200)',    req:true},
+      {key:'',  name:'Phone',     type:'NVARCHAR(30)'},
+      {key:'',  name:'Stage',     type:'NVARCHAR(20)',     req:true},
+      {key:'',  name:'CreatedAt', type:'DATETIME2',        req:true},
+    ]},
+
+  { id:'ReferralCodes', schema:'{schema}', domain:'growth-domain', x:330, y:2940, badge:'M-08',
+    cols:[
+      {key:'PK',name:'CodeId',       type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'StudentId',    type:'UNIQUEIDENTIFIER', req:true},
+      {key:'UK',name:'Code',         type:'NVARCHAR(20)',     req:true},
+      {key:'',  name:'DiscountType', type:'NVARCHAR(10)',     req:true},
+      {key:'',  name:'DiscountValue',type:'DECIMAL(6,2)',     req:true},
+      {key:'',  name:'TimesUsed',    type:'INT',              req:true},
+      {key:'',  name:'IsActive',     type:'BIT',              req:true},
+    ]},
+
+  { id:'ChurnScores', schema:'{schema}', domain:'growth-domain', x:600, y:2940, badge:'M-08',
+    cols:[
+      {key:'PK',name:'ScoreId',   type:'BIGINT IDENTITY',  req:true},
+      {key:'FK',name:'StudentId', type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'Score',     type:'DECIMAL(5,2)',     req:true},
+      {key:'',  name:'Signals',   type:'NVARCHAR(MAX)'},
+      {key:'',  name:'ComputedAt',type:'DATETIME2',        req:true},
+    ]},
+
+  // ── M-09 LMS ──────────────────────────────────────────────
+  { id:'Courses', schema:'{schema}', domain:'lms-domain', x:900, y:2940, badge:'M-09',
+    cols:[
+      {key:'PK',name:'CourseId',    type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'TeacherId',   type:'UNIQUEIDENTIFIER'},
+      {key:'FK',name:'SubjectId',   type:'INT'},
+      {key:'',  name:'Title',       type:'NVARCHAR(200)',    req:true},
+      {key:'',  name:'IsPublished', type:'BIT',              req:true},
+    ]},
+
+  { id:'Units', schema:'{schema}', domain:'lms-domain', x:1140, y:2700, badge:'M-09 New',
+    cols:[
+      {key:'PK',name:'UnitId',    type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'CourseId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'Title',     type:'NVARCHAR(200)',    req:true},
+      {key:'',  name:'SortOrder', type:'SMALLINT',         req:true},
+    ]},
+
+  { id:'Lessons', schema:'{schema}', domain:'lms-domain', x:1140, y:2940, badge:'M-09',
+    cols:[
+      {key:'PK',name:'LessonId',   type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'UnitId',     type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'Title',      type:'NVARCHAR(200)',    req:true},
+      {key:'',  name:'Type',       type:'NVARCHAR(15)',     req:true},
+      {key:'',  name:'ContentUrl', type:'NVARCHAR(500)'},
+      {key:'',  name:'PublishAt',  type:'DATETIME2'},
+      {key:'',  name:'ExpireAt',   type:'DATETIME2'},
+    ]},
+
+  { id:'Assignments', schema:'{schema}', domain:'lms-domain', x:1620, y:2940, badge:'M-09 New',
+    cols:[
+      {key:'PK',name:'AssignmentId', type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'CourseId',     type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'Title',        type:'NVARCHAR(200)',    req:true},
+      {key:'',  name:'Description',  type:'NVARCHAR(MAX)'},
+      {key:'',  name:'DueDate',      type:'DATETIME2',        req:true},
+    ]},
+
+  { id:'AssignmentSubmissions', schema:'{schema}', domain:'lms-domain', x:1620, y:3180, badge:'M-09 New',
+    cols:[
+      {key:'PK',name:'SubmissionId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'AssignmentId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'StudentId',     type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'FileId',        type:'UNIQUEIDENTIFIER'},
+      {key:'',  name:'Grade',         type:'DECIMAL(6,2)'},
+      {key:'',  name:'SubmittedAt',   type:'DATETIME2',        req:true},
+    ]},
+
+  { id:'StudentProgress', schema:'{schema}', domain:'lms-domain', x:1380, y:2940, badge:'M-09',
+    cols:[
+      {key:'PK',name:'ProgressId', type:'BIGINT IDENTITY',  req:true},
+      {key:'FK',name:'StudentId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'LessonId',   type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'IsCompleted',type:'BIT',              req:true},
+      {key:'',  name:'LastViewAt', type:'DATETIME2',        req:true},
+    ]},
+
+  // ── M-10 PARENTS (New) ────────────────────────────────────
+  { id:'Parents', schema:'{schema}', domain:'parent-domain', x:60, y:3440, badge:'M-10 New',
+    cols:[
+      {key:'PK',name:'ParentId',   type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'UserId',     type:'UNIQUEIDENTIFIER'},
+      {key:'',  name:'FullName',   type:'NVARCHAR(200)',    req:true},
+      {key:'UK',name:'Phone',      type:'NVARCHAR(30)',     req:true},
+      {key:'',  name:'Email',      type:'NVARCHAR(200)'},
+      {key:'',  name:'NationalId', type:'NVARCHAR(20)'},
+      {key:'',  name:'Occupation', type:'NVARCHAR(100)'},
+      {key:'',  name:'Address',    type:'NVARCHAR(300)'},
+      {key:'',  name:'CreatedAt',  type:'DATETIME2',        req:true},
+    ]},
+
+  { id:'StudentParents', schema:'{schema}', domain:'parent-domain', x:330, y:3440, badge:'Junction',
+    cols:[
+      {key:'FK',name:'StudentId',        type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'ParentId',         type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'Relationship',     type:'NVARCHAR(20)',     req:true},
+      {key:'',  name:'IsPrimaryContact', type:'BIT',              req:true},
+    ]},
+
+  // ── M-13 COMMUNICATION (Expanded) ──────────────────────────
+  { id:'Notifications', schema:'{schema}', domain:'comms-domain', x:620, y:3440, badge:'M-07 New',
+    cols:[
+      {key:'PK',name:'NotificationId', type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'Title',          type:'NVARCHAR(200)',    req:true},
+      {key:'',  name:'Body',           type:'NVARCHAR(MAX)',    req:true},
+      {key:'',  name:'Type',           type:'NVARCHAR(30)',     req:true},
+      {key:'FK',name:'CreatedBy',      type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'CreatedAt',      type:'DATETIME2',        req:true},
+    ]},
+
+  { id:'NotificationRecipients', schema:'{schema}', domain:'comms-domain', x:880, y:3440, badge:'Junction',
+    cols:[
+      {key:'FK',name:'NotificationId', type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'UserId',         type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'ReadAt',         type:'DATETIME2'},
+    ]},
+
+  { id:'NotificationTemplates', schema:'{schema}', domain:'comms-domain', x:1120, y:3440, badge:'M-07 New',
+    cols:[
+      {key:'PK',name:'TemplateId', type:'INT IDENTITY', req:true},
+      {key:'UK',name:'Code',       type:'NVARCHAR(50)', req:true},
+      {key:'',  name:'Channel',    type:'NVARCHAR(15)', req:true},
+      {key:'',  name:'Subject',    type:'NVARCHAR(200)'},
+      {key:'',  name:'Body',       type:'NVARCHAR(MAX)',req:true},
+    ]},
+
+  // ── M-11 STORAGE (New) ─────────────────────────────────────
+  { id:'Files', schema:'{schema}', domain:'storage-domain', x:1380, y:3440, badge:'M-11 New',
+    cols:[
+      {key:'PK',name:'FileId',          type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'OriginalName',    type:'NVARCHAR(300)',    req:true},
+      {key:'',  name:'StorageProvider', type:'NVARCHAR(20)',     req:true},
+      {key:'',  name:'Path',            type:'NVARCHAR(500)',    req:true},
+      {key:'',  name:'MimeType',        type:'NVARCHAR(100)',    req:true},
+      {key:'',  name:'SizeBytes',       type:'BIGINT',           req:true},
+      {key:'FK',name:'UploadedBy',      type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'UploadedAt',      type:'DATETIME2',        req:true},
+    ]},
+
+  { id:'EntityFiles', schema:'{schema}', domain:'storage-domain', x:1620, y:3440, badge:'Junction',
+    cols:[
+      {key:'',  name:'EntityType', type:'NVARCHAR(40)',     req:true},
+      {key:'',  name:'EntityId',   type:'UNIQUEIDENTIFIER', req:true},
+      {key:'FK',name:'FileId',     type:'UNIQUEIDENTIFIER', req:true},
+    ]},
+
+  // ── M-13 CONFIGURATION (New) ───────────────────────────────
+  { id:'TenantSettings', schema:'platform', domain:'config-domain', x:900, y:620, badge:'M-13 New',
+    cols:[
+      {key:'PK',name:'SettingId', type:'BIGINT IDENTITY',  req:true},
+      {key:'FK',name:'TenantId',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'UK',name:'Key',       type:'NVARCHAR(100)',    req:true},
+      {key:'',  name:'Value',     type:'NVARCHAR(MAX)',    req:true},
+      {key:'',  name:'ValueType', type:'NVARCHAR(15)',     req:true},
+    ]},
+
+  // ── M-14 NOTES (New) ────────────────────────────────────────
+  { id:'Notes', schema:'{schema}', domain:'notes-domain', x:1860, y:3440, badge:'M-14 New',
+    cols:[
+      {key:'PK',name:'NoteId',     type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'EntityType', type:'NVARCHAR(40)',     req:true},
+      {key:'',  name:'EntityId',   type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'Text',       type:'NVARCHAR(MAX)',    req:true},
+      {key:'FK',name:'CreatedBy',  type:'UNIQUEIDENTIFIER', req:true},
+      {key:'',  name:'CreatedAt',  type:'DATETIME2',        req:true},
+    ]},
+];
+
+// ═══════════════════════════════════════════════════════════
+// RELATIONSHIPS
+// ═══════════════════════════════════════════════════════════
+const RELS = [
+  // Platform
+  {from:'TenantPlans',   to:'Tenants',   type:'pk-fk'},
+  {from:'TenantPlans',   to:'Plans',     type:'pk-fk'},
+  {from:'TenantBilling', to:'Tenants',   type:'pk-fk'},
+  {from:'TenantBilling', to:'Plans',     type:'pk-fk'},
+  {from:'PlanFeatures',  to:'Plans',     type:'pk-fk'},
+  {from:'PlanFeatures',  to:'Features',  type:'pk-fk'},
+  {from:'TenantCRMLeads',to:'Tenants',   type:'pk-fk'},
+  {from:'PlatformAuditLog',to:'Tenants', type:'pk-fk'},
+  // Security
+  {from:'UserRoles',      to:'Users',      type:'pk-fk'},
+  {from:'UserRoles',      to:'Roles',      type:'pk-fk'},
+  {from:'RolePermissions',to:'Roles',      type:'pk-fk'},
+  {from:'RolePermissions',to:'Permissions',type:'pk-fk'},
+  {from:'RefreshTokens',  to:'Users',      type:'pk-fk'},
+  {from:'AuditLog',       to:'Users',      type:'pk-fk'},
+  {from:'LoginHistory',   to:'Users',      type:'pk-fk'},
+  {from:'TenantSettings', to:'Tenants',    type:'pk-fk'},
+  // Students
+  {from:'AcademicYears',  to:'AcademicStages', type:'pk-fk'},
+  {from:'Students',       to:'Branches',       type:'pk-fk'},
+  {from:'Students',       to:'AcademicStages', type:'pk-fk'},
+  {from:'Students',       to:'AcademicYears',  type:'pk-fk'},
+  {from:'AttendanceLogs', to:'Students',       type:'pk-fk'},
+  {from:'AttendanceLogs', to:'Groups',         type:'pk-fk'},
+  // Teachers
+  {from:'Teachers',           to:'Users',    type:'pk-fk'},
+  {from:'TeacherSalaryConfig',to:'Teachers', type:'pk-fk'},
+  {from:'SalaryPayments',     to:'Teachers', type:'pk-fk'},
+  {from:'TeacherRatings',     to:'Teachers', type:'pk-fk'},
+  {from:'TeacherRatings',     to:'Students', type:'pk-fk'},
+  // Schedule
+  {from:'Groups',       to:'Branches',  type:'pk-fk'},
+  {from:'Groups',       to:'Teachers',  type:'pk-fk'},
+  {from:'Groups',       to:'Subjects',  type:'pk-fk'},
+  {from:'Groups',       to:'Rooms',     type:'pk-fk'},
+  {from:'Rooms',        to:'Branches',  type:'pk-fk'},
+  {from:'GroupSchedule',to:'Groups',    type:'pk-fk'},
+  {from:'StudentGroups',to:'Students',  type:'pk-fk'},
+  {from:'StudentGroups',to:'Groups',    type:'pk-fk'},
+  {from:'Waitlist',     to:'Groups',    type:'pk-fk'},
+  {from:'Waitlist',     to:'Students',  type:'pk-fk'},
+  // Finance
+  {from:'StudentFees', to:'Students',  type:'pk-fk'},
+  {from:'StudentFees', to:'FeeTypes',  type:'pk-fk'},
+  {from:'StudentFees', to:'Groups',    type:'pk-fk'},
+  {from:'Payments',    to:'StudentFees',type:'pk-fk'},
+  {from:'Payments',    to:'Students',  type:'pk-fk'},
+  {from:'Expenses',    to:'Branches',  type:'pk-fk'},
+  // Academic
+  {from:'Assessments',       to:'Groups',      type:'pk-fk'},
+  {from:'AssessmentResults', to:'Assessments', type:'pk-fk'},
+  {from:'AssessmentResults', to:'Students',    type:'pk-fk'},
+  {from:'QuestionBank',      to:'Subjects',    type:'pk-fk'},
+  {from:'ExamSessions',      to:'Groups',      type:'pk-fk'},
+  // Growth
+  {from:'CRMLeads',    to:'Students',     type:'pk-fk'},
+  {from:'ReferralCodes',to:'Students',    type:'pk-fk'},
+  {from:'ChurnScores', to:'Students',     type:'pk-fk'},
+  // LMS
+  {from:'StudentProgress',to:'Students', type:'pk-fk'},
+  {from:'StudentProgress',to:'Lessons',  type:'pk-fk'},
+  {from:'Courses',        to:'Teachers', type:'pk-fk'},
+  {from:'Courses',        to:'Subjects', type:'pk-fk'},
+  {from:'Units',          to:'Courses',  type:'pk-fk'},
+  {from:'Lessons',        to:'Units',    type:'pk-fk'},
+  {from:'Assignments',       to:'Courses',    type:'pk-fk'},
+  {from:'AssignmentSubmissions', to:'Assignments', type:'pk-fk'},
+  {from:'AssignmentSubmissions', to:'Students',    type:'pk-fk'},
+  {from:'AssignmentSubmissions', to:'Files',        type:'pk-fk'},
+  // HR fixes
+  {from:'Employees',      to:'Users',      type:'pk-fk'},
+  {from:'Branches',       to:'Employees',  type:'idx'},
+  {from:'Subjects',       to:'AcademicStages', type:'idx'},
+  {from:'LeaveRequests',  to:'LeaveTypes', type:'pk-fk'},
+  // Finance fixes
+  {from:'Expenses',       to:'ExpenseCategories', type:'pk-fk'},
+  // Growth fixes
+  {from:'CRMLeads',       to:'LeadSources', type:'pk-fk'},
+  // Parents
+  {from:'Parents',        to:'Users',    type:'pk-fk'},
+  {from:'StudentParents', to:'Students', type:'pk-fk'},
+  {from:'StudentParents', to:'Parents',  type:'pk-fk'},
+  // Notifications
+  {from:'NotificationRecipients', to:'Notifications', type:'pk-fk'},
+  {from:'NotificationRecipients', to:'Users',          type:'pk-fk'},
+  {from:'NotificationLogs',       to:'NotificationTemplates', type:'pk-fk'},
+  // Storage
+  {from:'EntityFiles', to:'Files', type:'pk-fk'},
+];
+
+// ═══════════════════════════════════════════════════════════
+// BUILD DOM
+// ═══════════════════════════════════════════════════════════
+const canvas = document.getElementById('canvas');
+const svg = document.getElementById('svg-overlay');
+const tableEls = {};
+
+function buildTables(){
+  TABLES.forEach(t => {
+    const el = document.createElement('div');
+    el.className = `tbl ${t.domain}`;
+    el.id = 'tbl-' + t.id;
+    el.style.left = t.x + 'px';
+    el.style.top  = t.y + 'px';
+    el.style.zIndex = 10;
+
+    const schemaLabel = t.schema === '{schema}' ? 't_{slug}' : t.schema;
+
+    let html = `<div class="tbl-head">
+      <div>
+        <div class="tbl-schema">${schemaLabel}</div>
+        <div class="tbl-name">${t.id}</div>
+      </div>
+      <div class="tbl-badge">${t.badge}</div>
+    </div><div class="tbl-body">`;
+
+    t.cols.forEach((c, i) => {
+      if(i > 0 && c.key === 'FK' && t.cols[i-1].key !== 'FK') html += `<div class="col-divider"></div>`;
+      html += `<div class="col-row">
+        <span class="col-key ${c.key.toLowerCase()}">${c.key}</span>
+        <span class="col-name">${c.name}</span>
+        <span class="col-type">${c.type}</span>
+        ${c.req ? '<span class="col-req">*</span>' : ''}
+      </div>`;
+    });
+    html += '</div>';
+    el.innerHTML = html;
+
+    el.addEventListener('click', () => highlightRelations(t.id));
+    canvas.appendChild(el);
+    tableEls[t.id] = el;
+  });
+}
+
+function buildRelLines(){
+  svg.innerHTML = '';
+  // We draw lines after layout is known
+  setTimeout(drawLines, 200);
+}
+
+function getCenter(id){
+  const t = TABLES.find(t=>t.id===id);
+  if(!t) return null;
+  const el = tableEls[id];
+  if(!el) return null;
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  return { x: t.x + w/2, y: t.y + h/2, w, h, tx:t.x, ty:t.y };
+}
+
+function drawLines(){
+  svg.innerHTML = '';
+  const W = 8000, H = 8000;
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H);
+
+  RELS.forEach(r => {
+    const a = getCenter(r.from);
+    const b = getCenter(r.to);
+    if(!a || !b) return;
+
+    // Simple curved path
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const cx1 = a.x + dx * 0.4;
+    const cy1 = a.y;
+    const cx2 = b.x - dx * 0.4;
+    const cy2 = b.y;
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('d', `M ${a.x} ${a.y} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${b.x} ${b.y}`);
+    path.setAttribute('class', `rel-line ${r.type}`);
+    path.setAttribute('data-from', r.from);
+    path.setAttribute('data-to', r.to);
+    svg.appendChild(path);
+  });
+}
+
+let highlighted = null;
+function highlightRelations(id){
+  if(highlighted === id){ clearHighlight(); return; }
+  highlighted = id;
+  svg.querySelectorAll('.rel-line').forEach(l => {
+    const active = l.getAttribute('data-from')===id || l.getAttribute('data-to')===id;
+    l.style.opacity = active ? '1' : '0.08';
+    l.style.strokeWidth = active ? '2.5' : '1.5';
+  });
+  Object.values(tableEls).forEach(el => {
+    const tid = el.id.replace('tbl-','');
+    const connected = RELS.some(r=>(r.from===id&&r.to===tid)||(r.to===id&&r.from===tid));
+    el.style.opacity = (tid===id||connected) ? '1' : '0.3';
+  });
+}
+function clearHighlight(){
+  highlighted = null;
+  svg.querySelectorAll('.rel-line').forEach(l => {
+    l.style.opacity = '0.5';
+    l.style.strokeWidth = '1.5';
+  });
+  Object.values(tableEls).forEach(el => el.style.opacity = '1');
+}
+
+// ═══════════════════════════════════════════════════════════
+// PAN & ZOOM
+// ═══════════════════════════════════════════════════════════
+let scale = 0.55, tx = 40, ty = -40;
+let dragging = false, lastX = 0, lastY = 0;
+const wrap = document.getElementById('canvas-wrap');
+
+function applyTransform(){
+  canvas.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  document.getElementById('zoom-level').textContent = Math.round(scale*100)+'%';
+}
+
+wrap.addEventListener('mousedown', e => {
+  dragging = true; lastX = e.clientX; lastY = e.clientY;
+  wrap.classList.add('dragging');
+});
+window.addEventListener('mousemove', e => {
+  if(!dragging) return;
+  tx += e.clientX - lastX;
+  ty += e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  applyTransform();
+});
+window.addEventListener('mouseup', () => { dragging=false; wrap.classList.remove('dragging'); });
+
+wrap.addEventListener('wheel', e => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.9 : 1.1;
+  const rect = wrap.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  tx = mx - (mx - tx) * delta;
+  ty = my - (my - ty) * delta;
+  scale = Math.max(0.15, Math.min(2.5, scale * delta));
+  applyTransform();
+}, {passive:false});
+
+function zoomIn(){ scale = Math.min(2.5, scale*1.2); applyTransform(); }
+function zoomOut(){ scale = Math.max(0.15, scale/1.2); applyTransform(); }
+function resetView(){ scale=0.55; tx=40; ty=-40; applyTransform(); }
+function fitAll(){
+  const ww = wrap.offsetWidth, wh = wrap.offsetHeight;
+  scale = 0.22; tx = 20; ty = 20;
+  applyTransform();
+}
+
+// Touch support
+let lastTouchDist = 0;
+wrap.addEventListener('touchstart', e => {
+  if(e.touches.length===1){ dragging=true; lastX=e.touches[0].clientX; lastY=e.touches[0].clientY; }
+  if(e.touches.length===2){
+    lastTouchDist = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+  }
+}, {passive:true});
+wrap.addEventListener('touchmove', e => {
+  if(e.touches.length===1 && dragging){
+    tx += e.touches[0].clientX - lastX; ty += e.touches[0].clientY - lastY;
+    lastX=e.touches[0].clientX; lastY=e.touches[0].clientY;
+    applyTransform();
+  }
+  if(e.touches.length===2){
+    const d = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+    scale = Math.max(0.15, Math.min(2.5, scale*(d/lastTouchDist)));
+    lastTouchDist = d;
+    applyTransform();
+  }
+}, {passive:true});
+wrap.addEventListener('touchend', ()=>{ dragging=false; });
+
+// ═══════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════
+buildTables();
+buildRelLines();
+applyTransform();
+window.addEventListener('resize', drawLines);
+</script>
+</body>
+</html>

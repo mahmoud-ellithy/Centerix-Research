@@ -27,20 +27,18 @@ public class StudentConfiguration : IEntityTypeConfiguration<Student>
             .IsRequired();
 
         builder.Property(s => s.FullNameEn)
-            .HasMaxLength(200)
-            .IsRequired();
+            .HasMaxLength(200);
 
         builder.Property(s => s.DateOfBirth)
             .HasColumnType("date");
 
         builder.Property(s => s.Gender)
-            .HasConversion<byte>()
-            .HasColumnType("nchar(1)")
-            .IsRequired();
+            .HasConversion<string>()
+            .HasMaxLength(1)
+            .HasColumnType("nchar(1)");
 
         builder.Property(s => s.Phone)
-            .HasMaxLength(30)
-            .IsRequired();
+            .HasMaxLength(30);
 
         builder.Property(s => s.QRCode)
             .HasMaxLength(100)
@@ -48,11 +46,10 @@ public class StudentConfiguration : IEntityTypeConfiguration<Student>
 
         builder.Property(s => s.DiscountType)
             .HasConversion<string>()
-            .HasMaxLength(10)
-            .IsRequired();
+            .HasMaxLength(10);
 
         builder.Property(s => s.DiscountValue)
-            .HasColumnType("decimal(18,2)");
+            .HasColumnType("decimal(10,2)");
 
         builder.Property(s => s.Status)
             .HasConversion<string>()
@@ -60,20 +57,22 @@ public class StudentConfiguration : IEntityTypeConfiguration<Student>
             .IsRequired();
 
         builder.Property(s => s.EnrolledAt)
-            .HasColumnType("date");
+            .HasColumnType("date")
+            .IsRequired();
 
-        // Audit columns — keep native datetimeoffset mapping (matches the rest of the platform).
         builder.Property(s => s.CreatedAtUtc).HasColumnName("CreatedAt");
         builder.Property(s => s.LastModifiedUtc).HasColumnName("ModifiedAt");
         builder.Property(s => s.DeletedAtUtc).HasColumnName("DeletedAt");
 
+        builder.Property(s => s.CreatedBy).HasColumnName("CreatedBy");
+        builder.Property(s => s.LastModifiedBy).HasColumnName("ModifiedBy");
+        builder.Property(s => s.DeletedBy).HasColumnName("DeletedBy");
+
         builder.Property(s => s.RowVersion)
             .IsRowVersion();
 
-        // Global query filter: hide soft-deleted rows automatically.
         builder.HasQueryFilter(s => s.DeletedAtUtc == null);
 
-        // Indexes
         builder.HasIndex(s => s.TenantId);
         builder.HasIndex(s => s.QRCode)
             .IsUnique()

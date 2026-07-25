@@ -8,14 +8,14 @@ using Centerix.Domain.Common.Results;
 public class Branch : SoftDeletableEntity<Guid>
 {
     public string Name { get; private set; } = default!;
-    public string Address { get; private set; } = default!;
-    public string Phone { get; private set; } = default!;
+    public string? Address { get; private set; }
+    public string? Phone { get; private set; }
     public Guid? ManagerId { get; private set; }
     public bool IsActive { get; private set; }
 
     private Branch() { }
 
-    private Branch(Guid id, string name, string address, string phone, Guid? managerId, bool isActive)
+    private Branch(Guid id, string name, string? address, string? phone, Guid? managerId, bool isActive)
         : base(id)
     {
         Name = name;
@@ -28,24 +28,27 @@ public class Branch : SoftDeletableEntity<Guid>
     public static Result<Branch> Create(
         Guid id,
         string name,
-        string address,
-        string phone,
+        string? address = null,
+        string? phone = null,
         Guid? managerId = null,
         bool isActive = true)
     {
         if (string.IsNullOrWhiteSpace(name))
             return BranchErrors.NameRequired;
 
-        if (string.IsNullOrWhiteSpace(address))
-            return BranchErrors.AddressRequired;
-
-        if (string.IsNullOrWhiteSpace(phone) || !Regex.IsMatch(phone.Trim(), @"^\+?\d{7,15}$"))
+        if (!string.IsNullOrWhiteSpace(phone) && !Regex.IsMatch(phone.Trim(), @"^\+?\d{7,15}$"))
             return BranchErrors.InvalidPhone;
 
-        return new Branch(id, name.Trim(), address.Trim(), phone.Trim(), managerId, isActive);
+        return new Branch(
+            id,
+            name.Trim(),
+            string.IsNullOrWhiteSpace(address) ? null : address.Trim(),
+            string.IsNullOrWhiteSpace(phone) ? null : phone.Trim(),
+            managerId,
+            isActive);
     }
 
-    public Result<Updated> Update(string name, string address, string phone, Guid? managerId)
+    public Result<Updated> Update(string name, string? address, string? phone, Guid? managerId)
     {
         if (IsDeleted())
             return BranchErrors.AlreadyDeleted;
@@ -53,15 +56,12 @@ public class Branch : SoftDeletableEntity<Guid>
         if (string.IsNullOrWhiteSpace(name))
             return BranchErrors.NameRequired;
 
-        if (string.IsNullOrWhiteSpace(address))
-            return BranchErrors.AddressRequired;
-
-        if (string.IsNullOrWhiteSpace(phone) || !Regex.IsMatch(phone.Trim(), @"^\+?\d{7,15}$"))
+        if (!string.IsNullOrWhiteSpace(phone) && !Regex.IsMatch(phone.Trim(), @"^\+?\d{7,15}$"))
             return BranchErrors.InvalidPhone;
 
         Name = name.Trim();
-        Address = address.Trim();
-        Phone = phone.Trim();
+        Address = string.IsNullOrWhiteSpace(address) ? null : address.Trim();
+        Phone = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
         ManagerId = managerId;
 
         return Result.Updated;

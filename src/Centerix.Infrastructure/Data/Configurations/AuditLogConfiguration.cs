@@ -30,7 +30,22 @@ public class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
             .HasMaxLength(45);
 
         builder.Property(a => a.TenantId)
+            .HasMaxLength(450)
             .IsRequired();
+
+        builder.Property(a => a.CreatedAtUtc)
+            .HasColumnName("CreatedAt");
+
+        builder.Property(a => a.LastModifiedUtc)
+            .HasColumnName("ModifiedAt");
+
+        builder.Property(a => a.CreatedBy)
+            .HasColumnName("CreatedBy")
+            .HasMaxLength(450);
+
+        builder.Property(a => a.LastModifiedBy)
+            .HasColumnName("ModifiedBy")
+            .HasMaxLength(450);
 
         builder.HasIndex(a => new { a.TenantId, a.PerformedAt });
 

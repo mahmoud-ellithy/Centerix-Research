@@ -7,30 +7,16 @@ using Centerix.Domain.Common.Results;
 using Centerix.Domain.Students.Enums;
 using Centerix.Domain.Students.Students;
 
-/// <summary>
-/// Immutable check-in event. After <see cref="Create"/> the only legitimate mutation is
-/// <see cref="MarkSynced"/> (IsOffline false + SyncedAt stamp) when the row is synced
-/// from a device. Rows are never deleted from the application layer.
-///
-/// <see cref="DeletedAtUtc"/> / <see cref="DeletedBy"/> exist on the schema (for tooling
-/// parity with other AuditableEntity tables) but are only stamped by direct DB maintenance.
-/// </summary>
 public class AttendanceLog : AuditableEntity<long>
 {
     public Guid StudentId { get; private set; }
-
-    /// <summary>
-    /// Reference to a class/group entity (to be added in a future module).
-    /// Stored as a GUID-only column for now; no FK constraint is enforced
-    /// because the Groups aggregate has not been implemented yet.
-    /// </summary>
     public Guid GroupId { get; private set; }
 
     public DateOnly SessionDate { get; private set; }
     public AttendanceStatus Status { get; private set; }
-    public TimeOnly CheckInTime { get; private set; }
+    public TimeOnly? CheckInTime { get; private set; }
     public bool IsOffline { get; private set; }
-    public DateTime SyncedAt { get; private set; }
+    public DateTime? SyncedAt { get; private set; }
 
     [Timestamp]
     public byte[]? RowVersion { get; internal set; }
@@ -45,9 +31,9 @@ public class AttendanceLog : AuditableEntity<long>
         Guid groupId,
         DateOnly sessionDate,
         AttendanceStatus status,
-        TimeOnly checkInTime,
+        TimeOnly? checkInTime,
         bool isOffline,
-        DateTime syncedAt)
+        DateTime? syncedAt)
         : base(id)
     {
         StudentId = studentId;
@@ -64,9 +50,9 @@ public class AttendanceLog : AuditableEntity<long>
         Guid groupId,
         DateOnly sessionDate,
         AttendanceStatus status,
-        TimeOnly checkInTime,
-        bool isOffline,
-        DateTime syncedAt)
+        TimeOnly? checkInTime = null,
+        bool isOffline = false,
+        DateTime? syncedAt = null)
     {
         var error = Validate(studentId, groupId, sessionDate, status);
 
@@ -74,7 +60,7 @@ public class AttendanceLog : AuditableEntity<long>
             return error;
 
         return new AttendanceLog(
-            0, // IDENTITY-populated by SQL Server
+            0,
             studentId,
             groupId,
             sessionDate,
@@ -84,11 +70,6 @@ public class AttendanceLog : AuditableEntity<long>
             syncedAt);
     }
 
-    /// <summary>
-    /// Marks the row as synced from a device. Idempotent — multiple calls are safe
-    /// (only the first transitions IsOffline to false). This is the only legitimate
-    /// mutation after <see cref="Create"/>.
-    /// </summary>
     public void MarkSynced(DateTime syncedAt)
     {
         IsOffline = false;

@@ -32,12 +32,14 @@ public class AcademicStageConfiguration : IEntityTypeConfiguration<AcademicStage
             .HasMaxLength(450)
             .IsRequired();
 
-        // Audit columns — keep native datetimeoffset mapping (matches the rest of the platform).
         builder.Property(s => s.CreatedAtUtc)
             .HasColumnName("CreatedAt");
 
         builder.Property(s => s.LastModifiedUtc)
             .HasColumnName("ModifiedAt");
+
+        builder.Property(s => s.CreatedBy).HasColumnName("CreatedBy");
+        builder.Property(s => s.LastModifiedBy).HasColumnName("ModifiedBy");
 
         builder.HasIndex(s => new { s.TenantId, s.Code })
             .IsUnique()

@@ -5,7 +5,7 @@ using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Billing;
 using Centerix.Domain.Platform.Subscriptions;
 
-public class Plan : AuditableEntity<int>
+public class Plan : GlobalAuditableEntity<int>
 {
     public string Code { get; private set; } = default!;
     public string DisplayName { get; private set; } = default!;

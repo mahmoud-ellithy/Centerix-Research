@@ -315,7 +315,7 @@ public class PlatformService(
     {
         var billings = await _dbContext.TenantBillings
             .Include(tb => tb.Plan)
-            .OrderByDescending(tb => tb.CreatedAt)
+            .OrderByDescending(tb => tb.CreatedAtUtc)
             .ProjectToType<TenantBillingDto>()
             .ToListAsync(cancellationToken);
 
@@ -335,8 +335,7 @@ public class PlatformService(
             billingDto.PlanId,
             billingDto.AmountEGP,
             billingDto.Method,
-            (BillingStatus)billingDto.Status,
-            _timeProvider.GetUtcNow().DateTime);
+            (BillingStatus)billingDto.Status);
 
         if (!billingResult.IsSuccess)
             return billingResult.Errors!;
@@ -357,7 +356,7 @@ public class PlatformService(
     public async Task<Result<IEnumerable<TenantCRMLeadDto>>> GetTenantCRMLeadsAsync(CancellationToken cancellationToken)
     {
         var leads = await _dbContext.TenantCRMLeads
-            .OrderByDescending(tc => tc.CreatedAt)
+            .OrderByDescending(tc => tc.CreatedAtUtc)
             .ProjectToType<TenantCRMLeadDto>()
             .ToListAsync(cancellationToken);
 
@@ -386,8 +385,7 @@ public class PlatformService(
             leadDto.Phone,
             leadDto.Source,
             stage,
-            leadDto.AssignedTo,
-            _timeProvider.GetUtcNow().DateTime);
+            leadDto.AssignedTo);
 
         if (!leadResult.IsSuccess)
             return leadResult.Errors!;

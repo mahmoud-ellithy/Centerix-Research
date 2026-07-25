@@ -31,12 +31,14 @@ public class AcademicYearConfiguration : IEntityTypeConfiguration<AcademicYear>
             .HasMaxLength(450)
             .IsRequired();
 
-        // Audit columns — keep native datetimeoffset mapping (matches the rest of the platform).
         builder.Property(y => y.CreatedAtUtc)
             .HasColumnName("CreatedAt");
 
         builder.Property(y => y.LastModifiedUtc)
             .HasColumnName("ModifiedAt");
+
+        builder.Property(y => y.CreatedBy).HasColumnName("CreatedBy");
+        builder.Property(y => y.LastModifiedBy).HasColumnName("ModifiedBy");
 
         builder.HasOne(y => y.Stage)
             .WithMany(s => s.AcademicYears)
