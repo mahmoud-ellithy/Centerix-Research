@@ -29,6 +29,7 @@
   "TenantPlan.AlreadyActive": "This plan subscription is already active",
   "TenantPlan.NotActive": "This plan subscription is not active",
   "TenantPlan.CannotCancelExpired": "Cannot cancel an expired subscription",
+  "TenantPlan.CannotRenewCancelled": "Cannot renew a cancelled subscription",
   "TenantPlan.Status_Invalid": "Invalid subscription status",
   "PlanFeature.PlanId_Invalid": "Plan ID must be greater than zero",
   "PlanFeature.FeatureId_Invalid": "Feature ID must be greater than zero",
@@ -63,5 +64,19 @@
   "Auth:InvalidCredentials": "Invalid email or password.",
   "Auth:AccountLocked": "Account is locked due to too many failed login attempts.",
   "Auth:AccountLockedDueToFailedAttempts": "Account has been locked due to too many failed login attempts. Please try again later.",
-  "Auth:InvalidRefreshToken": "Refresh token is invalid or has expired."
+  "Auth:InvalidRefreshToken": "Refresh token is invalid or has expired.",
+  "RefreshToken.UserId_Required": "User ID is required",
+  "RefreshToken.TokenHash_Required": "Token hash is required",
+  "RefreshToken.Expiry_InPast": "Expiry must be in the future",
+  "RefreshToken.NotFound": "Refresh token was not found or is invalid",
+  "RefreshToken.Expired": "Refresh token has expired",
+  "RefreshToken.Revoked": "Refresh token has been revoked",
+  "RefreshToken.AlreadyRevoked": "Refresh token is already revoked",
+  "AuditLog.Action_Required": "Audit action is required",
+  "Permission.Module_Required": "Permission module is required",
+  "Permission.Action_Required": "Permission action is required",
+  "Permission.Code_Required": "Permission code is required",
+  "Permission.Code_FormatInvalid": "Permission code must follow 'Module.Action' format",
+  "RolePermission.RoleId_Required": "Role ID is required",
+  "RolePermission.PermissionId_Invalid": "Permission ID must be greater than zero"
 }

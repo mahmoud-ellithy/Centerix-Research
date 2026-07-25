@@ -29,6 +29,7 @@
   "TenantPlan.AlreadyActive": "هذا الاشتراك مفعل بالفعل",
   "TenantPlan.NotActive": "هذا الاشتراك غير نشط",
   "TenantPlan.CannotCancelExpired": "لا يمكن إلغاء اشتراك منتهي الصلاحية",
+  "TenantPlan.CannotRenewCancelled": "لا يمكن تجديد اشتراك ملغي",
   "TenantPlan.Status_Invalid": "حالة الاشتراك غير صالحة",
   "PlanFeature.PlanId_Invalid": "معرف الخطة يجب أن يكون أكبر من صفر",
   "PlanFeature.FeatureId_Invalid": "معرف الميزة يجب أن يكون أكبر من صفر",
@@ -63,5 +64,19 @@
   "Auth:InvalidCredentials": "البريد الإلكتروني أو كلمة المرور غير صحيحة",
   "Auth:AccountLocked": "الحساب مقفل بسبب محاولات تسجيل الدخول الفاشلة المتكررة.",
   "Auth:AccountLockedDueToFailedAttempts": "تم قفل الحساب بسبب محاولات تسجيل الدخول الفاشلة المتكررة. يرجى المحاولة لاحقًا.",
-  "Auth:InvalidRefreshToken": "رمز التحديث غير صالح أو منتهي الصلاحية."
+  "Auth:InvalidRefreshToken": "رمز التحديث غير صالح أو منتهي الصلاحية.",
+  "RefreshToken.UserId_Required": "معرف المستخدم مطلوب",
+  "RefreshToken.TokenHash_Required": "هاش الرمز مطلوب",
+  "RefreshToken.Expiry_InPast": "يجب أن يكون تاريخ الانتهاء في المستقبل",
+  "RefreshToken.NotFound": "رمز التحديث غير موجود أو غير صالح",
+  "RefreshToken.Expired": "انتهت صلاحية رمز التحديث",
+  "RefreshToken.Revoked": "تم إلغاء رمز التحديث",
+  "RefreshToken.AlreadyRevoked": "رمز التحديث ملغى بالفعل",
+  "AuditLog.Action_Required": "إجراء التدقيق مطلوب",
+  "Permission.Module_Required": "وحدة الصلاحية مطلوبة",
+  "Permission.Action_Required": "إجراء الصلاحية مطلوب",
+  "Permission.Code_Required": "رمز الصلاحية مطلوب",
+  "Permission.Code_FormatInvalid": "يجب أن يتبع رمز الصلاحية تنسيق 'Module.Action'",
+  "RolePermission.RoleId_Required": "معرف الدور مطلوب",
+  "RolePermission.PermissionId_Invalid": "يجب أن يكون معرف الصلاحية أكبر من صفر"
 }
