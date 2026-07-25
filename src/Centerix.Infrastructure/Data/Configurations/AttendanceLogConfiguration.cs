@@ -52,12 +52,6 @@ public class AttendanceLogConfiguration : IEntityTypeConfiguration<AttendanceLog
         builder.Property(a => a.CreatedAtUtc).HasColumnName("CreatedAt");
         builder.Property(a => a.LastModifiedUtc).HasColumnName("ModifiedAt");
 
-        // Soft-delete columns are mapped to keep the schema consistent with the rest of the
-        // AuditableEntity-derived tables. In practice attendance rows are append-only and the
-        // values remain NULL; these columns are only stamped under direct DB maintenance.
-        builder.Property(a => a.DeletedAtUtc).HasColumnName("DeletedAt");
-        builder.Property(a => a.DeletedBy).HasColumnName("DeletedBy");
-
         builder.Property(a => a.RowVersion)
             .IsRowVersion();
 

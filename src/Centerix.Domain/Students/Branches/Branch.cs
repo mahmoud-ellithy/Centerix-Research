@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 using Centerix.Domain.Common;
 using Centerix.Domain.Common.Results;
 
-public class Branch : AuditableEntity<Guid>
+public class Branch : SoftDeletableEntity<Guid>
 {
     public string Name { get; private set; } = default!;
     public string Address { get; private set; } = default!;

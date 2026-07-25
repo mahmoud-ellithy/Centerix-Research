@@ -8,7 +8,7 @@ using Centerix.Domain.Students.Branches;
 using Centerix.Domain.Students.Enums;
 using Centerix.Domain.Students.Lookups;
 
-public class Student : AuditableEntity<Guid>
+public class Student : SoftDeletableEntity<Guid>
 {
     public Guid BranchId { get; private set; }
     public int StageId { get; private set; }

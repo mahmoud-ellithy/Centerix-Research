@@ -38,10 +38,6 @@ public class AcademicYearConfiguration : IEntityTypeConfiguration<AcademicYear>
         builder.Property(y => y.LastModifiedUtc)
             .HasColumnName("ModifiedAt");
 
-        // Soft-delete columns are not part of the lookup table spec.
-        builder.Ignore(y => y.DeletedAtUtc);
-        builder.Ignore(y => y.DeletedBy);
-
         builder.HasOne(y => y.Stage)
             .WithMany(s => s.AcademicYears)
             .HasForeignKey(y => y.StageId)

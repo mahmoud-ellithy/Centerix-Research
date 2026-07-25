@@ -40,7 +40,30 @@ public class AuditableEntityInterceptor(TimeProvider dateTime, ICurrentUser curr
 
         foreach (var entry in context.ChangeTracker.Entries())
         {
-            if (entry.Entity is AuditableEntity auditableEntity)
+            if (entry.Entity is SoftDeletableEntity softDeletableEntity)
+            {
+                if (entry.State == EntityState.Added)
+                {
+                    softDeletableEntity.CreatedAtUtc = now;
+                    softDeletableEntity.CreatedBy = user;
+                }
+
+                if (entry.State == EntityState.Added || entry.State == EntityState.Modified || this.HasChangedOwnedEntities(entry))
+                {
+                    softDeletableEntity.LastModifiedUtc = now;
+                    softDeletableEntity.LastModifiedBy = user;
+                }
+
+                // When the entity is being soft-deleted (DeletedAtUtc transitions from null to a value)
+                // EF marks the entry as Modified. Stamp DeletedBy so audit captures the actor.
+                if (entry.State == EntityState.Modified
+                    && softDeletableEntity.DeletedAtUtc.HasValue
+                    && entry.Property(nameof(SoftDeletableEntity.DeletedBy)).IsModified)
+                {
+                    softDeletableEntity.DeletedBy = user;
+                }
+            }
+            else if (entry.Entity is AuditableEntity auditableEntity)
             {
                 if (entry.State == EntityState.Added)
                 {
@@ -52,15 +75,6 @@ public class AuditableEntityInterceptor(TimeProvider dateTime, ICurrentUser curr
                 {
                     auditableEntity.LastModifiedUtc = now;
                     auditableEntity.LastModifiedBy = user;
-                }
-
-                // When the entity is being soft-deleted (DeletedAtUtc transitions from null to a value)
-                // EF marks the entry as Modified. Stamp DeletedBy so audit captures the actor.
-                if (entry.State == EntityState.Modified
-                    && auditableEntity.DeletedAtUtc.HasValue
-                    && entry.Property(nameof(AuditableEntity.DeletedBy)).IsModified)
-                {
-                    auditableEntity.DeletedBy = user;
                 }
             }
         }

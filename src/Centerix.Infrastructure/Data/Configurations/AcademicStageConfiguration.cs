@@ -39,10 +39,6 @@ public class AcademicStageConfiguration : IEntityTypeConfiguration<AcademicStage
         builder.Property(s => s.LastModifiedUtc)
             .HasColumnName("ModifiedAt");
 
-        // Soft-delete columns are not part of the lookup table spec.
-        builder.Ignore(s => s.DeletedAtUtc);
-        builder.Ignore(s => s.DeletedBy);
-
         builder.HasIndex(s => new { s.TenantId, s.Code })
             .IsUnique()
             .HasDatabaseName("UX_AcademicStages_TenantId_Code");
