@@ -7,6 +7,10 @@ using Centerix.Domain.Platform.Features;
 using Centerix.Domain.Platform.Leads;
 using Centerix.Domain.Platform.Plans;
 using Centerix.Domain.Platform.Subscriptions;
+using Centerix.Domain.Students.Attendance;
+using Centerix.Domain.Students.Branches;
+using Centerix.Domain.Students.Lookups;
+using Centerix.Domain.Students.Students;
 using Microsoft.EntityFrameworkCore;
 
 namespace Centerix.Application.Common.Interfaces;
@@ -24,6 +28,13 @@ public interface IAppDbContext
     DbSet<RolePermission> RolePermissions { get; }
     DbSet<AuditLog> AuditLogs { get; }
     DbSet<RefreshToken> RefreshTokens { get; }
+
+    // Education module (M-01)
+    DbSet<Branch> Branches { get; }
+    DbSet<AcademicStage> AcademicStages { get; }
+    DbSet<AcademicYear> AcademicYears { get; }
+    DbSet<Student> Students { get; }
+    DbSet<AttendanceLog> AttendanceLogs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

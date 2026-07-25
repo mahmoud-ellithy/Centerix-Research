@@ -9,6 +9,10 @@ using Centerix.Domain.Platform.Billing;
 using Centerix.Domain.Platform.Leads;
 using Centerix.Domain.Platform.Auditing;
 using Centerix.Domain.Platform.Authorization;
+using Centerix.Domain.Students.Attendance;
+using Centerix.Domain.Students.Branches;
+using Centerix.Domain.Students.Lookups;
+using Centerix.Domain.Students.Students;
 using MediatR;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -44,6 +48,13 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     public DbSet<RolePermission> RolePermissions { get; set; } = default!;
     public DbSet<AuditLog> AuditLogs { get; set; } = default!;
     public DbSet<RefreshToken> RefreshTokens { get; set; } = default!;
+
+    // Education module (M-01)
+    public DbSet<Branch> Branches { get; set; } = default!;
+    public DbSet<AcademicStage> AcademicStages { get; set; } = default!;
+    public DbSet<AcademicYear> AcademicYears { get; set; } = default!;
+    public DbSet<Student> Students { get; set; } = default!;
+    public DbSet<AttendanceLog> AttendanceLogs { get; set; } = default!;
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
