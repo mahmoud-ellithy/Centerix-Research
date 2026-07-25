@@ -52,15 +52,10 @@ public static class Permissions
         public const string Delete = "TenantCRMLeads.Delete";
     }
 
-    public static string[] GetAll() =>
-    [
-        Plans.Create, Plans.Read, Plans.Update, Plans.Delete,
-        Features.Create, Features.Read, Features.Update, Features.Delete,
-        Tenants.Create, Tenants.Read, Tenants.Update, Tenants.Delete,
-        TenantPlans.Create, TenantPlans.Read, TenantPlans.Update, TenantPlans.Delete,
-        TenantBillings.Create, TenantBillings.Read, TenantBillings.Update, TenantBillings.Delete,
-        TenantCRMLeads.Create, TenantCRMLeads.Read, TenantCRMLeads.Update, TenantCRMLeads.Delete,
-    ];
+    /// <summary>
+    /// All permission codes registered in the canonical catalog (see <see cref="PermissionCatalog"/>).
+    /// </summary>
+    public static string[] GetAll() => PermissionCatalog.All.Select(e => e.Code).ToArray();
 
     public static string[] GetPlatformAdminPermissions() => GetAll();
 

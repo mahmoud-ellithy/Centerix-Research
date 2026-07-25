@@ -15,11 +15,16 @@ using Centerix.Domain.Platform.Subscriptions.Enums;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
 
-public class PlatformService(IAppDbContext dbContext, TimeProvider timeProvider, ILocalizer localizer) : IPlatformService
+public class PlatformService(
+    IAppDbContext dbContext,
+    TimeProvider timeProvider,
+    ILocalizer localizer,
+    IAuditWriter auditWriter) : IPlatformService
 {
     private readonly IAppDbContext _dbContext = dbContext;
     private readonly TimeProvider _timeProvider = timeProvider;
     private readonly ILocalizer _localizer = localizer;
+    private readonly IAuditWriter _auditWriter = auditWriter;
 
     public async Task<Result<IEnumerable<PlanDto>>> GetPlansAsync(CancellationToken cancellationToken)
     {
@@ -65,6 +70,14 @@ public class PlatformService(IAppDbContext dbContext, TimeProvider timeProvider,
 
         _dbContext.Plans.Add(planResult.Value);
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _auditWriter.WriteAsync(
+            action: "Plan.Create",
+            entityType: nameof(Plan),
+            entityId: planResult.Value.Id.ToString(),
+            newValue: AuditPayload.Serialize(new { planResult.Value.Code, planResult.Value.DisplayName, planResult.Value.MonthlyPrice, planResult.Value.IsActive }),
+            cancellationToken: cancellationToken);
+
         return Result.Created;
     }
 
@@ -75,6 +88,8 @@ public class PlatformService(IAppDbContext dbContext, TimeProvider timeProvider,
         {
             return Error.NotFound("Plan.NotFound", $"Plan with id '{id}' was not found.");
         }
+
+        var oldValue = AuditPayload.Serialize(new { plan.Code, plan.DisplayName, plan.MonthlyPrice, plan.IsActive });
 
         plan.Update(
             planDto.Code,
@@ -89,6 +104,15 @@ public class PlatformService(IAppDbContext dbContext, TimeProvider timeProvider,
             planDto.IsActive);
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _auditWriter.WriteAsync(
+            action: "Plan.Update",
+            entityType: nameof(Plan),
+            entityId: id.ToString(),
+            oldValue: oldValue,
+            newValue: AuditPayload.Serialize(new { plan.Code, plan.DisplayName, plan.MonthlyPrice, plan.IsActive }),
+            cancellationToken: cancellationToken);
+
         return Result.Updated;
     }
 
@@ -100,8 +124,18 @@ public class PlatformService(IAppDbContext dbContext, TimeProvider timeProvider,
             return Error.NotFound("Plan.NotFound", $"Plan with id '{id}' was not found.");
         }
 
+        var oldValue = AuditPayload.Serialize(new { plan.Code, plan.DisplayName, plan.MonthlyPrice, plan.IsActive });
+
         _dbContext.Plans.Remove(plan);
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _auditWriter.WriteAsync(
+            action: "Plan.Delete",
+            entityType: nameof(Plan),
+            entityId: id.ToString(),
+            oldValue: oldValue,
+            cancellationToken: cancellationToken);
+
         return Result.Deleted;
     }
 
@@ -141,6 +175,14 @@ public class PlatformService(IAppDbContext dbContext, TimeProvider timeProvider,
 
         _dbContext.Features.Add(featureResult.Value);
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _auditWriter.WriteAsync(
+            action: "Feature.Create",
+            entityType: nameof(Feature),
+            entityId: featureResult.Value.Id.ToString(),
+            newValue: AuditPayload.Serialize(new { featureResult.Value.Code, featureResult.Value.Description, featureResult.Value.Module }),
+            cancellationToken: cancellationToken);
+
         return Result.Created;
     }
 
@@ -152,6 +194,8 @@ public class PlatformService(IAppDbContext dbContext, TimeProvider timeProvider,
             return Error.NotFound("Feature.NotFound", $"Feature with id '{id}' was not found.");
         }
 
+        var oldValue = AuditPayload.Serialize(new { feature.Code, feature.Description, feature.Module });
+
         var updateResult = feature.Update(
             featureDto.Code,
             featureDto.Description,
@@ -161,6 +205,15 @@ public class PlatformService(IAppDbContext dbContext, TimeProvider timeProvider,
             return updateResult.Errors!;
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _auditWriter.WriteAsync(
+            action: "Feature.Update",
+            entityType: nameof(Feature),
+            entityId: id.ToString(),
+            oldValue: oldValue,
+            newValue: AuditPayload.Serialize(new { feature.Code, feature.Description, feature.Module }),
+            cancellationToken: cancellationToken);
+
         return Result.Updated;
     }
 
@@ -172,8 +225,18 @@ public class PlatformService(IAppDbContext dbContext, TimeProvider timeProvider,
             return Error.NotFound("Feature.NotFound", $"Feature with id '{id}' was not found.");
         }
 
+        var oldValue = AuditPayload.Serialize(new { feature.Code, feature.Description, feature.Module });
+
         _dbContext.Features.Remove(feature);
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _auditWriter.WriteAsync(
+            action: "Feature.Delete",
+            entityType: nameof(Feature),
+            entityId: id.ToString(),
+            oldValue: oldValue,
+            cancellationToken: cancellationToken);
+
         return Result.Deleted;
     }
 
@@ -207,6 +270,14 @@ public class PlatformService(IAppDbContext dbContext, TimeProvider timeProvider,
 
         _dbContext.TenantPlans.Add(planResult.Value);
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _auditWriter.WriteAsync(
+            action: "TenantPlan.Create",
+            entityType: nameof(TenantPlan),
+            entityId: planResult.Value.Id.ToString(),
+            newValue: AuditPayload.Serialize(new { planResult.Value.PlanId, planResult.Value.StartsAt, planResult.Value.AutoRenew }),
+            cancellationToken: cancellationToken);
+
         return Result.Created;
     }
 
@@ -218,6 +289,8 @@ public class PlatformService(IAppDbContext dbContext, TimeProvider timeProvider,
             return Error.NotFound("TenantPlan.NotFound", $"TenantPlan with id '{id}' was not found.");
         }
 
+        var oldValue = AuditPayload.Serialize(new { tenantPlan.EndsAt, tenantPlan.AutoRenew });
+
         var updateResult = tenantPlan.Update(
             tenantPlanDto.EndsAt,
             tenantPlanDto.AutoRenew);
@@ -226,6 +299,15 @@ public class PlatformService(IAppDbContext dbContext, TimeProvider timeProvider,
             return updateResult.Errors!;
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _auditWriter.WriteAsync(
+            action: "TenantPlan.Update",
+            entityType: nameof(TenantPlan),
+            entityId: id.ToString(),
+            oldValue: oldValue,
+            newValue: AuditPayload.Serialize(new { tenantPlan.EndsAt, tenantPlan.AutoRenew }),
+            cancellationToken: cancellationToken);
+
         return Result.Updated;
     }
 
@@ -261,6 +343,14 @@ public class PlatformService(IAppDbContext dbContext, TimeProvider timeProvider,
 
         _dbContext.TenantBillings.Add(billingResult.Value);
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _auditWriter.WriteAsync(
+            action: "TenantBilling.Create",
+            entityType: nameof(TenantBilling),
+            entityId: billingResult.Value.Id.ToString(),
+            newValue: AuditPayload.Serialize(new { billingResult.Value.PlanId, billingResult.Value.AmountEGP, billingResult.Value.Method }),
+            cancellationToken: cancellationToken);
+
         return Result.Created;
     }
 
@@ -304,6 +394,14 @@ public class PlatformService(IAppDbContext dbContext, TimeProvider timeProvider,
 
         _dbContext.TenantCRMLeads.Add(leadResult.Value);
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _auditWriter.WriteAsync(
+            action: "TenantCRMLead.Create",
+            entityType: nameof(TenantCRMLead),
+            entityId: leadResult.Value.Id.ToString(),
+            newValue: AuditPayload.Serialize(new { leadResult.Value.CenterName, leadResult.Value.ContactName, leadResult.Value.Phone, leadResult.Value.Stage }),
+            cancellationToken: cancellationToken);
+
         return Result.Created;
     }
 
@@ -315,6 +413,8 @@ public class PlatformService(IAppDbContext dbContext, TimeProvider timeProvider,
             return Error.NotFound("TenantCRMLead.NotFound", $"TenantCRMLead with id '{id}' was not found.");
         }
 
+        var oldValue = AuditPayload.Serialize(new { lead.CenterName, lead.ContactName, lead.Phone, lead.Stage });
+
         lead.Update(
             leadDto.CenterName,
             leadDto.ContactName,
@@ -324,6 +424,15 @@ public class PlatformService(IAppDbContext dbContext, TimeProvider timeProvider,
             leadDto.AssignedTo);
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _auditWriter.WriteAsync(
+            action: "TenantCRMLead.Update",
+            entityType: nameof(TenantCRMLead),
+            entityId: id.ToString(),
+            oldValue: oldValue,
+            newValue: AuditPayload.Serialize(new { lead.CenterName, lead.ContactName, lead.Phone, lead.Stage }),
+            cancellationToken: cancellationToken);
+
         return Result.Updated;
     }
 }

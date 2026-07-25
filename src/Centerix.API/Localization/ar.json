@@ -62,5 +62,6 @@
   "Error:TenantExpiredDetail": "انتهت صلاحية اشتراك المستأجر الخاص بك",
   "Auth:InvalidCredentials": "البريد الإلكتروني أو كلمة المرور غير صحيحة",
   "Auth:AccountLocked": "الحساب مقفل بسبب محاولات تسجيل الدخول الفاشلة المتكررة.",
-  "Auth:AccountLockedDueToFailedAttempts": "تم قفل الحساب بسبب محاولات تسجيل الدخول الفاشلة المتكررة. يرجى المحاولة لاحقًا."
+  "Auth:AccountLockedDueToFailedAttempts": "تم قفل الحساب بسبب محاولات تسجيل الدخول الفاشلة المتكررة. يرجى المحاولة لاحقًا.",
+  "Auth:InvalidRefreshToken": "رمز التحديث غير صالح أو منتهي الصلاحية."
 }

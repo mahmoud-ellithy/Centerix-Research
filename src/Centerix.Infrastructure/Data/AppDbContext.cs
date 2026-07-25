@@ -1,4 +1,6 @@
 using Centerix.Application.Common.Interfaces;
+using Centerix.Domain.Auditing;
+using Centerix.Domain.Authentication;
 using Centerix.Domain.Common;
 using Centerix.Domain.Platform.Plans;
 using Centerix.Domain.Platform.Features;
@@ -6,6 +8,7 @@ using Centerix.Domain.Platform.Subscriptions;
 using Centerix.Domain.Platform.Billing;
 using Centerix.Domain.Platform.Leads;
 using Centerix.Domain.Platform.Auditing;
+using Centerix.Domain.Platform.Authorization;
 using MediatR;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -37,6 +40,10 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     public DbSet<TenantBilling> TenantBillings { get; set; } = default!;
     public DbSet<PlatformAuditLog> PlatformAuditLogs { get; set; } = default!;
     public DbSet<TenantCRMLead> TenantCRMLeads { get; set; } = default!;
+    public DbSet<Permission> Permissions { get; set; } = default!;
+    public DbSet<RolePermission> RolePermissions { get; set; } = default!;
+    public DbSet<AuditLog> AuditLogs { get; set; } = default!;
+    public DbSet<RefreshToken> RefreshTokens { get; set; } = default!;
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {

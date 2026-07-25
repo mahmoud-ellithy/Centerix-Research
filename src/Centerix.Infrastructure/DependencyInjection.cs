@@ -2,6 +2,7 @@ using System.Text;
 using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform;
 using Centerix.Application.Tenants;
+using Centerix.Infrastructure.Auditing;
 using Centerix.Infrastructure.Auth;
 using Centerix.Infrastructure.Common;
 using Centerix.Infrastructure.Data;
@@ -38,6 +39,8 @@ public static class DependencyInjection
 
         services.AddScoped<ISaveChangesInterceptor, AuditableEntityInterceptor>();
         services.AddScoped<ISaveChangesInterceptor, TenantInterceptor>();
+
+        services.AddScoped<IAuditWriter, AuditWriter>();
 
         // Tenant database context
         services.AddDbContext<TenantDbContext>(options =>
@@ -78,7 +81,7 @@ public static class DependencyInjection
             options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
             options.Lockout.AllowedForNewUsers = true;
         })
-        .AddRoles<IdentityRole>()
+        .AddRoles<ApplicationRole>()
         .AddEntityFrameworkStores<AppDbContext>();
 
         // JWT Authentication
@@ -123,6 +126,7 @@ public static class DependencyInjection
 
         // Token generation service
         services.AddScoped<ITokenService, JwtTokenService>();
+        services.AddScoped<IRefreshTokenService, RefreshTokenService>();
 
         services.AddHybridCache();
 

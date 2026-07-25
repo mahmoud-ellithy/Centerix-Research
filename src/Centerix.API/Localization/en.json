@@ -62,5 +62,6 @@
   "Error:TenantExpiredDetail": "Your tenant subscription has expired.",
   "Auth:InvalidCredentials": "Invalid email or password.",
   "Auth:AccountLocked": "Account is locked due to too many failed login attempts.",
-  "Auth:AccountLockedDueToFailedAttempts": "Account has been locked due to too many failed login attempts. Please try again later."
+  "Auth:AccountLockedDueToFailedAttempts": "Account has been locked due to too many failed login attempts. Please try again later.",
+  "Auth:InvalidRefreshToken": "Refresh token is invalid or has expired."
 }

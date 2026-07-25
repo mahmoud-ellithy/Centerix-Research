@@ -18,7 +18,9 @@ public record CreatePlanCommand(
     int SMSQuota,
     bool IsActive) : IRequest<Result<Created>>;
 
-public class CreatePlanHandler(IAppDbContext _dbContext) : IRequestHandler<CreatePlanCommand, Result<Created>>
+public class CreatePlanHandler(
+    IAppDbContext dbContext,
+    IAuditWriter auditWriter) : IRequestHandler<CreatePlanCommand, Result<Created>>
 {
     public async Task<Result<Created>> Handle(
         CreatePlanCommand request,
@@ -37,13 +39,27 @@ public class CreatePlanHandler(IAppDbContext _dbContext) : IRequestHandler<Creat
             request.SMSQuota,
             request.IsActive);
 
-        if (planResult.IsSuccess)
+        if (!planResult.IsSuccess)
         {
-            _dbContext.Plans.Add(planResult.Value);
-            await _dbContext.SaveChangesAsync(cancellationToken);
-            return Result.Created;
+            return planResult.Errors!;
         }
 
-        return planResult.Errors!;
+        dbContext.Plans.Add(planResult.Value);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        await auditWriter.WriteAsync(
+            action: "Plan.Create",
+            entityType: nameof(Plan),
+            entityId: planResult.Value.Id.ToString(),
+            newValue: AuditPayload.Serialize(new
+            {
+                planResult.Value.Code,
+                planResult.Value.DisplayName,
+                planResult.Value.MonthlyPrice,
+                planResult.Value.IsActive
+            }),
+            cancellationToken: cancellationToken);
+
+        return Result.Created;
     }
 }

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Centerix.Domain.Platform.Authorization;
 using Centerix.Infrastructure.Auth;
 using Centerix.Infrastructure.Tenancy;
 using Finbuckle.MultiTenant.Abstractions;
@@ -12,13 +13,13 @@ public class ApplicationDbContextInitialiser(
     ILogger<ApplicationDbContextInitialiser> logger,
     AppDbContext context,
     UserManager<IdentityUser> userManager,
-    RoleManager<IdentityRole> roleManager,
+    RoleManager<ApplicationRole> roleManager,
     IMultiTenantContextAccessor<CenterixTenantInfo> tenantInfoContextAccessor)
 {
     private readonly ILogger<ApplicationDbContextInitialiser> _logger = logger;
     private readonly AppDbContext _context = context;
     private readonly UserManager<IdentityUser> _userManager = userManager;
-    private readonly RoleManager<IdentityRole> _roleManager = roleManager;
+    private readonly RoleManager<ApplicationRole> _roleManager = roleManager;
     private readonly IMultiTenantContextAccessor<CenterixTenantInfo> _tenantInfoContextAccessor = tenantInfoContextAccessor;
 
     public async Task InitialiseAsync(CancellationToken cancellationToken = default)
@@ -49,10 +50,43 @@ public class ApplicationDbContextInitialiser(
 
     private async Task TrySeedAsync()
     {
-        // Default Roles > Assign Permissions/claims
+        // Permission catalog (global) > Roles > RolePermission assignments per tenant.
+        await SeedPermissionCatalogAsync();
+        // Default Roles > Assign Permissions via RolePermission rows
         await InitializeDefaultRolesAsync();
         // Admin user (from the current tenant) > Assign Role
         await InitializeAdminUserAsync();
+    }
+
+    private async Task SeedPermissionCatalogAsync()
+    {
+        var existingCodes = await _context.Permissions
+            .Select(p => p.Code)
+            .ToListAsync();
+
+        var existingSet = new HashSet<string>(existingCodes, StringComparer.Ordinal);
+
+        foreach (var entry in PermissionCatalog.All)
+        {
+            if (existingSet.Contains(entry.Code))
+            {
+                continue;
+            }
+
+            var permission = Permission.Create(
+                id: 0,
+                module: entry.Module,
+                action: entry.Action,
+                code: entry.Code,
+                description: entry.Description);
+
+            if (permission.IsSuccess)
+            {
+                await _context.Permissions.AddAsync(permission.Value);
+            }
+        }
+
+        await _context.SaveChangesAsync();
     }
 
     private async Task InitializeDefaultRolesAsync()
@@ -62,25 +96,58 @@ public class ApplicationDbContextInitialiser(
         // PlatformAdmin role — full access to everything (root tenant only)
         if (isRootTenant)
         {
-            var platformAdminRole = await EnsureRoleAsync(RoleConstants.PlatformAdmin);
+            var platformAdminRole = await EnsureRoleAsync(RoleConstants.PlatformAdmin, "Platform Administrator", isSystem: true);
             await AssignPermissionsToRoleAsync(platformAdminRole, Permissions.GetPlatformAdminPermissions());
         }
 
         // TenantAdmin role — full CRUD on tenant resources
-        var tenantAdminRole = await EnsureRoleAsync(RoleConstants.TenantAdmin);
+        var tenantAdminRole = await EnsureRoleAsync(RoleConstants.TenantAdmin, "Tenant Administrator", isSystem: true);
         await AssignPermissionsToRoleAsync(tenantAdminRole, Permissions.GetTenantAdminPermissions());
 
         // TenantUser role — read-only access to tenant resources
-        var tenantUserRole = await EnsureRoleAsync(RoleConstants.TenantUser);
+        var tenantUserRole = await EnsureRoleAsync(RoleConstants.TenantUser, "Tenant User", isSystem: true);
         await AssignPermissionsToRoleAsync(tenantUserRole, Permissions.GetTenantUserPermissions());
     }
 
-    private async Task<IdentityRole> EnsureRoleAsync(string roleName)
+    private async Task<ApplicationRole> EnsureRoleAsync(string code, string displayName, bool isSystem)
     {
-        if (await _roleManager.Roles.SingleOrDefaultAsync(r => r.Name == roleName) is not IdentityRole role)
+        if (await _roleManager.Roles.SingleOrDefaultAsync(r => r.Name == code) is not ApplicationRole role)
         {
-            role = new IdentityRole(roleName);
+            role = new ApplicationRole(code)
+            {
+                Code = code,
+                DisplayName = displayName,
+                IsSystem = isSystem,
+                NormalizedName = code.ToUpperInvariant()
+            };
             await _roleManager.CreateAsync(role);
+        }
+        else
+        {
+            // Backfill metadata for roles created before Code/DisplayName/IsSystem existed.
+            var changed = false;
+            if (role.Code != code)
+            {
+                role.Code = code;
+                changed = true;
+            }
+
+            if (role.DisplayName != displayName)
+            {
+                role.DisplayName = displayName;
+                changed = true;
+            }
+
+            if (role.IsSystem != isSystem)
+            {
+                role.IsSystem = isSystem;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                await _roleManager.UpdateAsync(role);
+            }
         }
 
         return role;
@@ -126,16 +193,34 @@ public class ApplicationDbContextInitialiser(
         }
     }
 
-    private async Task AssignPermissionsToRoleAsync(IdentityRole role, string[] permissions)
+    private async Task AssignPermissionsToRoleAsync(ApplicationRole role, string[] permissions)
     {
-        var currentClaims = await _roleManager.GetClaimsAsync(role);
+        var permissionIds = await _context.Permissions
+            .Where(p => permissions.Contains(p.Code))
+            .Select(p => p.Id)
+            .ToListAsync();
 
-        foreach (var permission in permissions)
+        var existingAssignments = await _context.RolePermissions
+            .Where(rp => rp.RoleId == role.Id)
+            .Select(rp => rp.PermissionId)
+            .ToListAsync();
+
+        var existingSet = new HashSet<int>(existingAssignments);
+
+        foreach (var permissionId in permissionIds)
         {
-            if (!currentClaims.Any(c => c.Type == Permissions.ClaimType && c.Value == permission))
+            if (existingSet.Contains(permissionId))
             {
-                await _roleManager.AddClaimAsync(role, new Claim(Permissions.ClaimType, permission));
+                continue;
+            }
+
+            var result = RolePermission.Create(role.Id, permissionId);
+            if (result.IsSuccess)
+            {
+                await _context.RolePermissions.AddAsync(result.Value);
             }
         }
+
+        await _context.SaveChangesAsync();
     }
 }
