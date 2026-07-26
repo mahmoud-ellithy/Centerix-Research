@@ -1,23 +1,25 @@
+using System.Linq.Expressions;
+
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Auditing;
 using Centerix.Domain.Authentication;
 using Centerix.Domain.Common;
-using Centerix.Domain.Platform.Plans;
-using Centerix.Domain.Platform.Features;
-using Centerix.Domain.Platform.Subscriptions;
-using Centerix.Domain.Platform.Billing;
-using Centerix.Domain.Platform.Leads;
 using Centerix.Domain.Platform.Auditing;
 using Centerix.Domain.Platform.Authorization;
+using Centerix.Domain.Platform.Billing;
+using Centerix.Domain.Platform.Features;
+using Centerix.Domain.Platform.Leads;
+using Centerix.Domain.Platform.Plans;
+using Centerix.Domain.Platform.Subscriptions;
 using Centerix.Domain.Students.Attendance;
 using Centerix.Domain.Students.Branches;
 using Centerix.Domain.Students.Lookups;
 using Centerix.Domain.Students.Students;
+
 using MediatR;
+
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
-using System.Linq.Expressions;
-using System.Reflection;
 
 namespace Centerix.Infrastructure.Data;
 

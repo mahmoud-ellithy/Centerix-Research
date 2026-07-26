@@ -11,6 +11,7 @@ using Centerix.Domain.Students.Attendance;
 using Centerix.Domain.Students.Branches;
 using Centerix.Domain.Students.Lookups;
 using Centerix.Domain.Students.Students;
+
 using Microsoft.EntityFrameworkCore;
 
 namespace Centerix.Application.Common.Interfaces;

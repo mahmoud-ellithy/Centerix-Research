@@ -1,6 +1,7 @@
 namespace Centerix.Infrastructure.Data.Configurations;
 
 using Centerix.Domain.Students.Branches;
+
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 

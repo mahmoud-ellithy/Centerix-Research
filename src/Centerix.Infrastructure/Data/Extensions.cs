@@ -14,7 +14,6 @@ public static class Extensions
         var initialiser = scope.ServiceProvider.GetRequiredService<ApplicationDbContextInitialiser>();
 
         await initialiser.InitialiseAsync(cancellationToken);
-        await initialiser.SeedAsync(cancellationToken);
     }
 
     public static async Task InitialiseTenantDatabaseAsync(this WebApplication app, CancellationToken cancellationToken = default)
