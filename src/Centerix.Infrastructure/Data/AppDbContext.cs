@@ -7,10 +7,19 @@ using Centerix.Domain.Common;
 using Centerix.Domain.Platform.Auditing;
 using Centerix.Domain.Platform.Authorization;
 using Centerix.Domain.Platform.Billing;
+using Centerix.Domain.Platform.Billing.Credits;
+using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Features;
 using Centerix.Domain.Platform.Leads;
 using Centerix.Domain.Platform.Plans;
+using Centerix.Domain.Platform.Operations;
+using Centerix.Domain.Platform.Referrals;
+using Centerix.Domain.Platform.Staff;
 using Centerix.Domain.Platform.Subscriptions;
+using Centerix.Domain.Platform.Subscriptions.AddOns;
+using Centerix.Domain.Platform.Subscriptions.LimitOverrides;
+using Centerix.Domain.Platform.Subscriptions.UsageCounters;
+using Centerix.Domain.Platform.Tenants;
 using Centerix.Domain.Students.Attendance;
 using Centerix.Domain.Students.Branches;
 using Centerix.Domain.Students.Lookups;
@@ -39,17 +48,46 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
         _currentTenantId = _currentTenant.IsResolved ? _currentTenant.TenantId : null;
     }
 
+    public DbSet<Tenant> Tenants { get; set; } = default!;
     public DbSet<Plan> Plans { get; set; } = default!;
     public DbSet<Feature> Features { get; set; } = default!;
     public DbSet<PlanFeature> PlanFeatures { get; set; } = default!;
     public DbSet<TenantPlan> TenantPlans { get; set; } = default!;
     public DbSet<TenantBilling> TenantBillings { get; set; } = default!;
+    public DbSet<Invoice> Invoices { get; set; } = default!;
+    public DbSet<InvoiceLine> InvoiceLines { get; set; } = default!;
+    public DbSet<PlatformPayment> PlatformPayments { get; set; } = default!;
+    public DbSet<TenantCredit> TenantCredits { get; set; } = default!;
     public DbSet<PlatformAuditLog> PlatformAuditLogs { get; set; } = default!;
     public DbSet<TenantCRMLead> TenantCRMLeads { get; set; } = default!;
     public DbSet<Permission> Permissions { get; set; } = default!;
     public DbSet<RolePermission> RolePermissions { get; set; } = default!;
     public DbSet<AuditLog> AuditLogs { get; set; } = default!;
     public DbSet<RefreshToken> RefreshTokens { get; set; } = default!;
+
+    // Platform Staff (ERD v3)
+    public DbSet<PlatformUser> PlatformUsers { get; set; } = default!;
+    public DbSet<PlatformRole> PlatformRoles { get; set; } = default!;
+    public DbSet<PlatformPermission> PlatformPermissions { get; set; } = default!;
+    public DbSet<PlatformUserRole> PlatformUserRoles { get; set; } = default!;
+    public DbSet<PlatformRolePermission> PlatformRolePermissions { get; set; } = default!;
+    public DbSet<ImpersonationLog> ImpersonationLogs { get; set; } = default!;
+
+    // Phase 4: Subscriptions & Add-ons
+    public DbSet<AddOnCatalog> AddOnCatalogs { get; set; } = default!;
+    public DbSet<AddOnPricingTier> AddOnPricingTiers { get; set; } = default!;
+    public DbSet<TenantAddOn> TenantAddOns { get; set; } = default!;
+    public DbSet<TenantUsageCounter> TenantUsageCounters { get; set; } = default!;
+    public DbSet<TenantLimitOverride> TenantLimitOverrides { get; set; } = default!;
+
+    // Phase 5: Referrals
+    public DbSet<TenantReferralCode> TenantReferralCodes { get; set; } = default!;
+    public DbSet<TenantReferral> TenantReferrals { get; set; } = default!;
+
+    // Phase 6: Operations
+    public DbSet<TenantSetting> TenantSettings { get; set; } = default!;
+    public DbSet<TenantProvisioningJob> TenantProvisioningJobs { get; set; } = default!;
+    public DbSet<TenantSchemaVersion> TenantSchemaVersions { get; set; } = default!;
 
     // Education module (M-01)
     public DbSet<Branch> Branches { get; set; } = default!;

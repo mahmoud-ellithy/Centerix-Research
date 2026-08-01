@@ -60,5 +60,34 @@ public static class PermissionCatalog
         new("Branches",       "Read",   "Branches.Read",          "Read branches"),
         new("Branches",       "Update", "Branches.Update",        "Update a branch"),
         new("Branches",       "Delete", "Branches.Delete",        "Delete a branch"),
+
+        new("AddOnCatalogs",       "Create", "AddOnCatalogs.Create",       "Create an add-on catalog"),
+        new("AddOnCatalogs",       "Read",   "AddOnCatalogs.Read",         "Read add-on catalogs"),
+        new("AddOnCatalogs",       "Update", "AddOnCatalogs.Update",       "Update an add-on catalog"),
+
+        new("TenantAddOns",        "Create", "TenantAddOns.Create",        "Create a tenant add-on"),
+        new("TenantAddOns",        "Read",   "TenantAddOns.Read",          "Read tenant add-ons"),
+        new("TenantAddOns",        "Update", "TenantAddOns.Update",        "Update a tenant add-on"),
+
+        new("TenantLimitOverrides","Create", "TenantLimitOverrides.Create", "Create a tenant limit override"),
+        new("TenantLimitOverrides","Read",   "TenantLimitOverrides.Read",   "Read tenant limit overrides"),
+
+        new("TenantReferralCodes", "Create", "TenantReferralCodes.Create", "Create a tenant referral code"),
+        new("TenantReferralCodes", "Read",   "TenantReferralCodes.Read",   "Read tenant referral codes"),
+
+        new("TenantReferrals",     "Create", "TenantReferrals.Create",     "Create a tenant referral"),
+        new("TenantReferrals",     "Read",   "TenantReferrals.Read",       "Read tenant referrals"),
+
+        new("TenantProvisioningJobs","Create", "TenantProvisioningJobs.Create", "Create a provisioning job"),
+        new("TenantProvisioningJobs","Read",   "TenantProvisioningJobs.Read",   "Read provisioning jobs"),
+        new("TenantProvisioningJobs","Update", "TenantProvisioningJobs.Update", "Update a provisioning job"),
+
+        new("Invoices",       "Create", "Invoices.Create",       "Create an invoice"),
+        new("Invoices",       "Read",   "Invoices.Read",         "Read invoices"),
+        new("Invoices",       "Update", "Invoices.Update",       "Update an invoice"),
+        new("Invoices",       "Delete", "Invoices.Delete",       "Delete an invoice"),
+
+        new("TenantCredits",  "Create", "TenantCredits.Create",  "Create a tenant credit"),
+        new("TenantCredits",  "Read",   "TenantCredits.Read",    "Read tenant credits"),
     ];
 }

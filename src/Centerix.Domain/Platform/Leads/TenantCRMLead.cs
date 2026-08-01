@@ -14,7 +14,7 @@ public class TenantCRMLead : AuditableEntity<Guid>
     public string Phone { get; private set; } = default!;
     public string Source { get; private set; } = default!;
     public LeadStage Stage { get; private set; }
-    public string? AssignedTo { get; private set; }
+    public Guid? AssignedTo { get; private set; }
 
     private TenantCRMLead() { }
 
@@ -25,7 +25,7 @@ public class TenantCRMLead : AuditableEntity<Guid>
         string phone,
         string source,
         LeadStage stage,
-        string? assignedTo)
+        Guid? assignedTo)
         : base(id)
     {
         CenterName = centerName;
@@ -43,7 +43,7 @@ public class TenantCRMLead : AuditableEntity<Guid>
         string phone,
         string source,
         LeadStage stage,
-        string? assignedTo)
+        Guid? assignedTo)
     {
         if (string.IsNullOrWhiteSpace(centerName))
             return TenantCRMLeadErrors.CenterNameRequired;
@@ -69,7 +69,7 @@ public class TenantCRMLead : AuditableEntity<Guid>
         string phone,
         string source,
         string stage,
-        string? assignedTo)
+        Guid? assignedTo)
     {
         if (string.IsNullOrWhiteSpace(centerName))
             return TenantCRMLeadErrors.CenterNameRequired;

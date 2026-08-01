@@ -33,7 +33,7 @@ public class TenantCRMLeadConfiguration : IEntityTypeConfiguration<TenantCRMLead
             .IsRequired();
 
         builder.Property(tc => tc.AssignedTo)
-            .HasMaxLength(450);
+            .HasColumnType("uniqueidentifier");
 
         builder.Property(tc => tc.TenantId)
             .HasMaxLength(450)

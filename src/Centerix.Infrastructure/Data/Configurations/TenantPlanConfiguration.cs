@@ -12,6 +12,8 @@ public class TenantPlanConfiguration : IEntityTypeConfiguration<TenantPlan>
 
         builder.HasKey(tp => tp.Id);
 
+        builder.Property(tp => tp.SnapshotPrice).HasPrecision(10, 2);
+
         builder.HasOne(tp => tp.Plan)
             .WithMany(p => p.TenantPlans)
             .HasForeignKey(tp => tp.PlanId)

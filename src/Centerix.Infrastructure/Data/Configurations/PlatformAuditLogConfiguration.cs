@@ -26,8 +26,7 @@ public class PlatformAuditLogConfiguration : IEntityTypeConfiguration<PlatformAu
             .HasMaxLength(45);
 
         builder.Property(pa => pa.TenantId)
-            .HasMaxLength(450)
-            .IsRequired();
+            .HasMaxLength(450);
 
         builder.Property(pa => pa.CreatedAtUtc)
             .HasColumnName("CreatedAt");

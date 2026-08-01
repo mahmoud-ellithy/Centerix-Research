@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Centerix — ERD v3 (Hybrid Multi-Tenant, Hardened)</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --navy:#12306B; --teal:#0B7A66; --gold:#C9971A; --purple:#6A2E8C; --red:#9A1B1B;
+  --green:#1E7A45; --blue:#1560B0; --orange:#C1550A; --slate:#46618C;
+  --bg:#0E1117; --surface:#161B27; --card:#1C2333; --border:#2A3550;
+  --text:#E2E8F4; --muted:#6B7FA3; --mono:'JetBrains Mono',monospace; --sans:'Syne',sans-serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:var(--sans); overflow:hidden; user-select:none; }
+
+#topbar { position:fixed; top:0; left:0; right:0; z-index:100; height:52px; background:rgba(14,17,23,0.92);
+  backdrop-filter:blur(12px); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:16px; padding:0 20px; }
+#topbar .logo { font-size:18px; font-weight:800; letter-spacing:-.5px; }
+#topbar .logo span { color:var(--teal); }
+#topbar .subtitle { font-family:var(--mono); font-size:11px; color:var(--muted); padding:3px 10px;
+  background:var(--surface); border:1px solid var(--border); border-radius:4px; }
+#topbar .controls { margin-left:auto; display:flex; gap:8px; align-items:center; }
+.ctrl-btn { padding:5px 12px; border-radius:5px; border:1px solid var(--border); background:var(--card);
+  color:var(--text); font-family:var(--mono); font-size:11px; cursor:pointer; transition:all .15s; }
+.ctrl-btn:hover { border-color:var(--teal); color:var(--teal); }
+#zoom-level { font-family:var(--mono); font-size:12px; color:var(--muted); min-width:46px; text-align:center; }
+
+#legend { position:fixed; bottom:16px; left:16px; z-index:100; background:var(--card); border:1px solid var(--border);
+  border-radius:8px; padding:12px 16px; font-family:var(--mono); font-size:10.5px; max-height:70vh; overflow-y:auto; max-width:220px; }
+#legend .leg-title { color:var(--muted); margin-bottom:8px; font-size:10px; text-transform:uppercase; letter-spacing:1px; }
+.leg-item { display:flex; align-items:center; gap:8px; margin-bottom:5px; color:var(--muted); }
+.leg-dot { width:10px; height:10px; border-radius:2px; flex-shrink:0; }
+
+#help { position:fixed; bottom:16px; right:16px; z-index:100; background:var(--card); border:1px solid var(--border);
+  border-radius:8px; padding:10px 14px; font-family:var(--mono); font-size:10px; color:var(--muted); line-height:1.9; max-width:230px; }
+
+#search-box { position:fixed; top:64px; right:16px; z-index:100; }
+#search-input { font-family:var(--mono); font-size:12px; background:var(--card); color:var(--text);
+  border:1px solid var(--border); border-radius:6px; padding:7px 10px; width:220px; }
+#search-input:focus { outline:none; border-color:var(--teal); }
+#search-results { margin-top:6px; background:var(--card); border:1px solid var(--border); border-radius:6px;
+  max-height:260px; overflow-y:auto; display:none; }
+.search-hit { padding:7px 10px; font-family:var(--mono); font-size:11px; cursor:pointer; border-bottom:1px solid var(--border); }
+.search-hit:hover { background:var(--surface); color:var(--teal); }
+.search-hit:last-child { border-bottom:none; }
+
+#canvas-wrap { position:fixed; top:52px; left:0; right:0; bottom:0; overflow:hidden; cursor:grab; }
+#canvas-wrap.dragging { cursor:grabbing; }
+#canvas { position:absolute; transform-origin:0 0; will-change:transform; }
+
+.zone-label { position:absolute; font-family:var(--mono); font-size:13px; font-weight:700;
+  text-transform:uppercase; letter-spacing:2px; color:var(--muted); opacity:.55; pointer-events:none; }
+
+.tbl { position:absolute; background:var(--card); border-radius:8px; border:1.5px solid var(--border);
+  width:238px; transition:box-shadow .15s, border-color .15s; }
+.tbl:hover { box-shadow:0 0 0 2px var(--teal), 0 8px 32px rgba(11,122,102,.25); border-color:var(--teal); z-index:80 !important; }
+.tbl.dragged { z-index:90 !important; }
+.tbl-head { padding:8px 12px 7px; border-radius:6px 6px 0 0; display:flex; align-items:center; gap:8px; cursor:grab; }
+.tbl-head:active { cursor:grabbing; }
+.tbl.platform-schema .tbl-head { background: #12306B; }
+.tbl.billing-domain .tbl-head { background: #8A6410; }
+.tbl.platform-security .tbl-head { background: #9A1B1B; }
+.tbl.tenant-security .tbl-head { background: #6A2E8C; }
+.tbl.student-domain .tbl-head { background: #1560B0; }
+.tbl.teacher-domain .tbl-head { background: #0B7A66; }
+.tbl.schedule-domain .tbl-head { background: #1D6E8C; }
+.tbl.finance-domain .tbl-head { background: #A6740A; }
+.tbl.academic-domain .tbl-head { background: #1E7A45; }
+.tbl.hr-domain .tbl-head { background: #4B3F9C; }
+.tbl.comms-domain .tbl-head { background: #46618C; }
+.tbl.growth-domain .tbl-head { background: #C1550A; }
+.tbl.lms-domain .tbl-head { background: #2456A6; }
+.tbl.parent-domain .tbl-head { background: #B23A72; }
+.tbl.storage-domain .tbl-head { background: #3F7A4E; }
+.tbl.notes-domain .tbl-head { background: #5C5C5C; }
+.tbl-schema { font-family:var(--mono); font-size:9px; color:rgba(255,255,255,.55); text-transform:uppercase; letter-spacing:1px; }
+.tbl-name { font-family:var(--mono); font-size:13px; font-weight:700; color:#fff; letter-spacing:-.3px; }
+.tbl-badge { margin-left:auto; font-family:var(--mono); font-size:9px; padding:2px 6px; border-radius:3px;
+  background:rgba(255,255,255,.15); color:rgba(255,255,255,.75); white-space:nowrap; }
+.tbl-body { padding:6px 0 8px; }
+.tbl-desc { padding:6px 12px 8px; font-size:10px; color:var(--muted); line-height:1.5; border-top:1px solid var(--border); margin-top:4px; display:none; }
+.tbl.expanded .tbl-desc { display:block; }
+.col-row { display:flex; align-items:center; gap:0; padding:2.5px 12px; font-family:var(--mono); font-size:10.5px; }
+.col-row:hover { background:rgba(255,255,255,.03); }
+.col-key { width:26px; flex-shrink:0; font-size:9px; font-weight:700; text-align:center; opacity:.85; }
+.pk { color:var(--gold); } .fk { color:#3DD9B8; } .uk { color:#B98CE8; }
+.col-name { flex:1; color:var(--text); }
+.col-type { color:var(--muted); font-size:9px; margin-left:6px; white-space:nowrap; }
+.col-req { color:#E85D5D; font-size:9px; margin-left:4px; }
+.col-divider { height:1px; background:var(--border); margin:4px 12px; }
+.info-toggle { font-family:var(--mono); font-size:9px; color:var(--muted); cursor:pointer; padding:0 4px; }
+.info-toggle:hover { color:var(--teal); }
+
+#svg-overlay { position:absolute; top:0; left:0; pointer-events:none; overflow:visible; }
+.rel-line { stroke-width:1.4; fill:none; opacity:.45; }
+.rel-line.pk-fk { stroke:#3DD9B8; }
+.rel-line.idx { stroke:var(--muted); stroke-dasharray:4 3; }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="logo">Center<span>ix</span></div>
+  <div class="subtitle">ERD v3 — Hybrid Multi-Tenant (Hardened)</div>
+  <div class="subtitle">84 Tables · 103 Relations</div>
+  <div class="controls">
+    <button class="ctrl-btn" onclick="zoomIn()">＋ Zoom In</button>
+    <span id="zoom-level">100%</span>
+    <button class="ctrl-btn" onclick="zoomOut()">－ Zoom Out</button>
+    <button class="ctrl-btn" onclick="resetView()">⊡ Reset</button>
+    <button class="ctrl-btn" onclick="fitAll()">⊞ Fit All</button>
+    <button class="ctrl-btn" onclick="toggleAllDesc()">ℹ Toggle Notes</button>
+  </div>
+</div>
+
+<div id="search-box">
+  <input id="search-input" type="text" placeholder="🔍 ابحث عن جدول..." oninput="doSearch(this.value)">
+  <div id="search-results"></div>
+</div>
+
+<div id="canvas-wrap">
+  <div id="canvas">
+    <svg id="svg-overlay"></svg>
+  </div>
+</div>
+
+<div id="legend">
+  <div class="leg-title">Legend — Domains</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#12306B"></div> Platform Core</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#8A6410"></div> Billing & Invoices</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#9A1B1B"></div> Platform Staff (Internal)</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#6A2E8C"></div> M-12 Tenant Security</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#1560B0"></div> M-01 Students</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#0B7A66"></div> M-02 Teachers</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#1D6E8C"></div> M-03 Schedule</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#A6740A"></div> M-04 Finance</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#1E7A45"></div> M-05 Academic</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#4B3F9C"></div> M-06 HR</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#46618C"></div> M-07 Comms</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#C1550A"></div> M-08 Growth/Referral</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#2456A6"></div> M-09 LMS</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#B23A72"></div> M-10 Parents</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#3F7A4E"></div> M-11 Storage</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#5C5C5C"></div> M-14 Notes</div>
+  <div style="border-top:1px solid var(--border);margin:8px 0 6px"></div>
+  <div class="leg-item"><span style="color:var(--gold);font-size:11px;font-weight:700">PK</span> Primary Key</div>
+  <div class="leg-item"><span style="color:#3DD9B8;font-size:11px;font-weight:700">FK</span> Foreign Key</div>
+  <div class="leg-item"><span style="color:#B98CE8;font-size:11px;font-weight:700">UK</span> Unique Key</div>
+  <div style="border-top:1px solid var(--border);margin:8px 0 6px"></div>
+  <div class="leg-item" style="color:var(--muted)">TenantId FK→Tenants ضمني بكل جدول Tenant-scoped، غير مرسوم كخط لتقليل التعقيد البصري.</div>
+</div>
+
+<div id="help">
+  🖱 اسحب الخلفية للتنقل · Scroll للتكبير<br>
+  🖱 اسحب رأس أي جدول لتحريكه بحرية<br>
+  🖱 اضغط على جدول لإبراز علاقاته<br>
+  ℹ اضغط لعرض شرح وظيفة الجدول
+</div>
+
+<script>
+const TABLES = [{"id": "Tenants", "schema": "platform", "domain": "platform-schema", "badge": "Core", "cols": [{"key": "PK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "UK", "name": "Slug", "type": "NVARCHAR(60)", "req": true}, {"key": "UK", "name": "Subdomain", "type": "NVARCHAR(100)", "req": true}, {"key": "", "name": "DisplayName", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "LogoUrl", "type": "NVARCHAR(500)"}, {"key": "", "name": "PrimaryColor", "type": "NCHAR(7)"}, {"key": "", "name": "Country", "type": "NCHAR(2)", "req": true}, {"key": "", "name": "Currency", "type": "NCHAR(3)", "req": true}, {"key": "", "name": "Timezone", "type": "NVARCHAR(60)", "req": true}, {"key": "", "name": "OwnerFirstName", "type": "NVARCHAR(100)", "req": true}, {"key": "", "name": "OwnerLastName", "type": "NVARCHAR(100)", "req": true}, {"key": "", "name": "OwnerEmail", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "OwnerPhone", "type": "NVARCHAR(30)"}, {"key": "", "name": "IsolationMode", "type": "TINYINT", "req": true}, {"key": "", "name": "DatabaseServer", "type": "NVARCHAR(200)"}, {"key": "", "name": "ConnectionStringRef", "type": "NVARCHAR(200)"}, {"key": "FK", "name": "CurrentPlanId", "type": "INT"}, {"key": "", "name": "LifecycleStatus", "type": "TINYINT", "req": true}, {"key": "", "name": "SuspendedReason", "type": "NVARCHAR(200)"}, {"key": "", "name": "TrialEndsAt", "type": "DATETIME2"}, {"key": "", "name": "ValidUpTo", "type": "DATETIME2"}, {"key": "", "name": "IsActive", "type": "BIT", "req": true}, {"key": "", "name": "LastSyncedAt", "type": "DATETIME2"}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}], "zone": "platform-core", "desc": "الجدول المركزي لكل مركز مشترك في المنصة. نقطة الربط الوحيدة بين عالم الـ Shared DB وعالم الـ Dedicated DB عبر IsolationMode. أي جدول Tenant-scoped بيحمل TenantId بيرجع لهذا الجدول ضمنيًا (FK حقيقي لو Shared، منطقي/Application-level لو Dedicated)."}, {"id": "Plans", "schema": "platform", "domain": "platform-schema", "badge": "Billing", "cols": [{"key": "PK", "name": "PlanId", "type": "INT IDENTITY", "req": true}, {"key": "UK", "name": "Code", "type": "NVARCHAR(30)", "req": true}, {"key": "", "name": "DisplayName", "type": "NVARCHAR(100)", "req": true}, {"key": "", "name": "MonthlyPrice", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "MaxStudents", "type": "INT", "req": true}, {"key": "", "name": "MaxUsers", "type": "INT", "req": true}, {"key": "", "name": "MaxBranches", "type": "INT", "req": true}, {"key": "", "name": "MaxTeachers", "type": "INT", "req": true}, {"key": "", "name": "StorageGB", "type": "INT", "req": true}, {"key": "", "name": "SMSQuota", "type": "INT", "req": true}, {"key": "", "name": "IsActive", "type": "BIT", "req": true}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}], "zone": "platform-core", "desc": "كتالوج خطط الاشتراك القياسية (Starter/Pro/Enterprise). يحدد الحدود الافتراضية (طلاب/مستخدمين/فروع/معلمين) قبل إضافة أي Add-ons."}, {"id": "Features", "schema": "platform", "domain": "platform-schema", "badge": "Flags", "cols": [{"key": "PK", "name": "FeatureId", "type": "INT IDENTITY", "req": true}, {"key": "UK", "name": "Code", "type": "NVARCHAR(80)", "req": true}, {"key": "", "name": "Description", "type": "NVARCHAR(300)"}, {"key": "", "name": "Module", "type": "NVARCHAR(10)", "req": true}], "zone": "platform-core", "desc": "كتالوج الميزات القابلة للتفعيل/الإيقاف (Feature Flags) عبر النظام، مثل LMS أو Growth Analytics."}, {"id": "PlanFeatures", "schema": "platform", "domain": "platform-schema", "badge": "Junction", "cols": [{"key": "PK", "name": "PlanFeatureId", "type": "INT IDENTITY", "req": true}, {"key": "FK", "name": "PlanId", "type": "INT", "req": true}, {"key": "FK", "name": "FeatureId", "type": "INT", "req": true}, {"key": "", "name": "IsEnabled", "type": "BIT", "req": true}], "zone": "platform-core", "desc": "جدول ربط: أي ميزات مفعّلة ضمن أي خطة اشتراك."}, {"id": "TenantPlans", "schema": "platform", "domain": "platform-schema", "badge": "Subscription", "cols": [{"key": "PK", "name": "TenantPlanId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "PlanId", "type": "INT", "req": true}, {"key": "", "name": "SnapshotPrice", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "StartsAt", "type": "DATETIME2", "req": true}, {"key": "", "name": "EndsAt", "type": "DATETIME2", "req": true}, {"key": "", "name": "AutoRenew", "type": "BIT", "req": true}, {"key": "", "name": "Status", "type": "TINYINT", "req": true}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}], "zone": "platform-sub", "desc": "سجل تاريخي لاشتراكات كل Tenant. SnapshotPrice يجمّد السعر وقت الاشتراك فلا يتأثر بتغيير سعر الخطة لاحقًا."}, {"id": "AddOnCatalog", "schema": "platform", "domain": "platform-schema", "badge": "Catalog", "cols": [{"key": "PK", "name": "AddOnCatalogId", "type": "INT IDENTITY", "req": true}, {"key": "UK", "name": "Code", "type": "NVARCHAR(30)", "req": true}, {"key": "", "name": "DisplayName", "type": "NVARCHAR(100)", "req": true}, {"key": "", "name": "UnitType", "type": "NVARCHAR(20)", "req": true}, {"key": "", "name": "UnitQuantity", "type": "INT", "req": true}, {"key": "", "name": "BillingType", "type": "TINYINT", "req": true}, {"key": "", "name": "IsActive", "type": "BIT", "req": true}], "zone": "platform-sub", "desc": "كتالوج أنواع الإضافات القابلة للشراء فوق الخطة (فرع إضافي/بلوك طلاب/مستخدم إضافي/SMS إضافي)، قابل للتوسعة من لوحة الإدارة بدون نشر كود جديد."}, {"id": "AddOnPricingTiers", "schema": "platform", "domain": "platform-schema", "badge": "Pricing", "cols": [{"key": "PK", "name": "TierId", "type": "INT IDENTITY", "req": true}, {"key": "FK", "name": "AddOnCatalogId", "type": "INT", "req": true}, {"key": "", "name": "MinQuantity", "type": "INT", "req": true}, {"key": "", "name": "MaxQuantity", "type": "INT"}, {"key": "", "name": "UnitPrice", "type": "DECIMAL(10,2)", "req": true}], "zone": "platform-sub", "desc": "شرائح تسعير متدرجة لكل نوع إضافة (خصم كمية) — مثلاً أول فرعين بسعر، من 3-5 بسعر أقل، وهكذا."}, {"id": "TenantAddOns", "schema": "platform", "domain": "platform-schema", "badge": "Purchased", "cols": [{"key": "PK", "name": "TenantAddOnId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "AddOnCatalogId", "type": "INT", "req": true}, {"key": "", "name": "Quantity", "type": "INT", "req": true}, {"key": "", "name": "SnapshotUnitPrice", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "EffectiveFrom", "type": "DATETIME2", "req": true}, {"key": "", "name": "EffectiveTo", "type": "DATETIME2"}, {"key": "", "name": "Status", "type": "TINYINT", "req": true}, {"key": "FK", "name": "InvoiceLineId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}], "zone": "platform-sub", "desc": "الإضافات الفعلية المُشتراة لكل Tenant. عند الإلغاء EffectiveTo تُضبط على نهاية الدورة المدفوعة (بدون استرداد جزئي)، فتبقى الإضافة سارية ضمن الحدود لحد آخر يوم مدفوع."}, {"id": "TenantUsageCounters", "schema": "platform", "domain": "platform-schema", "badge": "Metrics", "cols": [{"key": "PK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "StudentsCount", "type": "INT", "req": true}, {"key": "", "name": "UsersCount", "type": "INT", "req": true}, {"key": "", "name": "BranchesCount", "type": "INT", "req": true}, {"key": "", "name": "TeachersCount", "type": "INT", "req": true}, {"key": "", "name": "StorageUsedMB", "type": "INT", "req": true}, {"key": "", "name": "SMSUsedThisCycle", "type": "INT", "req": true}, {"key": "", "name": "EffectiveMaxStudents", "type": "INT", "req": true}, {"key": "", "name": "EffectiveMaxUsers", "type": "INT", "req": true}, {"key": "", "name": "EffectiveMaxBranches", "type": "INT", "req": true}, {"key": "", "name": "EffectiveMaxTeachers", "type": "INT", "req": true}, {"key": "", "name": "CalculatedAt", "type": "DATETIME2", "req": true}, {"key": "", "name": "SyncStatus", "type": "TINYINT", "req": true}], "zone": "platform-sub", "desc": "عدّاد استخدام مركزي محدَّث دوريًا (Sync Job) لكل Tenant — يُستخدم لعرض الداشبورد الإداري والتنبيهات، وليس للفحص اللحظي وقت الإدخال (ده بيتم داخل الـ Tenant DB مباشرة لـ Hard Block دقيق)."}, {"id": "TenantLimitOverrides", "schema": "platform", "domain": "platform-schema", "badge": "Custom", "cols": [{"key": "PK", "name": "OverrideId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "LimitType", "type": "NVARCHAR(20)", "req": true}, {"key": "", "name": "OverrideValue", "type": "INT", "req": true}, {"key": "", "name": "Reason", "type": "NVARCHAR(300)"}, {"key": "FK", "name": "CreatedBy", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}], "zone": "platform-sub", "desc": "حدود مخصصة فوق حدود الخطة القياسية لعملاء عندهم اتفاق خاص (Enterprise deal)، بدون تعديل جدول Plans المشترك."}, {"id": "Invoices", "schema": "platform", "domain": "billing-domain", "badge": "Billing", "cols": [{"key": "PK", "name": "InvoiceId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "UK", "name": "InvoiceNumber", "type": "NVARCHAR(30)", "req": true}, {"key": "", "name": "PeriodStart", "type": "DATE", "req": true}, {"key": "", "name": "PeriodEnd", "type": "DATE", "req": true}, {"key": "", "name": "Subtotal", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "DiscountAmount", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "TaxAmount", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "TotalAmount", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "Status", "type": "TINYINT", "req": true}, {"key": "", "name": "IssuedAt", "type": "DATETIME2"}, {"key": "", "name": "DueAt", "type": "DATETIME2"}], "zone": "billing", "desc": "فاتورة رسمية لكل دورة اشتراك لكل Tenant. رقم متسلسل InvoiceNumber جاهز للتوسع مستقبلاً لمنظومة الفاتورة الإلكترونية."}, {"id": "InvoiceLines", "schema": "platform", "domain": "billing-domain", "badge": "Line Items", "cols": [{"key": "PK", "name": "LineId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "InvoiceId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "SourceType", "type": "NVARCHAR(20)", "req": true}, {"key": "", "name": "SourceId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "Description", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "Quantity", "type": "INT", "req": true}, {"key": "", "name": "UnitPrice", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "ProratedDays", "type": "INT"}, {"key": "", "name": "LineTotal", "type": "DECIMAL(10,2)", "req": true}], "zone": "billing", "desc": "بنود الفاتورة التفصيلية. SourceType يميّز أصل البند (اشتراك أساسي/إضافة/ترقية)، وProratedDays يوثّق حساب التسعير التناسبي عند الشراء منتصف الدورة."}, {"id": "PlatformPayments", "schema": "platform", "domain": "billing-domain", "badge": "Payments", "cols": [{"key": "PK", "name": "PaymentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "InvoiceId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Amount", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "Method", "type": "NVARCHAR(30)", "req": true}, {"key": "", "name": "GatewayRef", "type": "NVARCHAR(200)"}, {"key": "", "name": "PaidAt", "type": "DATETIME2", "req": true}, {"key": "", "name": "Status", "type": "TINYINT", "req": true}], "zone": "billing", "desc": "دفعات فعلية على مستوى المنصة (تحصيل اشتراك المراكز)، منفصلة عن Payments الخاصة بمصاريف الطلاب داخل كل مركز."}, {"id": "TenantCredits", "schema": "platform", "domain": "billing-domain", "badge": "Wallet", "cols": [{"key": "PK", "name": "CreditId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Amount", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "SourceType", "type": "NVARCHAR(30)", "req": true}, {"key": "", "name": "SourceId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "Status", "type": "TINYINT", "req": true}, {"key": "FK", "name": "AppliedToInvoiceLineId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}], "zone": "billing", "desc": "محفظة أرصدة/خصومات لكل Tenant (من مكافآت الإحالة، عروض ترويجية، تعويضات) تُطبّق تلقائيًا كخصم على الفاتورة القادمة."}, {"id": "TenantReferralCodes", "schema": "platform", "domain": "platform-schema", "badge": "Referral", "cols": [{"key": "PK", "name": "CodeId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "UK", "name": "Code", "type": "NVARCHAR(20)", "req": true}, {"key": "", "name": "TimesUsed", "type": "INT", "req": true}, {"key": "", "name": "IsActive", "type": "BIT", "req": true}], "zone": "platform-growth", "desc": "كود إحالة ثابت لكل مركز، يشاركه مع مراكز أخرى محتملة."}, {"id": "TenantReferrals", "schema": "platform", "domain": "platform-schema", "badge": "Referral", "cols": [{"key": "PK", "name": "ReferralId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "ReferrerTenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "UK", "name": "ReferredTenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "ReferralCodeId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Status", "type": "TINYINT", "req": true}, {"key": "", "name": "QualifiedAt", "type": "DATETIME2"}, {"key": "", "name": "RewardType", "type": "TINYINT", "req": true}, {"key": "", "name": "RewardValue", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "RewardAppliedTo", "type": "NVARCHAR(10)", "req": true}, {"key": "", "name": "RewardAppliedAt", "type": "DATETIME2"}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}], "zone": "platform-growth", "desc": "سجل إحالة مركز لمركز آخر. المكافأة (خصم/مدة إضافية) لا تُفعَّل إلا بعد Qualified (مثلاً أول فاتورة مدفوعة فعليًا) لمنع الاستغلال."}, {"id": "TenantCRMLeads", "schema": "platform", "domain": "platform-schema", "badge": "CRM", "cols": [{"key": "PK", "name": "LeadId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "CenterName", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "ContactName", "type": "NVARCHAR(150)", "req": true}, {"key": "", "name": "Phone", "type": "NVARCHAR(30)"}, {"key": "", "name": "Source", "type": "NVARCHAR(50)", "req": true}, {"key": "", "name": "Stage", "type": "NVARCHAR(30)", "req": true}, {"key": "", "name": "AssignedTo", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}], "zone": "platform-growth", "desc": "عملاء محتملون (مراكز جديدة) لم يشتركوا بعد — قِمع مبيعات المنصة نفسها، منفصل تمامًا عن CRMLeads داخل كل Tenant."}, {"id": "TenantSettings", "schema": "platform", "domain": "platform-schema", "badge": "Config", "cols": [{"key": "PK", "name": "SettingId", "type": "BIGINT IDENTITY", "req": true}, {"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "UK", "name": "Key", "type": "NVARCHAR(100)", "req": true}, {"key": "", "name": "Value", "type": "NVARCHAR(MAX)", "req": true}, {"key": "", "name": "ValueType", "type": "NVARCHAR(15)", "req": true}], "zone": "platform-growth", "desc": "إعدادات مفتاح/قيمة مرنة لكل Tenant، بدون الحاجة لتعديل الجداول عند إضافة إعداد جديد."}, {"id": "TenantProvisioningJobs", "schema": "platform", "domain": "platform-schema", "badge": "Ops", "cols": [{"key": "PK", "name": "JobId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Status", "type": "TINYINT", "req": true}, {"key": "", "name": "StartedAt", "type": "DATETIME2"}, {"key": "", "name": "CompletedAt", "type": "DATETIME2"}, {"key": "", "name": "ErrorMessage", "type": "NVARCHAR(MAX)"}, {"key": "", "name": "RetryCount", "type": "TINYINT", "req": true}], "zone": "platform-growth", "desc": "تتبع عملية تجهيز قاعدة بيانات مستقلة لـ Tenant جديد (Pending/Creating/Migrating/Ready/Failed) عند اختيار Dedicated Database."}, {"id": "TenantSchemaVersion", "schema": "platform", "domain": "platform-schema", "badge": "Ops", "cols": [{"key": "PK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "CurrentVersion", "type": "NVARCHAR(20)", "req": true}, {"key": "", "name": "LastMigratedAt", "type": "DATETIME2", "req": true}], "zone": "platform-growth", "desc": "نسخة الـ schema الحالية لكل Tenant — أساسي لمعرفة مين محتاج Migration جديد، خصوصًا مع تعدد قواعد البيانات المنفصلة."}, {"id": "PlatformAuditLog", "schema": "platform", "domain": "platform-schema", "badge": "Audit", "cols": [{"key": "PK", "name": "LogId", "type": "BIGINT IDENTITY", "req": true}, {"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "Action", "type": "NVARCHAR(100)", "req": true}, {"key": "", "name": "EntityType", "type": "NVARCHAR(60)"}, {"key": "", "name": "EntityId", "type": "NVARCHAR(100)"}, {"key": "", "name": "OldValue", "type": "NVARCHAR(MAX)"}, {"key": "", "name": "NewValue", "type": "NVARCHAR(MAX)"}, {"key": "", "name": "IPAddress", "type": "NVARCHAR(45)"}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}], "zone": "platform-growth", "desc": "سجل تدقيق لأي عملية إدارية على مستوى المنصة (تعديل خطة، تعليق Tenant، تغيير حدود)."}, {"id": "PlatformUsers", "schema": "platform", "domain": "platform-security", "badge": "Staff", "cols": [{"key": "PK", "name": "PlatformUserId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "UK", "name": "Email", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "FullName", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "PasswordHash", "type": "NVARCHAR(500)", "req": true}, {"key": "", "name": "Is2FAEnabled", "type": "BIT", "req": true}, {"key": "", "name": "IsActive", "type": "BIT", "req": true}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}], "zone": "platform-sec", "desc": "موظفو المنصة (Super Admin/Sales/Support) — منفصل تمامًا عن جدول Users الخاص بمستخدمي الـ Tenants لأسباب أمنية وتنظيمية."}, {"id": "PlatformRoles", "schema": "platform", "domain": "platform-security", "badge": "RBAC", "cols": [{"key": "PK", "name": "RoleId", "type": "INT IDENTITY", "req": true}, {"key": "UK", "name": "Code", "type": "NVARCHAR(40)", "req": true}, {"key": "", "name": "DisplayName", "type": "NVARCHAR(100)", "req": true}], "zone": "platform-sec", "desc": "أدوار داخلية لموظفي المنصة (SuperAdmin, SalesRep, SupportAgent, Billingmanager...)."}, {"id": "PlatformPermissions", "schema": "platform", "domain": "platform-security", "badge": "RBAC", "cols": [{"key": "PK", "name": "PermissionId", "type": "INT IDENTITY", "req": true}, {"key": "", "name": "Module", "type": "NVARCHAR(20)", "req": true}, {"key": "", "name": "Action", "type": "NVARCHAR(30)", "req": true}, {"key": "UK", "name": "Code", "type": "NVARCHAR(80)", "req": true}], "zone": "platform-sec", "desc": "صلاحيات دقيقة على مستوى المنصة، مستقلة تمامًا عن صلاحيات الـ Tenant."}, {"id": "PlatformUserRoles", "schema": "platform", "domain": "platform-security", "badge": "Junction", "cols": [{"key": "FK", "name": "PlatformUserId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "RoleId", "type": "INT", "req": true}], "zone": "platform-sec", "desc": "ربط موظف المنصة بأدواره."}, {"id": "PlatformRolePermissions", "schema": "platform", "domain": "platform-security", "badge": "Junction", "cols": [{"key": "FK", "name": "RoleId", "type": "INT", "req": true}, {"key": "FK", "name": "PermissionId", "type": "INT", "req": true}], "zone": "platform-sec", "desc": "ربط دور المنصة بصلاحياته."}, {"id": "ImpersonationLogs", "schema": "platform", "domain": "platform-security", "badge": "Audit", "cols": [{"key": "PK", "name": "LogId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "PlatformUserId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "TargetUserId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "StartedAt", "type": "DATETIME2", "req": true}, {"key": "", "name": "EndedAt", "type": "DATETIME2"}, {"key": "", "name": "Reason", "type": "NVARCHAR(300)", "req": true}, {"key": "", "name": "IPAddress", "type": "NVARCHAR(45)", "req": true}], "zone": "platform-sec", "desc": "توثيق إلزامي لكل مرة موظف دعم يدخل بالنيابة عن مستخدم Tenant لأغراض المساعدة الفنية."}, {"id": "Users", "schema": "{schema}", "domain": "tenant-security", "badge": "M-12", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "UserId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "UK", "name": "Email", "type": "NVARCHAR(200)"}, {"key": "", "name": "Phone", "type": "NVARCHAR(30)"}, {"key": "", "name": "FullName", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "PasswordHash", "type": "NVARCHAR(500)"}, {"key": "", "name": "UserType", "type": "NVARCHAR(20)", "req": true}, {"key": "", "name": "LinkedEntityId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "Is2FAEnabled", "type": "BIT", "req": true}, {"key": "", "name": "FailedLoginCount", "type": "TINYINT", "req": true}, {"key": "", "name": "LockedUntil", "type": "DATETIME2"}, {"key": "", "name": "LastLoginAt", "type": "DATETIME2"}, {"key": "", "name": "IsActive", "type": "BIT", "req": true}], "zone": "t-security", "desc": "مستخدمو النظام داخل المركز (طالب/معلم/ولي أمر/موظف حسب UserType)، مع LinkedEntityId للربط بالكيان الفعلي. UK على Email مركّبة فعليًا مع TenantId."}, {"id": "Roles", "schema": "{schema}", "domain": "tenant-security", "badge": "M-12", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "RoleId", "type": "INT IDENTITY", "req": true}, {"key": "UK", "name": "Code", "type": "NVARCHAR(40)", "req": true}, {"key": "", "name": "DisplayName", "type": "NVARCHAR(100)", "req": true}, {"key": "", "name": "IsSystem", "type": "BIT", "req": true}], "zone": "t-security", "desc": "أدوار قابلة للتخصيص داخل كل مركز على حدة (يُزرع منها مجموعة افتراضية عند إنشاء أي Tenant جديد)."}, {"id": "Permissions", "schema": "platform", "domain": "tenant-security", "badge": "Catalog", "cols": [{"key": "PK", "name": "PermissionId", "type": "INT IDENTITY", "req": true}, {"key": "", "name": "Module", "type": "NVARCHAR(10)", "req": true}, {"key": "", "name": "Action", "type": "NVARCHAR(30)", "req": true}, {"key": "UK", "name": "Code", "type": "NVARCHAR(80)", "req": true}], "zone": "t-security", "desc": "كتالوج صلاحيات عام تعرّفه المنصة (ثابت بالكود)، تُبنى منه أدوار كل Tenant — بدون TenantId لأنه تعريف نظامي وليس بيانات عميل."}, {"id": "UserRoles", "schema": "{schema}", "domain": "tenant-security", "badge": "Junction", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "UserId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "RoleId", "type": "INT", "req": true}], "zone": "t-security", "desc": "ربط مستخدم Tenant بأدواره."}, {"id": "RolePermissions", "schema": "{schema}", "domain": "tenant-security", "badge": "Junction", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "RoleId", "type": "INT", "req": true}, {"key": "FK", "name": "PermissionId", "type": "INT", "req": true}], "zone": "t-security", "desc": "ربط دور Tenant بصلاحياته المفعّلة من كتالوج Permissions العام."}, {"id": "RefreshTokens", "schema": "{schema}", "domain": "tenant-security", "badge": "Auth", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "TokenId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "UserId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "SessionId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "UK", "name": "TokenHash", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "DeviceInfo", "type": "NVARCHAR(200)"}, {"key": "", "name": "IPAddress", "type": "NVARCHAR(45)"}, {"key": "", "name": "ExpiresAtUtc", "type": "DATETIME2", "req": true}, {"key": "", "name": "RevokedAtUtc", "type": "DATETIME2"}, {"key": "", "name": "RevocationReason", "type": "NVARCHAR(20)"}, {"key": "FK", "name": "ReplacedByTokenId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "LastUsedAtUtc", "type": "DATETIME2"}, {"key": "", "name": "CreatedAtUtc", "type": "DATETIME2", "req": true}], "zone": "t-security", "desc": "توكنات تجديد الجلسة، بسلسلة استبدال قابلة للتتبع (ReplacedByTokenId)."}, {"id": "AuditLog", "schema": "{schema}", "domain": "tenant-security", "badge": "Audit", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "LogId", "type": "BIGINT IDENTITY", "req": true}, {"key": "FK", "name": "UserId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "Action", "type": "NVARCHAR(100)", "req": true}, {"key": "", "name": "EntityName", "type": "NVARCHAR(60)", "req": true}, {"key": "", "name": "EntityId", "type": "NVARCHAR(100)", "req": true}, {"key": "", "name": "OldValues", "type": "NVARCHAR(MAX)"}, {"key": "", "name": "NewValues", "type": "NVARCHAR(MAX)"}, {"key": "", "name": "IPAddress", "type": "NVARCHAR(45)"}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}], "zone": "t-security", "desc": "سجل تدقيق عام لكل العمليات الحساسة داخل بيانات المركز."}, {"id": "LoginHistory", "schema": "{schema}", "domain": "tenant-security", "badge": "Audit", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "LoginHistoryId", "type": "BIGINT IDENTITY", "req": true}, {"key": "FK", "name": "UserId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "LoginAtUtc", "type": "DATETIME2", "req": true}, {"key": "", "name": "IPAddress", "type": "NVARCHAR(45)", "req": true}, {"key": "", "name": "DeviceInfo", "type": "NVARCHAR(200)"}, {"key": "", "name": "UserAgent", "type": "NVARCHAR(300)"}, {"key": "", "name": "Success", "type": "BIT", "req": true}, {"key": "", "name": "FailureReason", "type": "NVARCHAR(50)"}], "zone": "t-security", "desc": "سجل كل محاولات الدخول (ناجحة وفاشلة) لأغراض الأمان."}, {"id": "Branches", "schema": "{schema}", "domain": "student-domain", "badge": "M-01", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "BranchId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Name", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "Address", "type": "NVARCHAR(300)"}, {"key": "", "name": "Phone", "type": "NVARCHAR(30)"}, {"key": "FK", "name": "ManagerId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "IsActive", "type": "BIT", "req": true}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}, {"key": "", "name": "DeletedAt", "type": "DATETIME2"}], "zone": "student", "desc": "فروع المركز الفعلية. تُحسب ضمن BranchesCount مقابل حد MaxBranches في الخطة."}, {"id": "AcademicStages", "schema": "{schema}", "domain": "student-domain", "badge": "M-01", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "StageId", "type": "INT IDENTITY", "req": true}, {"key": "UK", "name": "Code", "type": "NVARCHAR(30)", "req": true}, {"key": "", "name": "DisplayName", "type": "NVARCHAR(100)", "req": true}, {"key": "", "name": "SortOrder", "type": "TINYINT", "req": true}], "zone": "student", "desc": "المراحل الدراسية (ابتدائي/إعدادي/ثانوي...) الخاصة بالمركز."}, {"id": "AcademicYears", "schema": "{schema}", "domain": "student-domain", "badge": "M-01", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "YearId", "type": "INT IDENTITY", "req": true}, {"key": "FK", "name": "StageId", "type": "INT", "req": true}, {"key": "UK", "name": "YearCode", "type": "NVARCHAR(20)", "req": true}, {"key": "", "name": "YearName", "type": "NVARCHAR(60)", "req": true}], "zone": "student", "desc": "السنوات الدراسية داخل كل مرحلة."}, {"id": "Students", "schema": "{schema}", "domain": "student-domain", "badge": "M-01 Core", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "StudentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "BranchId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "StageId", "type": "INT", "req": true}, {"key": "FK", "name": "YearId", "type": "INT", "req": true}, {"key": "", "name": "FullNameAr", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "FullNameEn", "type": "NVARCHAR(200)"}, {"key": "", "name": "DateOfBirth", "type": "DATE"}, {"key": "", "name": "Gender", "type": "NCHAR(1)"}, {"key": "", "name": "Phone", "type": "NVARCHAR(30)"}, {"key": "UK", "name": "QRCode", "type": "NVARCHAR(100)", "req": true}, {"key": "", "name": "DiscountType", "type": "NVARCHAR(10)"}, {"key": "", "name": "DiscountValue", "type": "DECIMAL(10,2)"}, {"key": "", "name": "Status", "type": "TINYINT", "req": true}, {"key": "", "name": "EnrolledAt", "type": "DATE", "req": true}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}, {"key": "FK", "name": "CreatedBy", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "ModifiedAt", "type": "DATETIME2"}, {"key": "FK", "name": "ModifiedBy", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "DeletedAt", "type": "DATETIME2"}, {"key": "FK", "name": "DeletedBy", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "RowVersion", "type": "ROWVERSION", "req": true}], "zone": "student", "desc": "الكيان المركزي للطالب. يُحسب ضمن StudentsCount مقابل حد MaxStudents في الخطة. RowVersion لحل تعارضات التزامن."}, {"id": "AttendanceLogs", "schema": "{schema}", "domain": "student-domain", "badge": "M-01", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "AttendanceId", "type": "BIGINT IDENTITY", "req": true}, {"key": "FK", "name": "StudentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "GroupId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "SessionDate", "type": "DATE", "req": true}, {"key": "", "name": "Status", "type": "NVARCHAR(10)", "req": true}, {"key": "", "name": "CheckInTime", "type": "TIME"}, {"key": "", "name": "IsOffline", "type": "BIT", "req": true}, {"key": "", "name": "SyncedAt", "type": "DATETIME2"}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}, {"key": "", "name": "RowVersion", "type": "ROWVERSION", "req": true}], "zone": "student", "desc": "سجل حضور الطلاب، يدعم تسجيل Offline من الموبايل (IsOffline/SyncedAt) مع RowVersion لحل تعارضات المزامنة. GroupId اختياري لدعم حصص فردية خارج مجموعة."}, {"id": "Subjects", "schema": "{schema}", "domain": "teacher-domain", "badge": "M-02", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "SubjectId", "type": "INT IDENTITY", "req": true}, {"key": "", "name": "Name", "type": "NVARCHAR(100)", "req": true}, {"key": "FK", "name": "StageId", "type": "INT"}], "zone": "teacher", "desc": "المواد الدراسية المتاحة بالمركز."}, {"id": "Teachers", "schema": "{schema}", "domain": "teacher-domain", "badge": "M-02 Core", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "TeacherId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "UserId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "FullName", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "Phone", "type": "NVARCHAR(30)", "req": true}, {"key": "", "name": "Qualification", "type": "NVARCHAR(200)"}, {"key": "", "name": "YearsExp", "type": "TINYINT"}, {"key": "", "name": "Status", "type": "NVARCHAR(15)", "req": true}, {"key": "", "name": "JoinedAt", "type": "DATE", "req": true}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}, {"key": "FK", "name": "CreatedBy", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "ModifiedAt", "type": "DATETIME2"}, {"key": "", "name": "DeletedAt", "type": "DATETIME2"}], "zone": "teacher", "desc": "بيانات المعلمين. يُحسب ضمن TeachersCount مقابل حد MaxTeachers في الخطة."}, {"id": "TeacherSalaryConfig", "schema": "{schema}", "domain": "teacher-domain", "badge": "M-02", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "ConfigId", "type": "INT IDENTITY", "req": true}, {"key": "FK", "name": "TeacherId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "GroupId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "SalaryType", "type": "NVARCHAR(10)", "req": true}, {"key": "", "name": "Value", "type": "DECIMAL(8,2)", "req": true}, {"key": "", "name": "EffectiveFrom", "type": "DATE", "req": true}], "zone": "teacher", "desc": "إعدادات احتساب راتب المعلم (نسبة/ثابت) لكل مجموعة أو عام."}, {"id": "SalaryPayments", "schema": "{schema}", "domain": "teacher-domain", "badge": "M-02", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "PaymentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "TeacherId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "PeriodMonth", "type": "TINYINT", "req": true}, {"key": "", "name": "PeriodYear", "type": "SMALLINT", "req": true}, {"key": "", "name": "GrossAmount", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "NetAmount", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "Status", "type": "NVARCHAR(10)", "req": true}, {"key": "", "name": "PaidAt", "type": "DATETIME2"}], "zone": "teacher", "desc": "مستحقات ودفعات رواتب المعلمين الشهرية."}, {"id": "TeacherRatings", "schema": "{schema}", "domain": "teacher-domain", "badge": "M-02", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "RatingId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "TeacherId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "StudentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "GroupId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Stars", "type": "TINYINT", "req": true}, {"key": "", "name": "Comment", "type": "NVARCHAR(500)"}, {"key": "", "name": "PeriodMonth", "type": "TINYINT", "req": true}, {"key": "", "name": "PeriodYear", "type": "SMALLINT", "req": true}], "zone": "teacher", "desc": "تقييمات الطلاب للمعلمين شهريًا."}, {"id": "Rooms", "schema": "{schema}", "domain": "schedule-domain", "badge": "M-03", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "RoomId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "BranchId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Name", "type": "NVARCHAR(100)", "req": true}, {"key": "", "name": "Capacity", "type": "SMALLINT", "req": true}, {"key": "", "name": "Facilities", "type": "NVARCHAR(200)"}, {"key": "", "name": "IsActive", "type": "BIT", "req": true}], "zone": "schedule", "desc": "قاعات/غرف كل فرع، تُستخدم لجدولة المجموعات."}, {"id": "Groups", "schema": "{schema}", "domain": "schedule-domain", "badge": "M-03 Core", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "GroupId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "BranchId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "TeacherId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "SubjectId", "type": "INT", "req": true}, {"key": "FK", "name": "StageId", "type": "INT", "req": true}, {"key": "FK", "name": "RoomId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "Name", "type": "NVARCHAR(150)", "req": true}, {"key": "", "name": "PricePerMonth", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "MaxStudents", "type": "SMALLINT", "req": true}, {"key": "", "name": "IsActive", "type": "BIT", "req": true}, {"key": "", "name": "IsArchived", "type": "BIT", "req": true}], "zone": "schedule", "desc": "المجموعات/الفصول الدراسية — الكيان المحوري الذي يربط المعلم بالطلاب بالجدول والتسعير."}, {"id": "GroupSchedule", "schema": "{schema}", "domain": "schedule-domain", "badge": "M-03", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "ScheduleId", "type": "INT IDENTITY", "req": true}, {"key": "FK", "name": "GroupId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "DayOfWeek", "type": "TINYINT", "req": true}, {"key": "", "name": "StartTime", "type": "TIME", "req": true}, {"key": "", "name": "EndTime", "type": "TIME", "req": true}], "zone": "schedule", "desc": "مواعيد انعقاد كل مجموعة أسبوعيًا."}, {"id": "StudentGroups", "schema": "{schema}", "domain": "schedule-domain", "badge": "M-03", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "StudentGroupId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "StudentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "GroupId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "JoinedAt", "type": "DATE", "req": true}, {"key": "", "name": "LeftAt", "type": "DATE"}, {"key": "", "name": "Status", "type": "NVARCHAR(10)", "req": true}, {"key": "", "name": "RowVersion", "type": "ROWVERSION", "req": true}], "zone": "schedule", "desc": "تسجيل الطلاب في المجموعات (Many-to-Many مع تاريخ الالتحاق/الانسحاب)."}, {"id": "Waitlist", "schema": "{schema}", "domain": "schedule-domain", "badge": "M-03", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "WaitlistId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "GroupId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "StudentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "RequestedAt", "type": "DATETIME2", "req": true}, {"key": "", "name": "Priority", "type": "SMALLINT", "req": true}, {"key": "", "name": "Status", "type": "NVARCHAR(10)", "req": true}], "zone": "schedule", "desc": "قائمة انتظار للمجموعات المكتملة العدد."}, {"id": "FeeTypes", "schema": "{schema}", "domain": "finance-domain", "badge": "M-04", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "FeeTypeId", "type": "INT IDENTITY", "req": true}, {"key": "", "name": "Name", "type": "NVARCHAR(100)", "req": true}, {"key": "", "name": "IsRecurring", "type": "BIT", "req": true}], "zone": "finance", "desc": "أنواع الرسوم (اشتراك شهري/رسوم تسجيل/كتب...)."}, {"id": "StudentFees", "schema": "{schema}", "domain": "finance-domain", "badge": "M-04", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "FeeId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "StudentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "GroupId", "type": "UNIQUEIDENTIFIER"}, {"key": "FK", "name": "FeeTypeId", "type": "INT", "req": true}, {"key": "", "name": "Amount", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "Discount", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "NetAmount", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "DueDate", "type": "DATE", "req": true}, {"key": "", "name": "Status", "type": "NVARCHAR(10)", "req": true}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}, {"key": "", "name": "RowVersion", "type": "ROWVERSION", "req": true}], "zone": "finance", "desc": "الرسوم المستحقة على كل طالب."}, {"id": "Payments", "schema": "{schema}", "domain": "finance-domain", "badge": "M-04", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "PaymentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "FeeId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "StudentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Amount", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "Method", "type": "NVARCHAR(20)", "req": true}, {"key": "", "name": "GatewayRef", "type": "NVARCHAR(200)"}, {"key": "", "name": "ReceiptNo", "type": "NVARCHAR(50)"}, {"key": "", "name": "PaidAt", "type": "DATETIME2", "req": true}, {"key": "FK", "name": "CreatedBy", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "RowVersion", "type": "ROWVERSION", "req": true}], "zone": "finance", "desc": "دفعات الطلاب الفعلية سداداً للرسوم — منفصل عن PlatformPayments الخاص باشتراك المركز نفسه في المنصة."}, {"id": "StudentCredits", "schema": "{schema}", "domain": "finance-domain", "badge": "M-04", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "CreditId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "StudentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Amount", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "SourceType", "type": "NVARCHAR(30)", "req": true}, {"key": "", "name": "SourceId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "Status", "type": "TINYINT", "req": true}, {"key": "FK", "name": "AppliedToFeeId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}], "zone": "finance", "desc": "محفظة أرصدة/خصومات للطالب (من مكافآت إحالة طالب لطالب، أو عروض)، تُطبَّق تلقائيًا على StudentFees القادمة."}, {"id": "ExpenseCategories", "schema": "{schema}", "domain": "finance-domain", "badge": "M-04", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "CategoryId", "type": "INT IDENTITY", "req": true}, {"key": "UK", "name": "Code", "type": "NVARCHAR(30)", "req": true}, {"key": "", "name": "DisplayName", "type": "NVARCHAR(80)", "req": true}], "zone": "finance", "desc": "تصنيفات المصروفات (إيجار/رواتب/صيانة...)."}, {"id": "Expenses", "schema": "{schema}", "domain": "finance-domain", "badge": "M-04", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "ExpenseId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "BranchId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "CategoryId", "type": "INT", "req": true}, {"key": "", "name": "Amount", "type": "DECIMAL(10,2)", "req": true}, {"key": "", "name": "Description", "type": "NVARCHAR(300)"}, {"key": "", "name": "ExpenseDate", "type": "DATE", "req": true}], "zone": "finance", "desc": "مصروفات تشغيل كل فرع."}, {"id": "Assessments", "schema": "{schema}", "domain": "academic-domain", "badge": "M-05", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "AssessmentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "GroupId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Title", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "Type", "type": "NVARCHAR(15)", "req": true}, {"key": "", "name": "MaxScore", "type": "DECIMAL(6,2)", "req": true}, {"key": "", "name": "AssessmentDate", "type": "DATE", "req": true}], "zone": "academic", "desc": "اختبارات/تقييمات دورية لكل مجموعة."}, {"id": "AssessmentResults", "schema": "{schema}", "domain": "academic-domain", "badge": "M-05", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "ResultId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "AssessmentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "StudentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Score", "type": "DECIMAL(6,2)"}, {"key": "", "name": "Grade", "type": "NVARCHAR(5)"}, {"key": "", "name": "Notes", "type": "NVARCHAR(300)"}], "zone": "academic", "desc": "درجات الطلاب في كل تقييم."}, {"id": "QuestionBank", "schema": "{schema}", "domain": "academic-domain", "badge": "M-05", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "QuestionId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "SubjectId", "type": "INT", "req": true}, {"key": "", "name": "QuestionText", "type": "NVARCHAR(MAX)", "req": true}, {"key": "", "name": "Type", "type": "NVARCHAR(15)", "req": true}, {"key": "", "name": "Options", "type": "NVARCHAR(MAX)"}, {"key": "", "name": "CorrectAnswer", "type": "NVARCHAR(MAX)", "req": true}, {"key": "", "name": "Difficulty", "type": "TINYINT", "req": true}, {"key": "", "name": "TimesUsed", "type": "INT", "req": true}, {"key": "", "name": "CorrectRate", "type": "DECIMAL(5,2)"}], "zone": "academic", "desc": "بنك أسئلة قابل لإعادة الاستخدام في أي اختبار."}, {"id": "ExamSessions", "schema": "{schema}", "domain": "academic-domain", "badge": "M-05", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "ExamId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "GroupId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Title", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "StartAt", "type": "DATETIME2", "req": true}, {"key": "", "name": "EndAt", "type": "DATETIME2", "req": true}, {"key": "", "name": "DurationMin", "type": "SMALLINT", "req": true}, {"key": "", "name": "Status", "type": "NVARCHAR(10)", "req": true}], "zone": "academic", "desc": "جلسات امتحان إلكترونية مجدولة."}, {"id": "Employees", "schema": "{schema}", "domain": "hr-domain", "badge": "M-06", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "EmployeeId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "UserId", "type": "UNIQUEIDENTIFIER"}, {"key": "FK", "name": "BranchId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "FullName", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "JobTitle", "type": "NVARCHAR(100)"}, {"key": "", "name": "ContractType", "type": "NVARCHAR(20)"}, {"key": "", "name": "JoinedAt", "type": "DATE", "req": true}, {"key": "", "name": "Status", "type": "NVARCHAR(15)", "req": true}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}, {"key": "", "name": "DeletedAt", "type": "DATETIME2"}], "zone": "hr", "desc": "الموظفون الإداريون (غير المعلمين) بكل فرع. يُحسب ضمن UsersCount إجمالاً مع بقية أنواع المستخدمين."}, {"id": "LeaveTypes", "schema": "{schema}", "domain": "hr-domain", "badge": "M-06", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "LeaveTypeId", "type": "INT IDENTITY", "req": true}, {"key": "UK", "name": "Code", "type": "NVARCHAR(30)", "req": true}, {"key": "", "name": "DisplayName", "type": "NVARCHAR(80)", "req": true}, {"key": "", "name": "MaxDaysYear", "type": "TINYINT"}], "zone": "hr", "desc": "أنواع الإجازات المسموح بها وحدها السنوي."}, {"id": "LeaveRequests", "schema": "{schema}", "domain": "hr-domain", "badge": "M-06", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "RequestId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "EmployeeId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "LeaveTypeId", "type": "INT", "req": true}, {"key": "", "name": "StartDate", "type": "DATE", "req": true}, {"key": "", "name": "EndDate", "type": "DATE", "req": true}, {"key": "", "name": "Days", "type": "TINYINT", "req": true}, {"key": "", "name": "Status", "type": "NVARCHAR(10)", "req": true}], "zone": "hr", "desc": "طلبات إجازة الموظفين."}, {"id": "NotificationTemplates", "schema": "{schema}", "domain": "comms-domain", "badge": "M-07", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "TemplateId", "type": "INT IDENTITY", "req": true}, {"key": "UK", "name": "Code", "type": "NVARCHAR(50)", "req": true}, {"key": "", "name": "Channel", "type": "NVARCHAR(15)", "req": true}, {"key": "", "name": "Subject", "type": "NVARCHAR(200)"}, {"key": "", "name": "Body", "type": "NVARCHAR(MAX)", "req": true}], "zone": "comms", "desc": "قوالب الرسائل (SMS/Email/Push) الجاهزة لإعادة الاستخدام."}, {"id": "NotificationLogs", "schema": "{schema}", "domain": "comms-domain", "badge": "M-07", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "LogId", "type": "BIGINT IDENTITY", "req": true}, {"key": "FK", "name": "TemplateId", "type": "INT"}, {"key": "", "name": "Recipient", "type": "NVARCHAR(100)", "req": true}, {"key": "", "name": "Channel", "type": "NVARCHAR(15)", "req": true}, {"key": "", "name": "Body", "type": "NVARCHAR(1000)", "req": true}, {"key": "", "name": "Status", "type": "NVARCHAR(10)", "req": true}, {"key": "", "name": "SentAt", "type": "DATETIME2", "req": true}], "zone": "comms", "desc": "سجل إرسال فعلي لكل رسالة SMS/Email — يُستخدم أيضًا لاحتساب SMSUsedThisCycle."}, {"id": "Announcements", "schema": "{schema}", "domain": "comms-domain", "badge": "M-07", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "AnnouncementId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Title", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "Body", "type": "NVARCHAR(MAX)", "req": true}, {"key": "", "name": "TargetType", "type": "NVARCHAR(15)", "req": true}, {"key": "", "name": "TargetId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "ScheduledAt", "type": "DATETIME2"}, {"key": "", "name": "PublishedAt", "type": "DATETIME2"}], "zone": "comms", "desc": "إعلانات عامة موجهة لفرع/مجموعة/الكل."}, {"id": "Notifications", "schema": "{schema}", "domain": "comms-domain", "badge": "M-07", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "NotificationId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Title", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "Body", "type": "NVARCHAR(MAX)", "req": true}, {"key": "", "name": "Type", "type": "NVARCHAR(30)", "req": true}, {"key": "FK", "name": "CreatedBy", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}], "zone": "comms", "desc": "إشعارات داخل التطبيق (In-app)."}, {"id": "NotificationRecipients", "schema": "{schema}", "domain": "comms-domain", "badge": "Junction", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "NotificationId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "UserId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "ReadAt", "type": "DATETIME2"}], "zone": "comms", "desc": "من استلم/قرأ كل إشعار."}, {"id": "LeadSources", "schema": "{schema}", "domain": "growth-domain", "badge": "M-08", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "SourceId", "type": "INT IDENTITY", "req": true}, {"key": "UK", "name": "Code", "type": "NVARCHAR(30)", "req": true}, {"key": "", "name": "DisplayName", "type": "NVARCHAR(80)", "req": true}], "zone": "growth", "desc": "مصادر العملاء المحتملين (فيسبوك/إحالة/موقع...)."}, {"id": "CRMLeads", "schema": "{schema}", "domain": "growth-domain", "badge": "M-08", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "LeadId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "StudentId", "type": "UNIQUEIDENTIFIER"}, {"key": "FK", "name": "SourceId", "type": "INT"}, {"key": "", "name": "FullName", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "Phone", "type": "NVARCHAR(30)"}, {"key": "", "name": "Stage", "type": "NVARCHAR(20)", "req": true}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}], "zone": "growth", "desc": "عملاء محتملون لطلاب جدد داخل المركز — منفصل عن TenantCRMLeads (عملاء المنصة نفسها)."}, {"id": "ReferralCodes", "schema": "{schema}", "domain": "growth-domain", "badge": "M-08", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "CodeId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "StudentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "UK", "name": "Code", "type": "NVARCHAR(20)", "req": true}, {"key": "", "name": "TimesUsed", "type": "INT", "req": true}, {"key": "", "name": "IsActive", "type": "BIT", "req": true}], "zone": "growth", "desc": "كود إحالة ثابت لكل طالب."}, {"id": "StudentReferrals", "schema": "{schema}", "domain": "growth-domain", "badge": "M-08", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "ReferralId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "ReferrerStudentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "UK", "name": "ReferredStudentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "ReferralCodeId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Status", "type": "TINYINT", "req": true}, {"key": "", "name": "QualifiedAt", "type": "DATETIME2"}, {"key": "", "name": "RewardType", "type": "NVARCHAR(10)", "req": true}, {"key": "", "name": "RewardValue", "type": "DECIMAL(6,2)", "req": true}, {"key": "", "name": "RewardAppliedTo", "type": "NVARCHAR(10)", "req": true}, {"key": "", "name": "RewardAppliedAt", "type": "DATETIME2"}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}], "zone": "growth", "desc": "سجل إحالة طالب لطالب. نفس منطق TenantReferrals: المكافأة تُفعَّل بعد Qualified فقط (مثلاً أول قسط مدفوع)."}, {"id": "ChurnScores", "schema": "{schema}", "domain": "growth-domain", "badge": "M-08", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "ScoreId", "type": "BIGINT IDENTITY", "req": true}, {"key": "FK", "name": "StudentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Score", "type": "DECIMAL(5,2)", "req": true}, {"key": "", "name": "Signals", "type": "NVARCHAR(MAX)"}, {"key": "", "name": "ComputedAt", "type": "DATETIME2", "req": true}], "zone": "growth", "desc": "مؤشر احتمالية انسحاب الطالب (Churn Prediction) محسوب دوريًا."}, {"id": "Courses", "schema": "{schema}", "domain": "lms-domain", "badge": "M-09", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "CourseId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "TeacherId", "type": "UNIQUEIDENTIFIER"}, {"key": "FK", "name": "SubjectId", "type": "INT"}, {"key": "", "name": "Title", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "IsPublished", "type": "BIT", "req": true}], "zone": "lms", "desc": "دورات تعليمية إلكترونية (LMS)."}, {"id": "Units", "schema": "{schema}", "domain": "lms-domain", "badge": "M-09", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "UnitId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "CourseId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Title", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "SortOrder", "type": "SMALLINT", "req": true}], "zone": "lms", "desc": "وحدات الكورس."}, {"id": "Lessons", "schema": "{schema}", "domain": "lms-domain", "badge": "M-09", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "LessonId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "UnitId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Title", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "Type", "type": "NVARCHAR(15)", "req": true}, {"key": "", "name": "ContentUrl", "type": "NVARCHAR(500)"}, {"key": "", "name": "PublishAt", "type": "DATETIME2"}, {"key": "", "name": "ExpireAt", "type": "DATETIME2"}], "zone": "lms", "desc": "دروس الوحدة (فيديو/PDF/رابط)."}, {"id": "Assignments", "schema": "{schema}", "domain": "lms-domain", "badge": "M-09", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "AssignmentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "CourseId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Title", "type": "NVARCHAR(200)", "req": true}, {"key": "", "name": "Description", "type": "NVARCHAR(MAX)"}, {"key": "", "name": "DueDate", "type": "DATETIME2", "req": true}], "zone": "lms", "desc": "واجبات الكورس."}, {"id": "AssignmentSubmissions", "schema": "{schema}", "domain": "lms-domain", "badge": "M-09", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "SubmissionId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "AssignmentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "StudentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "FileId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "Grade", "type": "DECIMAL(6,2)"}, {"key": "", "name": "SubmittedAt", "type": "DATETIME2", "req": true}], "zone": "lms", "desc": "تسليمات الطلاب للواجبات."}, {"id": "StudentProgress", "schema": "{schema}", "domain": "lms-domain", "badge": "M-09", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "ProgressId", "type": "BIGINT IDENTITY", "req": true}, {"key": "FK", "name": "StudentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "LessonId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "IsCompleted", "type": "BIT", "req": true}, {"key": "", "name": "LastViewAt", "type": "DATETIME2", "req": true}], "zone": "lms", "desc": "تقدم الطالب في مشاهدة/إكمال الدروس."}, {"id": "Parents", "schema": "{schema}", "domain": "parent-domain", "badge": "M-10", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "ParentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "UserId", "type": "UNIQUEIDENTIFIER"}, {"key": "", "name": "FullName", "type": "NVARCHAR(200)", "req": true}, {"key": "UK", "name": "Phone", "type": "NVARCHAR(30)", "req": true}, {"key": "", "name": "Email", "type": "NVARCHAR(200)"}, {"key": "", "name": "NationalId", "type": "NVARCHAR(20)"}, {"key": "", "name": "Occupation", "type": "NVARCHAR(100)"}, {"key": "", "name": "Address", "type": "NVARCHAR(300)"}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}], "zone": "parent", "desc": "أولياء الأمور."}, {"id": "StudentParents", "schema": "{schema}", "domain": "parent-domain", "badge": "Junction", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "StudentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "ParentId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Relationship", "type": "NVARCHAR(20)", "req": true}, {"key": "", "name": "IsPrimaryContact", "type": "BIT", "req": true}], "zone": "parent", "desc": "ربط الطالب بأولياء أموره (Many-to-Many)."}, {"id": "Files", "schema": "{schema}", "domain": "storage-domain", "badge": "M-11", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "FileId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "OriginalName", "type": "NVARCHAR(300)", "req": true}, {"key": "", "name": "StorageProvider", "type": "NVARCHAR(20)", "req": true}, {"key": "", "name": "Path", "type": "NVARCHAR(500)", "req": true}, {"key": "", "name": "MimeType", "type": "NVARCHAR(100)", "req": true}, {"key": "", "name": "SizeBytes", "type": "BIGINT", "req": true}, {"key": "FK", "name": "UploadedBy", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "UploadedAt", "type": "DATETIME2", "req": true}], "zone": "storage", "desc": "المرفقات المرفوعة. مجموع SizeBytes يُستخدم لاحتساب StorageUsedMB مقابل حد StorageGB بالخطة."}, {"id": "EntityFiles", "schema": "{schema}", "domain": "storage-domain", "badge": "Junction", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "EntityType", "type": "NVARCHAR(40)", "req": true}, {"key": "", "name": "EntityId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "FK", "name": "FileId", "type": "UNIQUEIDENTIFIER", "req": true}], "zone": "storage", "desc": "ربط عام (Polymorphic) بين أي ملف وأي كيان في النظام (طالب/واجب/مركز...)."}, {"id": "Notes", "schema": "{schema}", "domain": "notes-domain", "badge": "M-14", "cols": [{"key": "FK", "name": "TenantId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "PK", "name": "NoteId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "EntityType", "type": "NVARCHAR(40)", "req": true}, {"key": "", "name": "EntityId", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "Text", "type": "NVARCHAR(MAX)", "req": true}, {"key": "FK", "name": "CreatedBy", "type": "UNIQUEIDENTIFIER", "req": true}, {"key": "", "name": "CreatedAt", "type": "DATETIME2", "req": true}], "zone": "notes", "desc": "ملاحظات حرة (Polymorphic) على أي كيان."}];
+const RELS_RAW = [["TenantPlans", "Tenants", "pk-fk"], ["TenantPlans", "Plans", "pk-fk"], ["PlanFeatures", "Plans", "pk-fk"], ["PlanFeatures", "Features", "pk-fk"], ["AddOnPricingTiers", "AddOnCatalog", "pk-fk"], ["TenantAddOns", "Tenants", "pk-fk"], ["TenantAddOns", "AddOnCatalog", "pk-fk"], ["TenantAddOns", "InvoiceLines", "idx"], ["TenantUsageCounters", "Tenants", "pk-fk"], ["TenantLimitOverrides", "Tenants", "pk-fk"], ["Invoices", "Tenants", "pk-fk"], ["InvoiceLines", "Invoices", "pk-fk"], ["PlatformPayments", "Invoices", "pk-fk"], ["TenantCredits", "Tenants", "pk-fk"], ["TenantCredits", "InvoiceLines", "idx"], ["TenantReferralCodes", "Tenants", "pk-fk"], ["TenantReferrals", "Tenants", "pk-fk"], ["TenantReferrals", "TenantReferralCodes", "pk-fk"], ["TenantSettings", "Tenants", "pk-fk"], ["TenantProvisioningJobs", "Tenants", "pk-fk"], ["TenantSchemaVersion", "Tenants", "pk-fk"], ["PlatformAuditLog", "Tenants", "idx"], ["PlatformUserRoles", "PlatformUsers", "pk-fk"], ["PlatformUserRoles", "PlatformRoles", "pk-fk"], ["PlatformRolePermissions", "PlatformRoles", "pk-fk"], ["PlatformRolePermissions", "PlatformPermissions", "pk-fk"], ["ImpersonationLogs", "PlatformUsers", "pk-fk"], ["ImpersonationLogs", "Tenants", "idx"], ["UserRoles", "Users", "pk-fk"], ["UserRoles", "Roles", "pk-fk"], ["RolePermissions", "Roles", "pk-fk"], ["RolePermissions", "Permissions", "pk-fk"], ["RefreshTokens", "Users", "pk-fk"], ["AuditLog", "Users", "pk-fk"], ["LoginHistory", "Users", "pk-fk"], ["AcademicYears", "AcademicStages", "pk-fk"], ["Students", "Branches", "pk-fk"], ["Students", "AcademicStages", "pk-fk"], ["Students", "AcademicYears", "pk-fk"], ["AttendanceLogs", "Students", "pk-fk"], ["AttendanceLogs", "Groups", "idx"], ["Branches", "Users", "idx"], ["Subjects", "AcademicStages", "idx"], ["Teachers", "Users", "idx"], ["TeacherSalaryConfig", "Teachers", "pk-fk"], ["TeacherSalaryConfig", "Groups", "idx"], ["SalaryPayments", "Teachers", "pk-fk"], ["TeacherRatings", "Teachers", "pk-fk"], ["TeacherRatings", "Students", "pk-fk"], ["TeacherRatings", "Groups", "idx"], ["Rooms", "Branches", "pk-fk"], ["Groups", "Branches", "pk-fk"], ["Groups", "Teachers", "pk-fk"], ["Groups", "Subjects", "pk-fk"], ["Groups", "AcademicStages", "idx"], ["Groups", "Rooms", "idx"], ["GroupSchedule", "Groups", "pk-fk"], ["StudentGroups", "Students", "pk-fk"], ["StudentGroups", "Groups", "pk-fk"], ["Waitlist", "Groups", "pk-fk"], ["Waitlist", "Students", "pk-fk"], ["StudentFees", "Students", "pk-fk"], ["StudentFees", "Groups", "idx"], ["StudentFees", "FeeTypes", "pk-fk"], ["Payments", "StudentFees", "pk-fk"], ["Payments", "Students", "pk-fk"], ["StudentCredits", "Students", "pk-fk"], ["StudentCredits", "StudentFees", "idx"], ["Expenses", "Branches", "pk-fk"], ["Expenses", "ExpenseCategories", "pk-fk"], ["Assessments", "Groups", "pk-fk"], ["AssessmentResults", "Assessments", "pk-fk"], ["AssessmentResults", "Students", "pk-fk"], ["QuestionBank", "Subjects", "pk-fk"], ["ExamSessions", "Groups", "pk-fk"], ["Employees", "Users", "idx"], ["Employees", "Branches", "pk-fk"], ["LeaveRequests", "Employees", "pk-fk"], ["LeaveRequests", "LeaveTypes", "pk-fk"], ["NotificationLogs", "NotificationTemplates", "idx"], ["Notifications", "Users", "idx"], ["NotificationRecipients", "Notifications", "pk-fk"], ["NotificationRecipients", "Users", "pk-fk"], ["CRMLeads", "Students", "idx"], ["CRMLeads", "LeadSources", "pk-fk"], ["ReferralCodes", "Students", "pk-fk"], ["StudentReferrals", "Students", "idx"], ["StudentReferrals", "ReferralCodes", "pk-fk"], ["ChurnScores", "Students", "pk-fk"], ["Courses", "Teachers", "idx"], ["Courses", "Subjects", "idx"], ["Units", "Courses", "pk-fk"], ["Lessons", "Units", "pk-fk"], ["Assignments", "Courses", "pk-fk"], ["AssignmentSubmissions", "Assignments", "pk-fk"], ["AssignmentSubmissions", "Students", "pk-fk"], ["AssignmentSubmissions", "Files", "idx"], ["StudentProgress", "Students", "pk-fk"], ["StudentProgress", "Lessons", "pk-fk"], ["Parents", "Users", "idx"], ["StudentParents", "Students", "pk-fk"], ["StudentParents", "Parents", "pk-fk"], ["EntityFiles", "Files", "pk-fk"]];
+const RELS = RELS_RAW.map(r => ({from:r[0], to:r[1], type:r[2]}));
+
+// ═══════════════════════════════════════════════════════════
+// AUTO LAYOUT — group by zone, greedy column packing
+// ═══════════════════════════════════════════════════════════
+const ZONE_ORDER = [
+  "platform-core","platform-sub","billing","platform-growth","platform-sec",
+  "t-security","student","teacher","schedule","finance","academic","hr","comms","growth","lms","parent","storage","notes"
+];
+const ZONE_TITLES = {
+  "platform-core":"Platform — Core & Plans",
+  "platform-sub":"Platform — Subscriptions & Add-ons",
+  "billing":"Platform — Billing & Invoicing",
+  "platform-growth":"Platform — CRM, Referrals & Ops",
+  "platform-sec":"Platform — Internal Staff (Admin)",
+  "t-security":"Tenant — M-12 Security",
+  "student":"Tenant — M-01 Students",
+  "teacher":"Tenant — M-02 Teachers",
+  "schedule":"Tenant — M-03 Schedule",
+  "finance":"Tenant — M-04 Finance",
+  "academic":"Tenant — M-05 Academic",
+  "hr":"Tenant — M-06 HR",
+  "comms":"Tenant — M-07 Comms",
+  "growth":"Tenant — M-08 Growth / Referral",
+  "lms":"Tenant — M-09 LMS",
+  "parent":"Tenant — M-10 Parents",
+  "storage":"Tenant — M-11 Storage",
+  "notes":"Tenant — M-14 Notes",
+};
+// Region: platform zones stack in left column-block, tenant zones stack in right column-block
+const PLATFORM_ZONES = new Set(["platform-core","platform-sub","billing","platform-growth","platform-sec"]);
+const REGION_X = { platform: 60, tenant: 3050 };
+const NUM_COLS = 3;
+const COL_W = 262;
+const ROW_GAP = 26;
+const ZONE_GAP_Y = 90;
+const HEADER_H = 34;
+const ROW_H = 21;
+const DESC_RESERVE = 0; // description hidden by default, no extra height needed
+
+function estHeight(t){
+  return HEADER_H + t.cols.length*ROW_H + 14;
+}
+
+function layout(){
+  let cursorY = { platform: 70, tenant: 70 };
+  ZONE_ORDER.forEach(zoneKey => {
+    const zTables = TABLES.filter(t => t.zone === zoneKey);
+    if(zTables.length === 0) return;
+    const region = PLATFORM_ZONES.has(zoneKey) ? "platform" : "tenant";
+    const baseX = REGION_X[region];
+    const baseY = cursorY[region];
+    // zone label
+    zTables._zoneBaseY = baseY;
+    const colHeights = new Array(NUM_COLS).fill(0);
+    zTables.forEach(t => {
+      let col = 0, min = colHeights[0];
+      for(let i=1;i<NUM_COLS;i++){ if(colHeights[i] < min){ min = colHeights[i]; col = i; } }
+      t.x = baseX + col*COL_W;
+      t.y = baseY + 28 + colHeights[col];
+      colHeights[col] += estHeight(t) + ROW_GAP;
+    });
+    const maxColH = Math.max(...colHeights);
+    t_zoneLabels.push({ text: ZONE_TITLES[zoneKey], x: baseX, y: baseY });
+    cursorY[region] = baseY + 28 + maxColH + ZONE_GAP_Y;
+  });
+}
+const t_zoneLabels = [];
+layout();
+
+// ═══════════════════════════════════════════════════════════
+// BUILD DOM
+// ═══════════════════════════════════════════════════════════
+const canvas = document.getElementById('canvas');
+const svg = document.getElementById('svg-overlay');
+const tableEls = {};
+
+function buildZoneLabels(){
+  t_zoneLabels.forEach(z => {
+    const el = document.createElement('div');
+    el.className = 'zone-label';
+    el.style.left = z.x + 'px';
+    el.style.top = (z.y - 6) + 'px';
+    el.textContent = z.text;
+    canvas.appendChild(el);
+  });
+}
+
+function buildTables(){
+  TABLES.forEach(t => {
+    const el = document.createElement('div');
+    el.className = `tbl ${t.domain}`;
+    el.id = 'tbl-' + t.id;
+    el.style.left = t.x + 'px';
+    el.style.top  = t.y + 'px';
+    el.style.zIndex = 10;
+
+    const schemaLabel = t.schema === '{schema}' ? 't_{slug}' : t.schema;
+
+    let html = `<div class="tbl-head" data-drag-handle="1">
+      <div>
+        <div class="tbl-schema">${schemaLabel}</div>
+        <div class="tbl-name">${t.id}</div>
+      </div>
+      <span class="info-toggle" title="عرض/إخفاء الشرح" onclick="toggleDesc(event,'${t.id}')">ⓘ</span>
+      <div class="tbl-badge">${t.badge}</div>
+    </div><div class="tbl-body">`;
+
+    t.cols.forEach((col, i) => {
+      if(i > 0 && col.key === 'FK' && t.cols[i-1].key !== 'FK') html += `<div class="col-divider"></div>`;
+      html += `<div class="col-row">
+        <span class="col-key ${col.key.toLowerCase()}">${col.key}</span>
+        <span class="col-name">${col.name}</span>
+        <span class="col-type">${col.type}</span>
+        ${col.req ? '<span class="col-req">*</span>' : ''}
+      </div>`;
+    });
+    html += `</div><div class="tbl-desc">${t.desc || ''}</div>`;
+    el.innerHTML = html;
+
+    el.addEventListener('click', (e) => { if(!draggingTable) highlightRelations(t.id); });
+    canvas.appendChild(el);
+    tableEls[t.id] = el;
+    makeDraggable(el, t);
+  });
+}
+
+function toggleDesc(e, id){
+  e.stopPropagation();
+  tableEls[id].classList.toggle('expanded');
+}
+let allExpanded = false;
+function toggleAllDesc(){
+  allExpanded = !allExpanded;
+  Object.values(tableEls).forEach(el => el.classList.toggle('expanded', allExpanded));
+}
+
+// ═══════════════════════════════════════════════════════════
+// DRAG INDIVIDUAL TABLES
+// ═══════════════════════════════════════════════════════════
+let draggingTable = null;
+function makeDraggable(el, t){
+  let startMouseX, startMouseY, startX, startY;
+  const head = el.querySelector('.tbl-head');
+  head.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+    draggingTable = t;
+    el.classList.add('dragged');
+    startMouseX = e.clientX; startMouseY = e.clientY;
+    startX = t.x; startY = t.y;
+    document.addEventListener('mousemove', onDragMove);
+    document.addEventListener('mouseup', onDragEnd);
+  });
+  head.addEventListener('touchstart', (e) => {
+    e.stopPropagation();
+    const touch = e.touches[0];
+    draggingTable = t;
+    el.classList.add('dragged');
+    startMouseX = touch.clientX; startMouseY = touch.clientY;
+    startX = t.x; startY = t.y;
+    document.addEventListener('touchmove', onDragMoveTouch, {passive:false});
+    document.addEventListener('touchend', onDragEndTouch);
+  }, {passive:true});
+
+  function onDragMove(e){
+    const dx = (e.clientX - startMouseX) / scale;
+    const dy = (e.clientY - startMouseY) / scale;
+    t.x = startX + dx; t.y = startY + dy;
+    el.style.left = t.x + 'px'; el.style.top = t.y + 'px';
+    requestAnimationFrame(drawLines);
+  }
+  function onDragEnd(){
+    document.removeEventListener('mousemove', onDragMove);
+    document.removeEventListener('mouseup', onDragEnd);
+    setTimeout(()=>{ draggingTable = null; }, 50);
+  }
+  function onDragMoveTouch(e){
+    e.preventDefault();
+    const touch = e.touches[0];
+    const dx = (touch.clientX - startMouseX) / scale;
+    const dy = (touch.clientY - startMouseY) / scale;
+    t.x = startX + dx; t.y = startY + dy;
+    el.style.left = t.x + 'px'; el.style.top = t.y + 'px';
+    requestAnimationFrame(drawLines);
+  }
+  function onDragEndTouch(){
+    document.removeEventListener('touchmove', onDragMoveTouch);
+    document.removeEventListener('touchend', onDragEndTouch);
+    setTimeout(()=>{ draggingTable = null; }, 50);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// RELATION LINES
+// ═══════════════════════════════════════════════════════════
+function getCenter(id){
+  const t = TABLES.find(t=>t.id===id);
+  const el = tableEls[id];
+  if(!t || !el) return null;
+  const w = el.offsetWidth, h = el.offsetHeight;
+  return { x: t.x + w/2, y: t.y + h/2 };
+}
+
+function drawLines(){
+  svg.innerHTML = '';
+  svg.setAttribute('width', 8200);
+  svg.setAttribute('height', 6000);
+  RELS.forEach(r => {
+    const a = getCenter(r.from), b = getCenter(r.to);
+    if(!a || !b) return;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const cx1 = a.x + dx*0.4, cy1 = a.y;
+    const cx2 = b.x - dx*0.4, cy2 = b.y;
+    const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('d', `M ${a.x} ${a.y} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${b.x} ${b.y}`);
+    path.setAttribute('class', `rel-line ${r.type}`);
+    path.setAttribute('data-from', r.from);
+    path.setAttribute('data-to', r.to);
+    svg.appendChild(path);
+  });
+}
+
+let highlighted = null;
+function highlightRelations(id){
+  if(highlighted === id){ clearHighlight(); return; }
+  highlighted = id;
+  svg.querySelectorAll('.rel-line').forEach(l => {
+    const active = l.getAttribute('data-from')===id || l.getAttribute('data-to')===id;
+    l.style.opacity = active ? '1' : '0.06';
+    l.style.strokeWidth = active ? '2.4' : '1.4';
+  });
+  Object.values(tableEls).forEach(el => {
+    const tid = el.id.replace('tbl-','');
+    const connected = RELS.some(r=>(r.from===id&&r.to===tid)||(r.to===id&&r.from===tid));
+    el.style.opacity = (tid===id||connected) ? '1' : '0.25';
+  });
+}
+function clearHighlight(){
+  highlighted = null;
+  svg.querySelectorAll('.rel-line').forEach(l => { l.style.opacity='0.45'; l.style.strokeWidth='1.4'; });
+  Object.values(tableEls).forEach(el => el.style.opacity = '1');
+}
+
+// ═══════════════════════════════════════════════════════════
+// SEARCH
+// ═══════════════════════════════════════════════════════════
+function doSearch(q){
+  const box = document.getElementById('search-results');
+  q = q.trim().toLowerCase();
+  if(!q){ box.style.display='none'; box.innerHTML=''; return; }
+  const hits = TABLES.filter(t => t.id.toLowerCase().includes(q)).slice(0,12);
+  if(hits.length===0){ box.style.display='none'; box.innerHTML=''; return; }
+  box.innerHTML = hits.map(t=>`<div class="search-hit" onclick="focusTable('${t.id}')">${t.id} <span style="color:var(--muted)">— ${t.badge}</span></div>`).join('');
+  box.style.display = 'block';
+}
+function focusTable(id){
+  const t = TABLES.find(t=>t.id===id);
+  if(!t) return;
+  const ww = wrap.offsetWidth, wh = wrap.offsetHeight;
+  scale = 1;
+  tx = ww/2 - (t.x+120)*scale;
+  ty = wh/2 - (t.y+80)*scale;
+  applyTransform();
+  clearHighlight();
+  highlightRelations(id);
+  document.getElementById('search-results').style.display='none';
+  document.getElementById('search-input').value='';
+}
+
+// ═══════════════════════════════════════════════════════════
+// PAN & ZOOM
+// ═══════════════════════════════════════════════════════════
+let scale = 0.34, tx = 40, ty = 40;
+let dragging = false, lastX = 0, lastY = 0;
+const wrap = document.getElementById('canvas-wrap');
+
+function applyTransform(){
+  canvas.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  document.getElementById('zoom-level').textContent = Math.round(scale*100)+'%';
+}
+wrap.addEventListener('mousedown', e => {
+  if(e.target.closest('.tbl')) return;
+  dragging = true; lastX = e.clientX; lastY = e.clientY;
+  wrap.classList.add('dragging');
+});
+window.addEventListener('mousemove', e => {
+  if(!dragging) return;
+  tx += e.clientX - lastX; ty += e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  applyTransform();
+});
+window.addEventListener('mouseup', () => { dragging=false; wrap.classList.remove('dragging'); });
+wrap.addEventListener('wheel', e => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.9 : 1.1;
+  const rect = wrap.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  tx = mx - (mx - tx) * delta; ty = my - (my - ty) * delta;
+  scale = Math.max(0.1, Math.min(2.5, scale * delta));
+  applyTransform();
+}, {passive:false});
+function zoomIn(){ scale = Math.min(2.5, scale*1.2); applyTransform(); }
+function zoomOut(){ scale = Math.max(0.1, scale/1.2); applyTransform(); }
+function resetView(){ scale=0.34; tx=40; ty=40; applyTransform(); }
+function fitAll(){ scale = 0.16; tx = 20; ty = 20; applyTransform(); }
+
+let lastTouchDist = 0;
+wrap.addEventListener('touchstart', e => {
+  if(e.target.closest('.tbl')) return;
+  if(e.touches.length===1){ dragging=true; lastX=e.touches[0].clientX; lastY=e.touches[0].clientY; }
+  if(e.touches.length===2){ lastTouchDist = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY); }
+}, {passive:true});
+wrap.addEventListener('touchmove', e => {
+  if(e.touches.length===1 && dragging){
+    tx += e.touches[0].clientX - lastX; ty += e.touches[0].clientY - lastY;
+    lastX=e.touches[0].clientX; lastY=e.touches[0].clientY;
+    applyTransform();
+  }
+  if(e.touches.length===2){
+    const d = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+    scale = Math.max(0.1, Math.min(2.5, scale*(d/lastTouchDist)));
+    lastTouchDist = d;
+    applyTransform();
+  }
+}, {passive:true});
+wrap.addEventListener('touchend', ()=>{ dragging=false; });
+
+// ═══════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════
+buildZoneLabels();
+buildTables();
+applyTransform();
+setTimeout(drawLines, 150);
+window.addEventListener('resize', drawLines);
+</script>
+</body>
+</html>

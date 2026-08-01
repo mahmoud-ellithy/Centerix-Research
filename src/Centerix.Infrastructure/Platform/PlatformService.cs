@@ -261,6 +261,7 @@ public class PlatformService(
         var planResult = TenantPlan.Create(
             Guid.NewGuid(),
             tenantPlanDto.PlanId,
+            tenantPlanDto.SnapshotPrice,
             tenantPlanDto.StartsAt,
             tenantPlanDto.AutoRenew,
             (SubscriptionStatus)tenantPlanDto.Status);
@@ -385,7 +386,7 @@ public class PlatformService(
             leadDto.Phone,
             leadDto.Source,
             stage,
-            leadDto.AssignedTo);
+            string.IsNullOrEmpty(leadDto.AssignedTo) ? null : Guid.TryParse(leadDto.AssignedTo, out var assignedTo) ? assignedTo : null);
 
         if (!leadResult.IsSuccess)
             return leadResult.Errors!;
@@ -419,7 +420,7 @@ public class PlatformService(
             leadDto.Phone,
             leadDto.Source,
             leadDto.Stage,
-            leadDto.AssignedTo);
+            string.IsNullOrEmpty(leadDto.AssignedTo) ? null : Guid.TryParse(leadDto.AssignedTo, out var updAssignedTo) ? updAssignedTo : null);
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 

@@ -1,64 +1,100 @@
 using Centerix.Application.Common.Interfaces;
-using Centerix.Application.Tenants;
+using Centerix.Application.Platform.Tenants;
+using Centerix.Application.Platform.Tenants.Commands;
+using Centerix.Application.Platform.Tenants.Queries;
 using Centerix.Infrastructure.Auth;
+using MediatR;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Centerix.API.Controllers;
 
 [Route("api/[controller]")]
-public class TenantsController(ILocalizer localizer, ITenantService tenantService) : ApiController(localizer)
+public class TenantsController(ILocalizer localizer, IMediator mediator) : ApiController(localizer)
 {
-    private readonly ITenantService _tenantService = tenantService;
-
     [HttpGet]
     [HasPermission(Permissions.Tenants.Read)]
     public async Task<IActionResult> GetTenants(CancellationToken cancellationToken)
     {
-        var tenants = await _tenantService.GetTenantsAsync(cancellationToken);
-        return Ok(tenants);
+        var result = await mediator.Send(new GetTenantsQuery(), cancellationToken);
+
+        return result.Match(
+            tenants => Ok(tenants),
+            Problem);
     }
 
-    [HttpGet("{id}")]
+    [HttpGet("{id:guid}")]
     [HasPermission(Permissions.Tenants.Read)]
-    public async Task<IActionResult> GetTenant(string id, CancellationToken cancellationToken)
+    public async Task<IActionResult> GetTenant(Guid id, CancellationToken cancellationToken)
     {
-        var tenant = await _tenantService.GetTenantByIdAsync(id, cancellationToken);
-        if (tenant is null)
-        {
-            return NotFound();
-        }
-        return Ok(tenant);
+        var result = await mediator.Send(new GetTenantByIdQuery(id), cancellationToken);
+
+        return result.Match(
+            tenant => Ok(tenant),
+            Problem);
     }
 
     [HttpPost]
     [HasPermission(Permissions.Tenants.Create)]
-    public async Task<IActionResult> CreateTenant(CreateTenantRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> CreateTenant(CreateTenantCommand command, CancellationToken cancellationToken)
     {
-        var tenant = await _tenantService.CreateTenantAsync(request, cancellationToken);
-        return CreatedAtAction(nameof(GetTenant), new { id = tenant.Id }, tenant);
+        var result = await mediator.Send(command, cancellationToken);
+
+        return result.Match(
+            _ => StatusCode(StatusCodes.Status201Created),
+            Problem);
     }
 
-    [HttpPut("{id}/deactivate")]
+    [HttpPut("{id:guid}")]
     [HasPermission(Permissions.Tenants.Update)]
-    public async Task<IActionResult> DeactivateTenant(string id, CancellationToken cancellationToken)
+    public async Task<IActionResult> UpdateTenant(Guid id, UpdateTenantCommand command, CancellationToken cancellationToken)
     {
-        await _tenantService.DeactivateTenantAsync(id, cancellationToken);
-        return NoContent();
+        if (id != command.Id)
+        {
+            return BadRequest(new { detail = "Route id does not match command id." });
+        }
+
+        var result = await mediator.Send(command, cancellationToken);
+
+        return result.Match(
+            _ => NoContent(),
+            Problem);
     }
 
-    [HttpPut("{id}/activate")]
+    [HttpPost("{id:guid}/suspend")]
     [HasPermission(Permissions.Tenants.Update)]
-    public async Task<IActionResult> ActivateTenant(string id, CancellationToken cancellationToken)
+    public async Task<IActionResult> SuspendTenant(Guid id, SuspendTenantCommand command, CancellationToken cancellationToken)
     {
-        await _tenantService.ActivateTenantAsync(id, cancellationToken);
-        return NoContent();
+        if (id != command.Id)
+        {
+            return BadRequest(new { detail = "Route id does not match command id." });
+        }
+
+        var result = await mediator.Send(command, cancellationToken);
+
+        return result.Match(
+            _ => NoContent(),
+            Problem);
     }
 
-    [HttpPut("{id}/subscription")]
+    [HttpPost("{id:guid}/reactivate")]
     [HasPermission(Permissions.Tenants.Update)]
-    public async Task<IActionResult> UpdateSubscription(string id, [FromBody] UpdateSubscriptionRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> ReactivateTenant(Guid id, CancellationToken cancellationToken)
     {
-        await _tenantService.UpdateTenantSubscriptionAsync(id, request.NewExpiryDate, cancellationToken);
-        return NoContent();
+        var result = await mediator.Send(new ReactivateTenantCommand(id), cancellationToken);
+
+        return result.Match(
+            _ => NoContent(),
+            Problem);
+    }
+
+    [HttpDelete("{id:guid}")]
+    [HasPermission(Permissions.Tenants.Delete)]
+    public async Task<IActionResult> CancelTenant(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(new CancelTenantCommand(id), cancellationToken);
+
+        return result.Match(
+            _ => NoContent(),
+            Problem);
     }
 }

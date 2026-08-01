@@ -23,7 +23,8 @@ public class FeatureConfiguration : IEntityTypeConfiguration<Feature>
             .HasMaxLength(500);
 
         builder.Property(f => f.Module)
-            .HasMaxLength(50);
+            .HasMaxLength(50)
+            .IsRequired();
 
         builder.Property(f => f.CreatedAtUtc)
             .HasColumnName("CreatedAt");

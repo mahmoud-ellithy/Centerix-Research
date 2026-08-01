@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Centerix — Entity Relationship Diagram</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel-2: #334155;
+    --ink: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --pk: #fbbf24;
+    --fk: #34d399;
+    --line: #475569;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  header {
+    padding: 18px 24px;
+    background: linear-gradient(90deg, #0b1224, #111c33);
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { margin: 0; font-size: 20px; letter-spacing: .3px; }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+  .bar { padding: 10px 24px; background: var(--panel); border-bottom: 1px solid var(--line); display:flex; gap: 10px; align-items:center; flex-wrap:wrap; }
+  .bar button {
+    background: var(--panel-2); color: var(--ink); border: 1px solid var(--line);
+    padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  .bar button:hover { border-color: var(--accent); }
+  .legend { display:flex; gap: 16px; margin-left: auto; font-size: 12px; color: var(--muted); }
+  .legend span { display:inline-flex; align-items:center; gap:6px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display:inline-block; }
+  #diagram { padding: 16px; overflow: auto; height: calc(100vh - 130px); }
+  .mermaid { background: #0b1224; border-radius: 10px; }
+  .mermaid svg { max-width: none; }
+  #err {
+    margin: 16px; padding: 12px 16px; background: #7f1d1d; color: #fee2e2;
+    border-radius: 8px; font-family: ui-monospace, "Cascadia Code", monospace;
+    white-space: pre-wrap; display: none;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Centerix — Entity Relationship Diagram</h1>
+  <p>Domain aggregates & Identity entities across <code>TenantDbContext</code> (Tenants) and <code>AppDbContext</code> (Platform schema) per EF Core configurations.</p>
+</header>
+
+<div class="bar">
+  <button onclick="zoomMermaid(0.85)">Zoom out</button>
+  <button onclick="zoomMermaid(1.15)">Zoom in</button>
+  <button onclick="resetZoom()">Reset</button>
+  <div class="legend">
+    <span><i class="dot" style="background:var(--pk)"></i> PK</span>
+    <span><i class="dot" style="background:var(--fk)"></i> FK</span>
+    <span><i class="dot" style="background:var(--accent)"></i> UK / Index</span>
+    <span><i class="dot" style="background:var(--muted)"></i> Tenant-scoped</span>
+  </div>
+</div>
+
+<div id="err"></div>
+<div id="diagram">
+<pre class="mermaid">
+erDiagram
+  direction LR
+
+  Tenants {
+    string Id PK
+    string Identifier UK
+    string Name
+    string DisplayName
+    string Slug
+    string Subdomain UK
+    string Email
+    string FirstName
+    string LastName
+    string ConnectionString
+    string LogoUrl
+    string PrimaryColor
+    string Country
+    string Currency
+    string Timezone
+    byte Status
+    bool IsActive
+    DateTime ValidUpTo
+    DateTime TrialEndsAt
+    DateTime CreatedAt
+  }
+
+  AspNetUsers {
+    string Id PK
+    string UserName UK
+    string Email
+    string NormalizedEmail
+    bool EmailConfirmed
+    string PhoneNumber
+    string PasswordHash
+    string SecurityStamp
+    string ConcurrencyStamp
+    bool LockoutEnabled
+    bool TwoFactorEnabled
+  }
+  AspNetRoles {
+    string Id PK
+    string Name UK
+    string Code
+    string DisplayName
+    bool IsSystem
+  }
+  AspNetUserRoles {
+    string UserId PK,FK
+    string RoleId PK,FK
+  }
+  AspNetUserClaims {
+    int Id PK
+    string UserId FK
+    string ClaimType
+    string ClaimValue
+  }
+  AspNetUserLogins {
+    string LoginProvider PK,FK
+    string ProviderKey PK,FK
+    string UserId FK
+  }
+  AspNetUserTokens {
+    string UserId PK,FK
+    string LoginProvider PK,FK
+    string Name PK,FK
+    string Value
+  }
+  AspNetRoleClaims {
+    int Id PK
+    string RoleId FK
+    string ClaimType
+    string ClaimValue
+  }
+
+  Permissions {
+    int Id PK
+    string Module
+    string Action
+    string Code UK
+    string Description
+    string CreatedBy
+    DateTime CreatedAt
+    DateTime ModifiedAt
+  }
+  RolePermissions {
+    string RoleId PK,FK
+    int PermissionId PK,FK
+    string TenantId
+  }
+
+  Plans {
+    int Id PK
+    string Code
+    string DisplayName
+    decimal MonthlyPrice
+    int MaxStudents
+    int MaxUsers
+    int MaxBranches
+    int MaxTeachers
+    int StorageGB
+    int SMSQuota
+    bool IsActive
+    DateTime CreatedAt
+  }
+  Features {
+    int Id PK
+    string Code
+    string Description
+    string Module
+    DateTime CreatedAt
+  }
+  PlanFeatures {
+    int Id PK
+    int PlanId FK
+    int FeatureId FK
+    bool IsEnabled
+  }
+
+  TenantPlans {
+    Guid Id PK
+    string TenantId
+    int PlanId FK
+    DateTime StartsAt
+    DateTime EndsAt
+    bool AutoRenew
+    string Status
+    DateTime CreatedAt
+  }
+  TenantBilling {
+    Guid Id PK
+    string TenantId
+    int PlanId FK
+    decimal AmountEGP
+    string Method
+    string Status
+    DateTime PaidAt
+    string InvoiceRef
+    DateTime CreatedAt
+  }
+
+  TenantCRMLeads {
+    Guid Id PK
+    string TenantId
+    string CenterName
+    string ContactName
+    string Phone
+    string Source
+    string Stage
+    string AssignedTo
+    DateTime CreatedAt
+  }
+
+  AuditLogs {
+    long Id PK
+    string TenantId
+    string Action
+    string EntityType
+    string EntityId
+    string UserId FK
+    string IPAddress
+    string OldValue
+    string NewValue
+    DateTime PerformedAt
+  }
+  PlatformAuditLogs {
+    long Id PK
+    string Action
+    string EntityType
+    string EntityId
+    string OldValue
+    string NewValue
+    string IPAddress
+    DateTime CreatedAt
+  }
+
+  RefreshTokens {
+    Guid Id PK
+    string TenantId
+    string UserId FK
+    string TokenHash UK
+    string DeviceInfo
+    string IPAddress
+    DateTime ExpiresAtUtc
+    DateTime RevokedAtUtc
+    string ReplacedByTokenHash
+    DateTime CreatedAt
+  }
+
+  AcademicStages {
+    int Id PK
+    string TenantId
+    string Code
+    string DisplayName
+    byte SortOrder
+    DateTime CreatedAt
+  }
+  AcademicYears {
+    int Id PK
+    string TenantId
+    int StageId FK
+    string YearCode
+    string YearName
+    DateTime CreatedAt
+  }
+
+  Branches {
+    Guid Id PK
+    string TenantId
+    string Name
+    string Address
+    string Phone
+    Guid ManagerId
+    bool IsActive
+    DateTime DeletedAt
+    DateTime CreatedAt
+  }
+
+  Students {
+    Guid Id PK
+    string TenantId
+    Guid BranchId FK
+    int StageId FK
+    int YearId FK
+    string FullNameAr
+    string FullNameEn
+    DateOnly DateOfBirth
+    string Gender
+    string Phone
+    string QRCode UK
+    string DiscountType
+    decimal DiscountValue
+    string Status
+    DateOnly EnrolledAt
+    DateTime DeletedAt
+    binary RowVersion
+  }
+  AttendanceLogs {
+    long Id PK
+    string TenantId
+    Guid StudentId FK
+    Guid GroupId
+    DateOnly SessionDate
+    string Status
+    TimeOnly CheckInTime
+    bool IsOffline
+    DateTime SyncedAt
+    binary RowVersion
+  }
+
+  AspNetUsers ||--o{ AspNetUserRoles : has
+  AspNetRoles ||--o{ AspNetUserRoles : grants
+  AspNetUsers ||--o{ AspNetUserClaims : owns
+  AspNetUsers ||--o{ AspNetUserLogins : has
+  AspNetUsers ||--o{ AspNetUserTokens : has
+  AspNetRoles ||--o{ AspNetRoleClaims : owns
+  AspNetRoles ||--o{ RolePermissions : RoleId
+  Permissions ||--o{ RolePermissions : PermissionId
+  Plans ||--o{ PlanFeatures : PlanId
+  Features ||--o{ PlanFeatures : FeatureId
+  Plans ||--o{ TenantPlans : PlanId
+  Plans ||--o{ TenantBilling : PlanId
+  AspNetUsers ||--o{ RefreshTokens : UserId
+  AspNetUsers ||--o{ AuditLogs : UserId
+  AcademicStages ||--o{ AcademicYears : StageId
+  AcademicYears ||--o{ Students : YearId
+  AcademicStages ||--o{ Students : StageId
+  Branches ||--o{ Students : BranchId
+  Students ||--o{ AttendanceLogs : StudentId
+</pre>
+</div>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10.9.6/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'dark',
+    themeVariables: {
+      darkMode: true,
+      background: '#0b1224',
+      primaryColor: '#1e293b',
+      primaryTextColor: '#e2e8f0',
+      primaryBorderColor: '#38bdf8',
+      lineColor: '#64748b',
+      secondaryColor: '#334155',
+      tertiaryColor: '#0f172a',
+      fontFamily: 'system-ui, sans-serif'
+    },
+    flowchart: { useMaxWidth: false, htmlLabels: true, curve: 'basis' },
+    er: { useMaxWidth: false, entityPadding: 12, minEntityWidth: 160 }
+  });
+  const errBox = document.getElementById('err');
+  try {
+    await mermaid.run();
+  } catch (e) {
+    errBox.style.display = 'block';
+    errBox.textContent = 'Mermaid parse error:\n\n' + (e?.message || String(e)) +
+      '\n\n' + (e?.str || '');
+  }
+</script>
+<script>
+  let scale = 1;
+  function zoomMermaid(factor) {
+    scale = Math.min(3, Math.max(0.3, scale * factor));
+    applyZoom();
+  }
+  function resetZoom() {
+    scale = 1;
+    applyZoom();
+  }
+  function applyZoom() {
+    const svg = document.querySelector('.mermaid svg');
+    if (svg) {
+      svg.style.transformOrigin = 'top left';
+      svg.style.transform = `scale(${scale})`;
+    }
+  }
+</script>
+</body>
+</html>

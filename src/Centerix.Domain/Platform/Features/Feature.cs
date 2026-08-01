@@ -7,7 +7,7 @@ using Centerix.Domain.Platform.Plans;
 public class Feature : GlobalAuditableEntity<int>
 {
     public string Code { get; private set; } = default!;
-    public string Description { get; private set; } = default!;
+    public string? Description { get; private set; }
     public string Module { get; private set; } = default!;
 
     private readonly List<PlanFeature> _planFeatures = [];
@@ -15,7 +15,7 @@ public class Feature : GlobalAuditableEntity<int>
 
     private Feature() { }
 
-    private Feature(int id, string code, string description, string module)
+    private Feature(int id, string code, string? description, string module)
         : base(id)
     {
         Code = code;
@@ -23,13 +23,10 @@ public class Feature : GlobalAuditableEntity<int>
         Module = module;
     }
 
-    public static Result<Feature> Create(int id, string code, string description, string module)
+    public static Result<Feature> Create(int id, string code, string? description, string module)
     {
         if (string.IsNullOrWhiteSpace(code))
             return FeatureErrors.CodeRequired;
-
-        if (string.IsNullOrWhiteSpace(description))
-            return FeatureErrors.DescriptionRequired;
 
         if (string.IsNullOrWhiteSpace(module))
             return FeatureErrors.ModuleRequired;
@@ -37,13 +34,10 @@ public class Feature : GlobalAuditableEntity<int>
         return new Feature(id, code, description, module);
     }
 
-    public Result<Updated> Update(string code, string description, string module)
+    public Result<Updated> Update(string code, string? description, string module)
     {
         if (string.IsNullOrWhiteSpace(code))
             return FeatureErrors.CodeRequired;
-
-        if (string.IsNullOrWhiteSpace(description))
-            return FeatureErrors.DescriptionRequired;
 
         if (string.IsNullOrWhiteSpace(module))
             return FeatureErrors.ModuleRequired;

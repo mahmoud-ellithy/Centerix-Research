@@ -8,6 +8,7 @@ using Centerix.Domain.Platform.Subscriptions.Events;
 public class TenantPlan : AuditableEntity<Guid>
 {
     public int PlanId { get; private set; }
+    public decimal SnapshotPrice { get; private set; }
     public DateTime StartsAt { get; private set; }
     public DateTime? EndsAt { get; private set; }
     public bool AutoRenew { get; private set; }
@@ -20,6 +21,7 @@ public class TenantPlan : AuditableEntity<Guid>
     private TenantPlan(
         Guid id,
         int planId,
+        decimal snapshotPrice,
         DateTime startsAt,
         DateTime? endsAt,
         bool autoRenew,
@@ -27,6 +29,7 @@ public class TenantPlan : AuditableEntity<Guid>
         : base(id)
     {
         PlanId = planId;
+        SnapshotPrice = snapshotPrice;
         StartsAt = startsAt;
         EndsAt = endsAt;
         AutoRenew = autoRenew;
@@ -36,6 +39,7 @@ public class TenantPlan : AuditableEntity<Guid>
     public static Result<TenantPlan> Create(
         Guid id,
         int planId,
+        decimal snapshotPrice,
         DateTime startsAt,
         bool autoRenew,
         SubscriptionStatus status)
@@ -43,13 +47,16 @@ public class TenantPlan : AuditableEntity<Guid>
         if (planId <= 0)
             return TenantPlanErrors.PlanIdRequired;
 
+        if (snapshotPrice <= 0)
+            return Error.Validation("TenantPlan.SnapshotPrice_Invalid", "Snapshot price must be greater than zero");
+
         if (startsAt == default)
             return TenantPlanErrors.StartsAtRequired;
 
         if (!Enum.IsDefined(status))
             return Error.Validation("TenantPlan.Status_Invalid", "Invalid subscription status");
 
-        return new TenantPlan(id, planId, startsAt, null, autoRenew, status);
+        return new TenantPlan(id, planId, snapshotPrice, startsAt, null, autoRenew, status);
     }
 
     public Result<Updated> Update(DateTime? endsAt, bool autoRenew)
