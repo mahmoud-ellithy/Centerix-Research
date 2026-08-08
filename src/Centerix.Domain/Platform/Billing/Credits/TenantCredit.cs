@@ -11,6 +11,7 @@ public class TenantCredit : AuditableEntity<Guid>
     public Guid? SourceId { get; private set; }
     public CreditStatus Status { get; private set; }
     public Guid? AppliedToInvoiceLineId { get; private set; }
+    public Guid? ReversalOfCreditId { get; private set; }
 
     private TenantCredit() { }
 
@@ -70,6 +71,17 @@ public class TenantCredit : AuditableEntity<Guid>
             return TenantCreditErrors.NotAvailable;
 
         Status = CreditStatus.Revoked;
+
+        return Result.Updated;
+    }
+
+    public Result<Updated> Reverse(Guid reversalCreditId)
+    {
+        if (Status != CreditStatus.Available)
+            return TenantCreditErrors.NotAvailable;
+
+        Status = CreditStatus.Reversed;
+        ReversalOfCreditId = reversalCreditId;
 
         return Result.Updated;
     }

@@ -30,11 +30,6 @@ public static class PermissionCatalog
         new("TenantPlans",     "Update", "TenantPlans.Update",     "Update a tenant subscription"),
         new("TenantPlans",     "Delete", "TenantPlans.Delete",     "Cancel a tenant subscription"),
 
-        new("TenantBillings", "Create", "TenantBillings.Create", "Record a billing payment"),
-        new("TenantBillings", "Read",   "TenantBillings.Read",   "Read billing history"),
-        new("TenantBillings", "Update", "TenantBillings.Update", "Update a billing record"),
-        new("TenantBillings", "Delete", "TenantBillings.Delete", "Delete a billing record"),
-
         new("TenantCRMLeads", "Create", "TenantCRMLeads.Create", "Create a CRM lead"),
         new("TenantCRMLeads", "Read",   "TenantCRMLeads.Read",   "Read CRM leads"),
         new("TenantCRMLeads", "Update", "TenantCRMLeads.Update", "Update a CRM lead"),

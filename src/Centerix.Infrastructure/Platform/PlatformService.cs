@@ -4,8 +4,6 @@ using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform;
 using Centerix.Domain.Common;
 using Centerix.Domain.Common.Results;
-using Centerix.Domain.Platform.Billing;
-using Centerix.Domain.Platform.Billing.Enums;
 using Centerix.Domain.Platform.Features;
 using Centerix.Domain.Platform.Leads;
 using Centerix.Domain.Platform.Leads.Enums;
@@ -310,48 +308,6 @@ public class PlatformService(
             cancellationToken: cancellationToken);
 
         return Result.Updated;
-    }
-
-    public async Task<Result<IEnumerable<TenantBillingDto>>> GetTenantBillingsAsync(CancellationToken cancellationToken)
-    {
-        var billings = await _dbContext.TenantBillings
-            .Include(tb => tb.Plan)
-            .OrderByDescending(tb => tb.CreatedAtUtc)
-            .ProjectToType<TenantBillingDto>()
-            .ToListAsync(cancellationToken);
-
-        foreach (var billing in billings)
-        {
-            var status = (BillingStatus)billing.Status;
-            billing.StatusLabel = _localizer.Translate($"Enum:BillingStatus.{status}");
-        }
-
-        return billings;
-    }
-
-    public async Task<Result<Created>> CreateTenantBillingAsync(TenantBillingDto billingDto, CancellationToken cancellationToken)
-    {
-        var billingResult = TenantBilling.Create(
-            Guid.NewGuid(),
-            billingDto.PlanId,
-            billingDto.AmountEGP,
-            billingDto.Method,
-            (BillingStatus)billingDto.Status);
-
-        if (!billingResult.IsSuccess)
-            return billingResult.Errors!;
-
-        _dbContext.TenantBillings.Add(billingResult.Value);
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        await _auditWriter.WriteAsync(
-            action: "TenantBilling.Create",
-            entityType: nameof(TenantBilling),
-            entityId: billingResult.Value.Id.ToString(),
-            newValue: AuditPayload.Serialize(new { billingResult.Value.PlanId, billingResult.Value.AmountEGP, billingResult.Value.Method }),
-            cancellationToken: cancellationToken);
-
-        return Result.Created;
     }
 
     public async Task<Result<IEnumerable<TenantCRMLeadDto>>> GetTenantCRMLeadsAsync(CancellationToken cancellationToken)

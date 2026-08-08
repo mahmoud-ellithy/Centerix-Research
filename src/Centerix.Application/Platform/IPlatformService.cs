@@ -20,9 +20,6 @@ public interface IPlatformService
     Task<Result<Created>> CreateTenantPlanAsync(TenantPlanDto tenantPlanDto, CancellationToken cancellationToken);
     Task<Result<Updated>> UpdateTenantPlanAsync(Guid id, TenantPlanDto tenantPlanDto, CancellationToken cancellationToken);
 
-    Task<Result<IEnumerable<TenantBillingDto>>> GetTenantBillingsAsync(CancellationToken cancellationToken);
-    Task<Result<Created>> CreateTenantBillingAsync(TenantBillingDto billingDto, CancellationToken cancellationToken);
-
     Task<Result<IEnumerable<TenantCRMLeadDto>>> GetTenantCRMLeadsAsync(CancellationToken cancellationToken);
     Task<Result<Created>> CreateTenantCRMLeadAsync(TenantCRMLeadDto leadDto, CancellationToken cancellationToken);
     Task<Result<Updated>> UpdateTenantCRMLeadAsync(Guid id, TenantCRMLeadDto leadDto, CancellationToken cancellationToken);

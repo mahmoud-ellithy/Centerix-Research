@@ -2,7 +2,6 @@ using Centerix.Domain.Auditing;
 using Centerix.Domain.Authentication;
 using Centerix.Domain.Platform.Auditing;
 using Centerix.Domain.Platform.Authorization;
-using Centerix.Domain.Platform.Billing;
 using Centerix.Domain.Platform.Billing.Credits;
 using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Features;
@@ -32,7 +31,6 @@ public interface IAppDbContext
     DbSet<Feature> Features { get; }
     DbSet<PlanFeature> PlanFeatures { get; }
     DbSet<TenantPlan> TenantPlans { get; }
-    DbSet<TenantBilling> TenantBillings { get; }
     DbSet<PlatformAuditLog> PlatformAuditLogs { get; }
     DbSet<TenantCRMLead> TenantCRMLeads { get; }
     DbSet<Permission> Permissions { get; }

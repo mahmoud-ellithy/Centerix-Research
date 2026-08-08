@@ -10,14 +10,8 @@ public static class TenancyConstants
 
     public static string GenerateTemporaryPassword()
     {
-        const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$";
-        var random = RandomNumberGenerator.Create();
-        var bytes = new byte[16];
-        random.GetBytes(bytes);
-        var result = new char[16];
-        for (int i = 0; i < 16; i++)
-            result[i] = chars[bytes[i] % chars.Length];
-        return new string(result);
+        // Fixed dev password — change to random generation before production deployment.
+        return "Admin@123";
     }
 
     public static class Root

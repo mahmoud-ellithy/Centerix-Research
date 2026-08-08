@@ -44,6 +44,12 @@ public class TenantReferralConfiguration : IEntityTypeConfiguration<TenantReferr
         builder.Property(r => r.RewardAppliedTo)
             .HasMaxLength(450);
 
+        builder.Property(r => r.RevokedReason)
+            .HasMaxLength(300);
+
+        builder.Property(r => r.RevokedBy)
+            .HasColumnType("uniqueidentifier");
+
         builder.Property(r => r.TenantId)
             .HasMaxLength(450)
             .IsRequired();

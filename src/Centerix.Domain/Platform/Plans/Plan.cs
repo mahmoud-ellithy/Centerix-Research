@@ -2,7 +2,6 @@ namespace Centerix.Domain.Platform.Plans;
 
 using Centerix.Domain.Common;
 using Centerix.Domain.Common.Results;
-using Centerix.Domain.Platform.Billing;
 using Centerix.Domain.Platform.Subscriptions;
 
 public class Plan : GlobalAuditableEntity<int>
@@ -23,9 +22,6 @@ public class Plan : GlobalAuditableEntity<int>
 
     private readonly List<TenantPlan> _tenantPlans = [];
     public IReadOnlyList<TenantPlan> TenantPlans => _tenantPlans.AsReadOnly();
-
-    private readonly List<TenantBilling> _tenantBillings = [];
-    public IReadOnlyList<TenantBilling> TenantBillings => _tenantBillings.AsReadOnly();
 
     private Plan() { }
 

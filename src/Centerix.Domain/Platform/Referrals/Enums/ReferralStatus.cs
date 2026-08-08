@@ -5,5 +5,6 @@ public enum ReferralStatus : byte
     Pending = 0,
     Qualified = 1,
     RewardApplied = 2,
-    Expired = 3
+    Expired = 3,
+    Revoked = 4
 }

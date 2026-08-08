@@ -16,6 +16,10 @@ public class TenantReferral : AuditableEntity<Guid>
     public decimal RewardValue { get; private set; }
     public string? RewardAppliedTo { get; private set; }
     public DateTime? RewardAppliedAt { get; private set; }
+    public DateTime? LockedUntil { get; private set; }
+    public DateTime? RevokedAt { get; private set; }
+    public string? RevokedReason { get; private set; }
+    public Guid? RevokedBy { get; private set; }
 
     public TenantReferralCode TenantReferralCode { get; private set; } = default!;
 
@@ -79,6 +83,7 @@ public class TenantReferral : AuditableEntity<Guid>
 
         Status = ReferralStatus.Qualified;
         QualifiedAt = DateTime.UtcNow;
+        LockedUntil = DateTime.UtcNow.AddDays(90);
 
         AddDomainEvent(new ReferralQualifiedEvent(Id, ReferrerTenantId, ReferredTenantId));
 
@@ -90,11 +95,27 @@ public class TenantReferral : AuditableEntity<Guid>
         if (Status != ReferralStatus.Qualified)
             return TenantReferralErrors.NotQualified;
 
+        if (LockedUntil.HasValue && DateTime.UtcNow < LockedUntil.Value)
+            return TenantReferralErrors.LockedPeriod;
+
         Status = ReferralStatus.RewardApplied;
         RewardAppliedTo = appliedTo;
         RewardAppliedAt = DateTime.UtcNow;
 
         AddDomainEvent(new ReferralRewardAppliedEvent(Id, ReferrerTenantId, ReferredTenantId, RewardType, RewardValue));
+
+        return Result.Updated;
+    }
+
+    public Result<Updated> Revoke(string reason, Guid revokedBy)
+    {
+        if (Status is ReferralStatus.Expired or ReferralStatus.Revoked)
+            return TenantReferralErrors.CannotRevoke;
+
+        Status = ReferralStatus.Revoked;
+        RevokedAt = DateTime.UtcNow;
+        RevokedReason = reason;
+        RevokedBy = revokedBy;
 
         return Result.Updated;
     }

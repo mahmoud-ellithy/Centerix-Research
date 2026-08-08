@@ -36,14 +36,6 @@ public static class Permissions
         public const string Delete = "TenantPlans.Delete";
     }
 
-    public static class TenantBillings
-    {
-        public const string Create = "TenantBillings.Create";
-        public const string Read = "TenantBillings.Read";
-        public const string Update = "TenantBillings.Update";
-        public const string Delete = "TenantBillings.Delete";
-    }
-
     public static class TenantCRMLeads
     {
         public const string Create = "TenantCRMLeads.Create";
@@ -172,14 +164,12 @@ public static class Permissions
     public static string[] GetTenantAdminPermissions() =>
     [
         TenantPlans.Create, TenantPlans.Read, TenantPlans.Update, TenantPlans.Delete,
-        TenantBillings.Create, TenantBillings.Read, TenantBillings.Update, TenantBillings.Delete,
         TenantCRMLeads.Create, TenantCRMLeads.Read, TenantCRMLeads.Update, TenantCRMLeads.Delete,
     ];
 
     public static string[] GetTenantUserPermissions() =>
     [
         TenantPlans.Read,
-        TenantBillings.Read,
         TenantCRMLeads.Read,
     ];
 }

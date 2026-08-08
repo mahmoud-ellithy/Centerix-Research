@@ -6,7 +6,6 @@ using Centerix.Domain.Authentication;
 using Centerix.Domain.Common;
 using Centerix.Domain.Platform.Auditing;
 using Centerix.Domain.Platform.Authorization;
-using Centerix.Domain.Platform.Billing;
 using Centerix.Domain.Platform.Billing.Credits;
 using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Features;
@@ -53,7 +52,6 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     public DbSet<Feature> Features { get; set; } = default!;
     public DbSet<PlanFeature> PlanFeatures { get; set; } = default!;
     public DbSet<TenantPlan> TenantPlans { get; set; } = default!;
-    public DbSet<TenantBilling> TenantBillings { get; set; } = default!;
     public DbSet<Invoice> Invoices { get; set; } = default!;
     public DbSet<InvoiceLine> InvoiceLines { get; set; } = default!;
     public DbSet<PlatformPayment> PlatformPayments { get; set; } = default!;

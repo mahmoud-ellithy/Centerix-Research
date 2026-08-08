@@ -21,4 +21,10 @@ public static class TenantReferralErrors
 
     public static Error NotQualified =>
         Error.Conflict("TenantReferral.NotQualified", "Referral is not in qualified status");
+
+    public static Error LockedPeriod =>
+        Error.Conflict("TenantReferral.LockedPeriod", "Referral is still within the lock-in period");
+
+    public static Error CannotRevoke =>
+        Error.Conflict("TenantReferral.CannotRevoke", "Referral cannot be revoked in its current status");
 }

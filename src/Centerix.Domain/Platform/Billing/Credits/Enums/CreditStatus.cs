@@ -5,5 +5,6 @@ public enum CreditStatus : byte
     Available = 0,
     Applied = 1,
     Expired = 2,
-    Revoked = 3
+    Revoked = 3,
+    Reversed = 4
 }
