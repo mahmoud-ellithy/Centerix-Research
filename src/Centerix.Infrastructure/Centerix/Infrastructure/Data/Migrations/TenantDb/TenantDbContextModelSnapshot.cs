@@ -104,7 +104,7 @@ namespace Centerix.Infrastructure.Data.Migrations.TenantDb
                         .IsUnique()
                         .HasFilter("[Subdomain] IS NOT NULL");
 
-                    b.ToTable("Tenants", "Platform");
+                    b.ToTable("TenantRegistry", "Platform");
                 });
 #pragma warning restore 612, 618
         }

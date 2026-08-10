@@ -10,7 +10,7 @@ public class TenantDbContext(DbContextOptions<TenantDbContext> options) : EFCore
         base.OnModelCreating(modelBuilder);
 
         modelBuilder.Entity<CenterixTenantInfo>()
-            .ToTable("Tenants", "Platform");
+            .ToTable("TenantRegistry", "Platform");
 
         // Configure missing ERD fields with lengths and indexes
         modelBuilder.Entity<CenterixTenantInfo>()

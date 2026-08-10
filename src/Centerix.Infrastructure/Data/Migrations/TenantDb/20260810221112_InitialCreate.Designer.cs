@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Centerix.Infrastructure.Data.Migrations.TenantDb
 {
     [DbContext(typeof(TenantDbContext))]
-    [Migration("20260704062512_InitialCreate")]
+    [Migration("20260810221112_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -107,7 +107,7 @@ namespace Centerix.Infrastructure.Data.Migrations.TenantDb
                         .IsUnique()
                         .HasFilter("[Subdomain] IS NOT NULL");
 
-                    b.ToTable("Tenants", "Platform");
+                    b.ToTable("TenantRegistry", "Platform");
                 });
 #pragma warning restore 612, 618
         }

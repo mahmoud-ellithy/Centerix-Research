@@ -3,11 +3,10 @@ namespace Centerix.Domain.Platform.Authorization;
 using Centerix.Domain.Common;
 using Centerix.Domain.Common.Results;
 
-public class RolePermission : Entity, IHasTenantId
+public class RolePermission : Entity
 {
     public string RoleId { get; private set; } = default!;
     public int PermissionId { get; private set; }
-    public string? TenantId { get; internal set; }
 
     public Permission Permission { get; private set; } = default!;
 

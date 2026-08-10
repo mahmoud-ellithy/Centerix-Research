@@ -42,9 +42,11 @@ public static class DependencyInjection
 
         services.AddScoped<IAuditWriter, AuditWriter>();
 
-        // Tenant database context
+        // Tenant registry context — uses its own migrations history table
+        // so it doesn't conflict with AppDbContext in the shared database.
         services.AddDbContext<TenantDbContext>(options =>
-            options.UseSqlServer(connectionString));
+            options.UseSqlServer(connectionString,
+                sql => sql.MigrationsHistoryTable("__TenantMigrationsHistory")));
 
         // Configure Finbuckle MultiTenant
         services.AddMultiTenant<CenterixTenantInfo>()

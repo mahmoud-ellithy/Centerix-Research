@@ -15,7 +15,7 @@ namespace Centerix.Infrastructure.Data.Migrations.TenantDb
                 name: "Platform");
 
             migrationBuilder.CreateTable(
-                name: "Tenants",
+                name: "TenantRegistry",
                 schema: "Platform",
                 columns: table => new
                 {
@@ -42,20 +42,20 @@ namespace Centerix.Infrastructure.Data.Migrations.TenantDb
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_Tenants", x => x.Id);
+                    table.PrimaryKey("PK_TenantRegistry", x => x.Id);
                 });
 
             migrationBuilder.CreateIndex(
-                name: "IX_Tenants_Identifier",
+                name: "IX_TenantRegistry_Identifier",
                 schema: "Platform",
-                table: "Tenants",
+                table: "TenantRegistry",
                 column: "Identifier",
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_Tenants_Subdomain",
+                name: "IX_TenantRegistry_Subdomain",
                 schema: "Platform",
-                table: "Tenants",
+                table: "TenantRegistry",
                 column: "Subdomain",
                 unique: true,
                 filter: "[Subdomain] IS NOT NULL");
@@ -65,7 +65,7 @@ namespace Centerix.Infrastructure.Data.Migrations.TenantDb
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(
-                name: "Tenants",
+                name: "TenantRegistry",
                 schema: "Platform");
         }
     }
