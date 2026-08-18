@@ -52,6 +52,10 @@ public class JwtTokenService(IOptions<JwtSettings> jwtSettings) : ITokenService
 
     public string GenerateAccessToken(IdentityUser user, IList<string> roles, IList<string> permissions)
     {
+        // Intentionally TENANT-AGNOSTIC: no tenant claim is emitted. The active tenant is a client
+        // selection (header/host) verified server-side on every request via TenantMembership in
+        // TenantGuardMiddleware. A JWT tenant claim must never be introduced as a source of truth or
+        // as proof of membership — multi-tenancy is authorized per request, not pinned in the token.
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, user.Id),

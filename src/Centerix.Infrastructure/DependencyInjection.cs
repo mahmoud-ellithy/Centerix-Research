@@ -48,11 +48,16 @@ public static class DependencyInjection
             options.UseSqlServer(connectionString,
                 sql => sql.MigrationsHistoryTable("__TenantMigrationsHistory")));
 
-        // Configure Finbuckle MultiTenant
+        // Configure Finbuckle MultiTenant.
+        // The tenant is a client SELECTION resolved from the request header or host only. It is
+        // never resolved from a token claim: doing so would make the JWT a tenant source of truth,
+        // which it must not be (see TenantGuardMiddleware — membership is verified server-side per
+        // request). If a tenant switch is needed, the client sends a different `tenant` header on the
+        // next request and the guard re-verifies TenantMembership. There is deliberately NO
+        // WithClaimStrategy: a `tenant` claim in the JWT must never resolve or authorize a tenant.
         services.AddMultiTenant<CenterixTenantInfo>()
             .WithHeaderStrategy(TenancyConstants.TenantIdName)
             .WithHostStrategy("tenant") // e.g., tenant1.myapp.com
-            .WithClaimStrategy(TenancyConstants.TenantIdName)
             .WithEFCoreStore<TenantDbContext, CenterixTenantInfo>();
 
         services.AddDbContext<AppDbContext>((sp, options) =>

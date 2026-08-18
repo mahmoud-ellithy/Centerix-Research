@@ -172,4 +172,50 @@ public static class Permissions
         TenantPlans.Read,
         TenantCRMLeads.Read,
     ];
+
+    /// <summary>
+    /// Classifies a permission (and therefore the endpoint that requires it) as PLATFORM-scoped.
+    /// Platform-scoped operations act on cross-tenant platform resources that are NOT tenant-partitioned:
+    /// the tenant registry, platform staff/RBAC, and global catalogs. They are authorized through
+    /// platform permissions and MUST NOT establish a tenant-scoped data context or require a tenant
+    /// membership. Everything not listed here is TENANT-scoped and requires an active
+    /// TenantMembership for the resolved tenant before any data access is permitted.
+    /// </summary>
+    /// <remarks>
+    /// This list is the single source of truth for scope classification. It is intentionally
+    /// conservative: a permission is only platform-scoped when it unambiguously operates on
+    /// platform-level resources rather than a single tenant's partitioned data. Unknown or
+    /// missing permissions default to tenant-scoped (fail-closed) in the guard.
+    /// </remarks>
+    public static class PlatformScope
+    {
+        public static IReadOnlySet<string> PermissionCodes { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            // Platform staff and RBAC (cross-tenant, managed by the platform itself)
+            PlatformUsers.Create, PlatformUsers.Read, PlatformUsers.Update, PlatformUsers.Delete,
+            PlatformRoles.Create, PlatformRoles.Read, PlatformRoles.Update, PlatformRoles.Delete,
+            PlatformPermissions.Read,
+
+            // Tenant registry management: provisioning, suspension and cancellation of tenants
+            Tenants.Create, Tenants.Read, Tenants.Update, Tenants.Delete,
+
+            // Global catalogs shared across every tenant (not a tenant's own data)
+            Plans.Create, Plans.Read, Plans.Update, Plans.Delete,
+            Features.Create, Features.Read, Features.Update, Features.Delete,
+            AddOnCatalogs.Create, AddOnCatalogs.Read, AddOnCatalogs.Update,
+        };
+
+        /// <summary>
+        /// Permission codes that are intentionally <b>not</b> in <see cref="PermissionCodes"/> even
+        /// though their names suggest platform-level work. These operate on <see cref="IHasTenantId"/>
+        /// (tenant-partitioned) entities — Invoices, TenantCredits, TenantReferrals,
+        /// TenantReferralCodes, TenantProvisioningJobs, TenantPlans, TenantCRMLeads, TenantAddOns,
+        /// etc. — so they MUST run inside a verified tenant context and therefore remain
+        /// TENANT-scoped in the guard (an active TenantMembership is required). A global role never
+        /// grants cross-tenant access to these; that would only be possible via an explicitly
+        /// approved platform capability that reads them with the tenant filter bypassed.
+        /// </summary>
+        public static bool IsPlatformScoped(string? permissionCode) =>
+            permissionCode is not null && PermissionCodes.Contains(permissionCode);
+    }
 }
