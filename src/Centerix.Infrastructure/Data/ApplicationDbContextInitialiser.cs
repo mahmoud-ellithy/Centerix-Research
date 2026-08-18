@@ -1,5 +1,7 @@
 using System.Security.Claims;
 using Centerix.Domain.Platform.Authorization;
+using Centerix.Domain.Platform.Tenants;
+using Centerix.Domain.Platform.Tenants.Enums;
 using Centerix.Infrastructure.Auth;
 using Centerix.Infrastructure.Tenancy;
 using Finbuckle.MultiTenant.Abstractions;
@@ -190,6 +192,20 @@ public class ApplicationDbContextInitialiser(
         if (!await _userManager.IsInRoleAsync(adminUser, adminRole))
         {
             await _userManager.AddToRoleAsync(adminUser, adminRole);
+        }
+
+        // C1 fix: record the tenant's admin user as an ACTIVE member of this tenant so the
+        // TenantGuardMiddleware membership check authorizes legitimate owners. Idempotent:
+        // skips when a membership already exists (e.g. migration backfill or re-seeding).
+        if (!await _context.TenantMemberships.AnyAsync(
+                m => m.UserId == adminUser.Id && m.TenantId == tenantInfo.Id))
+        {
+            var membership = TenantMembership.Create(adminUser.Id, tenantInfo.Id, TenantMembershipStatus.Active);
+            if (membership.IsSuccess)
+            {
+                await _context.TenantMemberships.AddAsync(membership.Value);
+                await _context.SaveChangesAsync();
+            }
         }
     }
 

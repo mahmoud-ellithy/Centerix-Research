@@ -15,6 +15,7 @@ using Centerix.Domain.Platform.Operations;
 using Centerix.Domain.Platform.Referrals;
 using Centerix.Domain.Platform.Staff;
 using Centerix.Domain.Platform.Subscriptions;
+using Centerix.Domain.Platform.Tenants;
 using Centerix.Domain.Platform.Subscriptions.AddOns;
 using Centerix.Domain.Platform.Subscriptions.LimitOverrides;
 using Centerix.Domain.Platform.Subscriptions.UsageCounters;
@@ -35,7 +36,6 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
 {
     private readonly IMediator _mediator;
     private readonly ICurrentTenant _currentTenant;
-    private string? _currentTenantId;
 
     public AppDbContext(
         DbContextOptions<AppDbContext> options,
@@ -44,7 +44,6 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     {
         _mediator = mediator;
         _currentTenant = currentTenant;
-        _currentTenantId = _currentTenant.IsResolved ? _currentTenant.TenantId : null;
     }
 
     public DbSet<Tenant> Tenants { get; set; } = default!;
@@ -62,6 +61,9 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     public DbSet<RolePermission> RolePermissions { get; set; } = default!;
     public DbSet<AuditLog> AuditLogs { get; set; } = default!;
     public DbSet<RefreshToken> RefreshTokens { get; set; } = default!;
+
+    // User <-> Tenant membership (foundation for tenant access control)
+    public DbSet<TenantMembership> TenantMemberships { get; set; } = default!;
 
     // Platform Staff (ERD v3)
     public DbSet<PlatformUser> PlatformUsers { get; set; } = default!;
@@ -109,22 +111,28 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
 
     private void ApplyTenantQueryFilter(ModelBuilder builder)
     {
-        // When tenant is resolved, filter by tenant ID.
-        // When tenant is NOT resolved, apply a filter that returns no results (fail-closed).
-        var tenantId = _currentTenantId ?? "__NO_ACCESS__";
-
+        // The VERIFIED tenant is read LIVE (per request) from ICurrentTenant.TenantId.
+        // Until the pipeline authorizes the resolved tenant (TenantGuardMiddleware calls
+        // AuthorizeTenant), TenantId is empty, so the filter matches nothing (fail-closed).
+        // We use a C# lambda over a context member (not a baked Expression.Constant) so that EF
+        // evaluates _currentTenant.TenantId against the EXECUTING context at query time. This gives
+        // correct per-request tenant isolation even though the EF model is cached.
         foreach (var entityType in builder.Model.GetEntityTypes())
         {
             if (typeof(IHasTenantId).IsAssignableFrom(entityType.ClrType) && !entityType.IsOwned())
             {
-                var parameter = Expression.Parameter(entityType.ClrType, "e");
-                var property = Expression.Property(parameter, nameof(IHasTenantId.TenantId));
-                var constant = Expression.Constant(tenantId);
-                var equal = Expression.Equal(property, constant);
-                var lambda = Expression.Lambda(equal, parameter);
-                builder.Entity(entityType.ClrType).HasQueryFilter(lambda);
+                var apply = typeof(AppDbContext)
+                    .GetMethod(nameof(ApplyFilterFor), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                    .MakeGenericMethod(entityType.ClrType);
+                apply.Invoke(this, new object[] { builder });
             }
         }
+    }
+
+    private void ApplyFilterFor<TEntity>(ModelBuilder builder)
+        where TEntity : class, IHasTenantId
+    {
+        builder.Entity<TEntity>().HasQueryFilter(e => e.TenantId == _currentTenant.TenantId);
     }
 
     private async Task DispatchDomainEventsAsync(CancellationToken cancellationToken)

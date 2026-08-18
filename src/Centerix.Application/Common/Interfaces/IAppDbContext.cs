@@ -27,6 +27,10 @@ namespace Centerix.Application.Common.Interfaces;
 public interface IAppDbContext
 {
     DbSet<Tenant> Tenants { get; }
+
+    // User <-> Tenant membership (C1: tenant access control)
+    DbSet<TenantMembership> TenantMemberships { get; }
+
     DbSet<Plan> Plans { get; }
     DbSet<Feature> Features { get; }
     DbSet<PlanFeature> PlanFeatures { get; }

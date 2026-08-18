@@ -1,14 +1,18 @@
+using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common;
-using Centerix.Infrastructure.Tenancy;
-using Finbuckle.MultiTenant.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace Centerix.Infrastructure.Data.Interceptors;
 
-public class TenantInterceptor(IMultiTenantContextAccessor<CenterixTenantInfo> multiTenantContextAccessor) : SaveChangesInterceptor
+/// <summary>
+/// Stamps the AUTHORIZED tenant id (from <see cref="ICurrentTenant"/>) onto newly added
+/// <see cref="IHasTenantId"/> entities. It deliberately reads the verified tenant context, not the
+/// client-resolved Finbuckle tenant, so rows are never written under an unverified tenant.
+/// </summary>
+public class TenantInterceptor(ICurrentTenant currentTenant) : SaveChangesInterceptor
 {
-    private readonly IMultiTenantContextAccessor<CenterixTenantInfo> _multiTenantContextAccessor = multiTenantContextAccessor;
+    private readonly ICurrentTenant _currentTenant = currentTenant;
 
     public override InterceptionResult<int> SavingChanges(
         DbContextEventData eventData,
@@ -34,7 +38,8 @@ public class TenantInterceptor(IMultiTenantContextAccessor<CenterixTenantInfo> m
             return;
         }
 
-        var tenantId = _multiTenantContextAccessor.MultiTenantContext?.TenantInfo?.Id;
+        // Verified tenant context. Empty until authorized => nothing is stamped (fail-closed).
+        var tenantId = _currentTenant.TenantId;
 
         if (string.IsNullOrEmpty(tenantId))
         {
