@@ -58,6 +58,8 @@ public class ApplicationDbContextInitialiser(
         await InitializeDefaultRolesAsync();
         // Admin user (from the current tenant) > Assign Role
         await InitializeAdminUserAsync();
+        // C2: Ensure Platform.Tenants entry exists for the root tenant
+        await EnsureRootTenantEntityAsync();
     }
 
     private async Task SeedPermissionCatalogAsync()
@@ -238,5 +240,38 @@ public class ApplicationDbContextInitialiser(
         }
 
         await _context.SaveChangesAsync();
+    }
+
+    private async Task EnsureRootTenantEntityAsync()
+    {
+        var tenantInfo = _tenantInfoContextAccessor.MultiTenantContext.TenantInfo;
+        if (tenantInfo is null || tenantInfo.Id != TenancyConstants.Root.Id)
+        {
+            return;
+        }
+
+        if (await _context.Tenants.AnyAsync(t => t.Id == TenancyConstants.Root.GuidId))
+        {
+            return;
+        }
+
+        var tenantResult = Domain.Platform.Tenants.Tenant.Create(
+            TenancyConstants.Root.GuidId,
+            slug: "root",
+            subdomain: "root",
+            displayName: "Root",
+            country: "EG",
+            currency: "EGP",
+            timezone: "Africa/Cairo",
+            ownerFirstName: TenancyConstants.FirstName,
+            ownerLastName: TenancyConstants.LastName,
+            ownerEmail: TenancyConstants.Root.Email,
+            isolationMode: IsolationMode.Shared);
+
+        if (tenantResult.IsSuccess)
+        {
+            _context.Tenants.Add(tenantResult.Value);
+            await _context.SaveChangesAsync();
+        }
     }
 }

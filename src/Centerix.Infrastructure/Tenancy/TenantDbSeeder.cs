@@ -4,7 +4,6 @@ using Centerix.Domain.Platform.Tenants.Enums;
 using Centerix.Infrastructure.Data;
 using Finbuckle.MultiTenant;
 using Finbuckle.MultiTenant.Abstractions;
-using Microsoft.Data.SqlClient; 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -20,7 +19,7 @@ public class TenantDbSeeder(
     public async Task InitializeDatabaseAsync(CancellationToken cancellationToken = default)
     {
         await _tenantDbContext.Database.MigrateAsync(cancellationToken);
-        await InitializeDatabaseWithTenantAsync(cancellationToken);
+        await InitializeRootTenantAsync(cancellationToken);
 
         foreach (var tenant in await _tenantDbContext.TenantInfo.ToListAsync(cancellationToken))
         {
@@ -28,14 +27,17 @@ public class TenantDbSeeder(
         }
     }
 
-    private async Task InitializeDatabaseWithTenantAsync(CancellationToken cancellationToken)
+    private async Task InitializeRootTenantAsync(CancellationToken cancellationToken)
     {
-        if (await _tenantDbContext.TenantInfo.FindAsync([TenancyConstants.Root.Id], cancellationToken) is null)
+        var rootRegistryId = TenancyConstants.Root.GuidId.ToString();
+        var existingRegistry = await _tenantDbContext.TenantInfo.FindAsync([rootRegistryId], cancellationToken);
+
+        if (existingRegistry is null)
         {
             var rootTenant = new CenterixTenantInfo
             {
-                Id = TenancyConstants.Root.Id,
-                Identifier = TenancyConstants.Root.Id,
+                Id = rootRegistryId,
+                Identifier = rootRegistryId,
                 Name = TenancyConstants.Root.Name,
                 Email = TenancyConstants.Root.Email,
                 FirstName = TenancyConstants.FirstName,

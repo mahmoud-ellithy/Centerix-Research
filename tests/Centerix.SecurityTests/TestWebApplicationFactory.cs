@@ -37,26 +37,20 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureServices(services =>
         {
-            // Replace AppDbContext with InMemory
-            var descriptor = services.SingleOrDefault(
-                d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
-            if (descriptor != null)
-            {
-                services.Remove(descriptor);
-            }
+            // Remove ALL AppDbContext options descriptors (including any from AddDbContext)
+            var appDescriptors = services.Where(
+                d => d.ServiceType == typeof(DbContextOptions<AppDbContext>)).ToList();
+            foreach (var d in appDescriptors) services.Remove(d);
 
             services.AddDbContext<AppDbContext>(options =>
             {
                 options.UseInMemoryDatabase(_databaseName);
             });
 
-            // Replace TenantDbContext with InMemory
-            var tenantDescriptor = services.SingleOrDefault(
-                d => d.ServiceType == typeof(DbContextOptions<TenantDbContext>));
-            if (tenantDescriptor != null)
-            {
-                services.Remove(tenantDescriptor);
-            }
+            // Remove ALL TenantDbContext options descriptors (including from WithEFCoreStore)
+            var tenantDescriptors = services.Where(
+                d => d.ServiceType == typeof(DbContextOptions<TenantDbContext>)).ToList();
+            foreach (var d in tenantDescriptors) services.Remove(d);
 
             services.AddDbContext<TenantDbContext>(options =>
             {

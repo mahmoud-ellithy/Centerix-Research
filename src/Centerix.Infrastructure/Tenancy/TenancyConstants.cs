@@ -17,6 +17,7 @@ public static class TenancyConstants
     public static class Root
     {
         public const string Id = "root";
+        public static readonly Guid GuidId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         public const string Name = "Root";
         public const string Email = "admin.root@centerix.com";
     }
