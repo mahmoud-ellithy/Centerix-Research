@@ -1,3 +1,6 @@
+using Centerix.Application.Common.Interfaces;
+using Centerix.Domain.Platform.Tenants;
+using Centerix.Domain.Platform.Tenants.Enums;
 using Centerix.Infrastructure.Data;
 using Finbuckle.MultiTenant;
 using Finbuckle.MultiTenant.Abstractions;

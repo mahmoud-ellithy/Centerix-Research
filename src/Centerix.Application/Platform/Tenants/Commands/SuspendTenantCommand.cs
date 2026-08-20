@@ -10,6 +10,7 @@ public record SuspendTenantCommand(Guid Id, string Reason) : IRequest<Result<Upd
 
 public class SuspendTenantHandler(
     IAppDbContext dbContext,
+    ITenantRegistrySync tenantRegistrySync,
     IAuditWriter auditWriter) : IRequestHandler<SuspendTenantCommand, Result<Updated>>
 {
     public async Task<Result<Updated>> Handle(SuspendTenantCommand request, CancellationToken cancellationToken)
@@ -33,7 +34,7 @@ public class SuspendTenantHandler(
             return suspendResult.Errors!;
         }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await tenantRegistrySync.SyncLifecycleAsync(tenant, cancellationToken);
 
         await auditWriter.WriteAsync(
             action: "Tenant.Suspend",

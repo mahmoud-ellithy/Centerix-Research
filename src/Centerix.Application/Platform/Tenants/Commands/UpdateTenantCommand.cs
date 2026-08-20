@@ -15,6 +15,7 @@ public record UpdateTenantCommand(
 
 public class UpdateTenantHandler(
     IAppDbContext dbContext,
+    ITenantRegistrySync tenantRegistrySync,
     IAuditWriter auditWriter) : IRequestHandler<UpdateTenantCommand, Result<Updated>>
 {
     public async Task<Result<Updated>> Handle(UpdateTenantCommand request, CancellationToken cancellationToken)
@@ -44,7 +45,7 @@ public class UpdateTenantHandler(
             return updateResult.Errors!;
         }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await tenantRegistrySync.SyncMetadataAsync(tenant, cancellationToken);
 
         await auditWriter.WriteAsync(
             action: "Tenant.Update",

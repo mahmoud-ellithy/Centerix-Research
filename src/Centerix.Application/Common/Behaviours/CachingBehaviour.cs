@@ -17,10 +17,14 @@ public class CachingBehaviour<TRequest, TResponse>(
         RequestHandlerDelegate<TResponse> next,
         CancellationToken cancellationToken)
     {
-        // Fail-closed: skip caching when tenant is not resolved to prevent cross-tenant cache leakage
-        if (!currentTenant.IsResolved)
+        // Fail-closed: skip caching when tenant is not authorized (verified) to prevent
+        // cross-tenant cache leakage. Using IsAuthorized (not IsResolved) ensures that only
+        // requests that passed TenantGuardMiddleware membership verification participate in
+        // the cache, and the TenantId used in the key is the verified tenant, not the raw
+        // client-resolved value.
+        if (!currentTenant.IsAuthorized)
         {
-            logger.LogWarning("Cache skipped for {RequestName}: tenant not resolved", typeof(TRequest).Name);
+            logger.LogWarning("Cache skipped for {RequestName}: tenant not authorized", typeof(TRequest).Name);
             return await next();
         }
 

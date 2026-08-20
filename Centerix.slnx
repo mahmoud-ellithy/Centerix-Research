@@ -5,4 +5,7 @@
     <Project Path="src/Centerix.Domain/Centerix.Domain.csproj" />
     <Project Path="src/Centerix.Infrastructure/Centerix.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Centerix.SecurityTests/Centerix.SecurityTests.csproj" />
+  </Folder>
 </Solution>

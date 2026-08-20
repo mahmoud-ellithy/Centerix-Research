@@ -33,7 +33,6 @@ public class Tenant : AuditableEntity
     public DateTime? TrialEndsAt { get; private set; }
     public DateTime? ValidUpTo { get; private set; }
     public bool IsActive { get; private set; }
-    public DateTime? LastSyncedAt { get; private set; }
 
     private Tenant() { }
 
@@ -157,6 +156,7 @@ public class Tenant : AuditableEntity
             return TenantErrors.AlreadyCancelled;
 
         LifecycleStatus = LifecycleStatus.Active;
+        IsActive = true;
 
         AddDomainEvent(new TenantReactivatedEvent(Id));
 
@@ -172,6 +172,7 @@ public class Tenant : AuditableEntity
             return TenantErrors.AlreadyCancelled;
 
         LifecycleStatus = LifecycleStatus.Suspended;
+        IsActive = false;
         SuspendedReason = reason;
 
         AddDomainEvent(new TenantSuspendedEvent(Id, reason));
@@ -202,8 +203,8 @@ public class Tenant : AuditableEntity
         return Result.Updated;
     }
 
-    public void MarkSynced(DateTime utcNow)
+    public void SetValidUpTo(DateTime validUpTo)
     {
-        LastSyncedAt = utcNow;
+        ValidUpTo = validUpTo;
     }
 }

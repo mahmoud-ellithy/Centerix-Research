@@ -10,6 +10,7 @@ public record ReactivateTenantCommand(Guid Id) : IRequest<Result<Updated>>;
 
 public class ReactivateTenantHandler(
     IAppDbContext dbContext,
+    ITenantRegistrySync tenantRegistrySync,
     IAuditWriter auditWriter) : IRequestHandler<ReactivateTenantCommand, Result<Updated>>
 {
     public async Task<Result<Updated>> Handle(ReactivateTenantCommand request, CancellationToken cancellationToken)
@@ -33,7 +34,7 @@ public class ReactivateTenantHandler(
             return activateResult.Errors!;
         }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await tenantRegistrySync.SyncLifecycleAsync(tenant, cancellationToken);
 
         await auditWriter.WriteAsync(
             action: "Tenant.Reactivate",

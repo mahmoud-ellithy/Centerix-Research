@@ -1,7 +1,6 @@
 using System.Text;
 using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform;
-using Centerix.Application.Tenants;
 using Centerix.Infrastructure.Auditing;
 using Centerix.Infrastructure.Auth;
 using Centerix.Infrastructure.Common;
@@ -70,7 +69,7 @@ public static class DependencyInjection
 
         services.AddScoped<ApplicationDbContextInitialiser>();
         services.AddTransient<ITenantDbSeeder, TenantDbSeeder>();
-        services.AddTransient<ITenantService, TenantService>();
+        services.AddScoped<ITenantRegistrySync, TenantRegistrySyncService>();
         services.AddTransient<IPlatformService, PlatformService>();
 
         // Identity configuration

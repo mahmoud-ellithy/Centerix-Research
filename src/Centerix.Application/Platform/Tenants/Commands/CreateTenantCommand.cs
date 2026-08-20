@@ -24,6 +24,7 @@ public record CreateTenantCommand(
 
 public class CreateTenantHandler(
     IAppDbContext dbContext,
+    ITenantRegistrySync tenantRegistrySync,
     IAuditWriter auditWriter) : IRequestHandler<CreateTenantCommand, Result<Created>>
 {
     public async Task<Result<Created>> Handle(
@@ -51,22 +52,24 @@ public class CreateTenantHandler(
             return tenantResult.Errors!;
         }
 
-        dbContext.Tenants.Add(tenantResult.Value);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        var tenant = tenantResult.Value;
+
+        dbContext.Tenants.Add(tenant);
+        await tenantRegistrySync.SyncCreatedAsync(tenant, cancellationToken);
 
         await auditWriter.WriteAsync(
             action: "Tenant.Create",
             entityType: nameof(Tenant),
-            entityId: tenantResult.Value.Id.ToString(),
+            entityId: tenant.Id.ToString(),
             newValue: AuditPayload.Serialize(new
             {
-                tenantResult.Value.Slug,
-                tenantResult.Value.Subdomain,
-                tenantResult.Value.DisplayName,
-                tenantResult.Value.Country,
-                tenantResult.Value.Currency,
-                tenantResult.Value.OwnerEmail,
-                IsolationMode = tenantResult.Value.IsolationMode.ToString()
+                tenant.Slug,
+                tenant.Subdomain,
+                tenant.DisplayName,
+                tenant.Country,
+                tenant.Currency,
+                tenant.OwnerEmail,
+                IsolationMode = tenant.IsolationMode.ToString()
             }),
             cancellationToken: cancellationToken);
 
