@@ -21,6 +21,7 @@ using Centerix.Domain.Students.Lookups;
 using Centerix.Domain.Students.Students;
 
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Centerix.Application.Common.Interfaces;
 
@@ -30,6 +31,9 @@ public interface IAppDbContext
 
     // User <-> Tenant membership (C1: tenant access control)
     DbSet<TenantMembership> TenantMemberships { get; }
+
+    // Tenant invitations
+    DbSet<TenantInvitation> TenantInvitations { get; }
 
     DbSet<Plan> Plans { get; }
     DbSet<Feature> Features { get; }
@@ -81,4 +85,10 @@ public interface IAppDbContext
     DbSet<AttendanceLog> AttendanceLogs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Begins a database transaction so multi-step use cases (e.g. identity creation plus
+    /// membership provisioning) can commit or roll back atomically.
+    /// </summary>
+    Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default);
 }

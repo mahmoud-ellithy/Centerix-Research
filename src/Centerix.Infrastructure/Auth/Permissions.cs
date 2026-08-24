@@ -154,6 +154,19 @@ public static class Permissions
         public const string Read = "TenantCredits.Read";
     }
 
+    public static class Invitations
+    {
+        public const string Create = "Invitations.Create";
+        public const string Read = "Invitations.Read";
+        public const string Revoke = "Invitations.Revoke";
+    }
+
+    public static class Memberships
+    {
+        public const string Read = "Memberships.Read";
+        public const string Manage = "Memberships.Manage";
+    }
+
     /// <summary>
     /// All permission codes registered in the canonical catalog (see <see cref="PermissionCatalog"/>).
     /// </summary>
@@ -165,12 +178,15 @@ public static class Permissions
     [
         TenantPlans.Create, TenantPlans.Read, TenantPlans.Update, TenantPlans.Delete,
         TenantCRMLeads.Create, TenantCRMLeads.Read, TenantCRMLeads.Update, TenantCRMLeads.Delete,
+        Invitations.Create, Invitations.Read, Invitations.Revoke,
+        Memberships.Read, Memberships.Manage,
     ];
 
     public static string[] GetTenantUserPermissions() =>
     [
         TenantPlans.Read,
         TenantCRMLeads.Read,
+        Memberships.Read,
     ];
 
     /// <summary>

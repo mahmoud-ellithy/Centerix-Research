@@ -1,10 +1,14 @@
 using System.Text;
+using Centerix.Domain.Platform.Authorization;
 using Centerix.Infrastructure.Auth;
 using Centerix.Infrastructure.Data;
 using Centerix.Infrastructure.Tenancy;
+using Finbuckle.MultiTenant.Abstractions;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
@@ -28,6 +32,7 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
                     ["JwtSettings:Issuer"] = "TestIssuer",
                     ["JwtSettings:Audience"] = "TestAudience",
                     ["JwtSettings:ExpirationInMinutes"] = "60",
+                    ["Invitations:BaseUrl"] = "https://app.securitytests.local",
                     ["ConnectionStrings:DefaultConnection"] = $"Server=localhost;Database={_databaseName};Trusted_Connection=True;TrustServerCertificate=True;"
                 })
                 .Build();
@@ -37,29 +42,139 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureServices(services =>
         {
-            // Remove ALL AppDbContext options descriptors (including any from AddDbContext)
-            var appDescriptors = services.Where(
-                d => d.ServiceType == typeof(DbContextOptions<AppDbContext>)).ToList();
-            foreach (var d in appDescriptors) services.Remove(d);
+            ReplaceDbContext<AppDbContext>(services, ConfigureAppDatabase);
 
-            services.AddDbContext<AppDbContext>(options =>
-            {
-                options.UseInMemoryDatabase(_databaseName);
-            });
+            ReplaceDbContext<TenantDbContext>(services, ConfigureTenantDatabase);
 
-            // Remove ALL TenantDbContext options descriptors (including from WithEFCoreStore)
-            var tenantDescriptors = services.Where(
-                d => d.ServiceType == typeof(DbContextOptions<TenantDbContext>)).ToList();
-            foreach (var d in tenantDescriptors) services.Remove(d);
+            var storeDescriptor = services.FirstOrDefault(
+                d => d.ServiceType == typeof(IMultiTenantStore<CenterixTenantInfo>));
+            if (storeDescriptor != null) services.Remove(storeDescriptor);
 
-            services.AddDbContext<TenantDbContext>(options =>
-            {
-                options.UseInMemoryDatabase($"{_databaseName}_Tenant");
-            });
+            services.AddSingleton<IMultiTenantStore<CenterixTenantInfo>, InMemoryTenantStore>();
+
+            // Replace the development e-mail sender with a capturing double so tests can recover
+            // raw invitation tokens (they are never persisted server-side).
+            var emailSenderDescriptor = services.FirstOrDefault(
+                d => d.ServiceType == typeof(Centerix.Application.Common.Interfaces.IEmailSender));
+            if (emailSenderDescriptor != null) services.Remove(emailSenderDescriptor);
+
+            services.AddSingleton(EmailSender);
+            services.AddSingleton<Centerix.Application.Common.Interfaces.IEmailSender>(
+                sp => sp.GetRequiredService<CapturingEmailSender>());
         });
     }
 
-    public string GenerateTestToken(string userId, string email, IList<string> roles, IList<string> permissions)
+    /// <summary>
+    /// Database configuration for <see cref="AppDbContext"/>. Defaults to EF InMemory;
+    /// relational test factories override this to target a real SQL Server container.
+    /// The TransactionIgnoredWarning suppression lets handlers open real transactions
+    /// (no-ops on InMemory) while relational suites exercise them for real.
+    /// </summary>
+    protected virtual void ConfigureAppDatabase(IServiceProvider services, DbContextOptionsBuilder options)
+        => options
+            .UseInMemoryDatabase(_databaseName)
+            .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning));
+
+    /// <summary>
+    /// Database configuration for <see cref="TenantDbContext"/>. Defaults to EF InMemory.
+    /// </summary>
+    protected virtual void ConfigureTenantDatabase(IServiceProvider services, DbContextOptionsBuilder options)
+        => options.UseInMemoryDatabase($"{_databaseName}_Tenant");
+
+    private void ReplaceDbContext<TContext>(
+        IServiceCollection services,
+        Action<IServiceProvider, DbContextOptionsBuilder> configureOptions) where TContext : DbContext
+    {
+        var toRemove = services.Where(d =>
+        {
+            var st = d.ServiceType;
+            if (st == typeof(DbContextOptions<TContext>)) return true;
+            if (st == typeof(TContext)) return true;
+            // Remove any generic service where TContext is a type argument
+            if (st.IsConstructedGenericType && st.GenericTypeArguments.Contains(typeof(TContext))) return true;
+            return false;
+        }).ToList();
+
+        foreach (var d in toRemove) services.Remove(d);
+
+        services.AddDbContext<TContext>(configureOptions);
+    }
+
+    public async Task SeedPermissionsAsync()
+    {
+        using var scope = Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
+
+        // Seed permissions
+        foreach (var entry in PermissionCatalog.All)
+        {
+            if (!context.Permissions.Any(p => p.Code == entry.Code))
+            {
+                var permission = Permission.Create(0, entry.Module, entry.Action, entry.Code, entry.Description);
+                if (permission.IsSuccess)
+                    context.Permissions.Add(permission.Value);
+            }
+        }
+        await context.SaveChangesAsync();
+
+        // Seed default roles
+        await EnsureRoleAsync(roleManager, "TenantAdmin", "Tenant Administrator");
+        await EnsureRoleAsync(roleManager, "TenantUser", "Tenant User");
+
+        // Assign all permissions to TenantAdmin
+        var adminRole = await roleManager.FindByNameAsync("TenantAdmin");
+        if (adminRole != null)
+        {
+            var allPermissions = context.Permissions.ToList();
+            var existingRolePermissions = context.RolePermissions.Where(rp => rp.RoleId == adminRole.Id).ToList();
+            var existingPermissionIds = new HashSet<int>(existingRolePermissions.Select(rp => rp.PermissionId));
+
+            foreach (var permission in allPermissions)
+            {
+                if (!existingPermissionIds.Contains(permission.Id))
+                {
+                    context.RolePermissions.Add(RolePermission.Create(adminRole.Id, permission.Id).Value);
+                }
+            }
+        }
+
+        // Assign read permissions to TenantUser
+        var userRole = await roleManager.FindByNameAsync("TenantUser");
+        if (userRole != null)
+        {
+            var readPermissions = context.Permissions
+                .Where(p => p.Action == "Read" || p.Action == "Manage")
+                .ToList();
+            var existingRolePermissions = context.RolePermissions.Where(rp => rp.RoleId == userRole.Id).ToList();
+            var existingPermissionIds = new HashSet<int>(existingRolePermissions.Select(rp => rp.PermissionId));
+
+            foreach (var permission in readPermissions)
+            {
+                if (!existingPermissionIds.Contains(permission.Id))
+                {
+                    context.RolePermissions.Add(RolePermission.Create(userRole.Id, permission.Id).Value);
+                }
+            }
+        }
+        await context.SaveChangesAsync();
+    }
+
+    private static async Task EnsureRoleAsync(RoleManager<ApplicationRole> roleManager, string code, string displayName)
+    {
+        if (!await roleManager.RoleExistsAsync(code))
+        {
+            await roleManager.CreateAsync(new ApplicationRole(code)
+            {
+                Code = code,
+                DisplayName = displayName,
+                IsSystem = true,
+                NormalizedName = code.ToUpperInvariant()
+            });
+        }
+    }
+
+    public string GenerateTestToken(string userId, string email, IList<string> roles, IList<string>? permissions = null)
     {
         var claims = new List<System.Security.Claims.Claim>
         {
@@ -71,8 +186,8 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
         foreach (var role in roles)
             claims.Add(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, role));
 
-        foreach (var permission in permissions)
-            claims.Add(new System.Security.Claims.Claim(Permissions.ClaimType, permission));
+        // Note: Permissions are no longer embedded in the JWT.
+        // They are resolved per-request via TenantPermissionResolver.
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("ThisIsATestSecretKeyThatIsAtLeast32CharsLong!!"));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -86,4 +201,10 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
 
         return new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().WriteToken(token);
     }
+
+    /// <summary>
+    /// Capturing e-mail sender shared by every host built from this factory. Call
+    /// <see cref="CapturingEmailSender.Clear"/> between tests that assert on sent mail.
+    /// </summary>
+    public CapturingEmailSender EmailSender { get; } = new();
 }

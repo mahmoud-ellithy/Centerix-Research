@@ -1675,6 +1675,99 @@ namespace Centerix.Infrastructure.Data.Migrations
                     b.ToTable("Tenants", "Platform");
                 });
 
+            modelBuilder.Entity("Centerix.Domain.Platform.Tenants.TenantInvitation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("Id");
+
+                    b.Property<DateTimeOffset?>("AcceptedAtUtc")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("AcceptedAtUtc");
+
+                    b.Property<string>("AcceptedByUserId")
+                        .HasColumnType("nvarchar(450)")
+                        .HasColumnName("AcceptedByUserId");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("CreatedAtUtc");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(256)")
+                        .HasColumnName("Email");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("ExpiresAtUtc");
+
+                    b.Property<string>("InvitedByUserId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)")
+                        .HasColumnName("InvitedByUserId");
+
+                    b.Property<string>("NormalizedEmail")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(256)")
+                        .HasColumnName("NormalizedEmail");
+
+                    b.Property<DateTimeOffset?>("RevokedAtUtc")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("RevokedAtUtc");
+
+                    b.Property<string>("RevokedByUserId")
+                        .HasColumnType("nvarchar(450)")
+                        .HasColumnName("RevokedByUserId");
+
+                    b.Property<string>("RoleName")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(128)")
+                        .HasColumnName("RoleName");
+
+                    b.Property<byte>("Status")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("tinyint")
+                        .HasDefaultValue((byte)0);
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(64)")
+                        .HasColumnName("TenantId");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(128)")
+                        .HasColumnName("TokenHash");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AcceptedByUserId");
+
+                    b.HasIndex("InvitedByUserId");
+
+                    b.HasIndex("NormalizedEmail")
+                        .HasDatabaseName("IX_TenantInvitations_NormalizedEmail");
+
+                    b.HasIndex("RevokedByUserId");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_TenantInvitations_Status");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("IX_TenantInvitations_TenantId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasDatabaseName("IX_TenantInvitations_TokenHash");
+
+                    b.HasIndex("TenantId", "NormalizedEmail", "Status")
+                        .HasDatabaseName("IX_TenantInvitations_Tenant_Email_Status");
+
+                    b.ToTable("TenantInvitations", "Platform");
+                });
+
             modelBuilder.Entity("Centerix.Domain.Platform.Tenants.TenantMembership", b =>
                 {
                     b.Property<string>("UserId")
@@ -1688,6 +1781,13 @@ namespace Centerix.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("JoinedAtUtc")
                         .HasColumnType("datetimeoffset")
                         .HasColumnName("JoinedAtUtc");
+
+                    b.Property<string>("RoleName")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("nvarchar(128)")
+                        .HasDefaultValue("TenantUser")
+                        .HasColumnName("RoleName");
 
                     b.Property<byte>("Status")
                         .ValueGeneratedOnAdd()
@@ -2460,6 +2560,25 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Plan");
+                });
+
+            modelBuilder.Entity("Centerix.Domain.Platform.Tenants.TenantInvitation", b =>
+                {
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", null)
+                        .WithMany()
+                        .HasForeignKey("AcceptedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", null)
+                        .WithMany()
+                        .HasForeignKey("InvitedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", null)
+                        .WithMany()
+                        .HasForeignKey("RevokedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Centerix.Domain.Platform.Tenants.TenantMembership", b =>

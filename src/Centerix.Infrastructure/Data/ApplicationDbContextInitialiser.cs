@@ -202,7 +202,7 @@ public class ApplicationDbContextInitialiser(
         if (!await _context.TenantMemberships.AnyAsync(
                 m => m.UserId == adminUser.Id && m.TenantId == tenantInfo.Id))
         {
-            var membership = TenantMembership.Create(adminUser.Id, tenantInfo.Id, TenantMembershipStatus.Active);
+            var membership = TenantMembership.Create(adminUser.Id, tenantInfo.Id, adminRole, TenantMembershipStatus.Active);
             if (membership.IsSuccess)
             {
                 await _context.TenantMemberships.AddAsync(membership.Value);

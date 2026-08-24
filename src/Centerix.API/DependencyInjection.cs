@@ -138,8 +138,10 @@ public static class DependencyInjection
 
         app.UseMultiTenant();
         app.UseAuthentication();
-        app.UseAuthorization();
+        // TenantGuardMiddleware must run BEFORE UseAuthorization so that tenant context
+        // is established and permissions are loaded before the PermissionAuthorizationHandler runs.
         app.UseMiddleware<TenantGuardMiddleware>();
+        app.UseAuthorization();
 
         return app;
     }

@@ -35,6 +35,9 @@
     <PackageVersion Include="Finbuckle.MultiTenant.EntityFrameworkCore" Version="8.0.0" />
     <!-- Serilog -->
     <PackageVersion Include="Microsoft.Extensions.Localization" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.9" />
+    <!-- Direct reference overrides the vulnerable transitive 2.0.0 (GHSA-v5pm-xwqc-g5wc / CVE-2026-49451) -->
+    <PackageVersion Include="Microsoft.OpenApi" Version="2.7.5" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.9" />
     <PackageVersion Include="Serilog" Version="4.0.0" />
     <PackageVersion Include="Serilog.AspNetCore" Version="9.0.0" />

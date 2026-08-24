@@ -33,6 +33,12 @@ public class TenantMembershipConfiguration : IEntityTypeConfiguration<TenantMemb
             .IsRequired()
             .HasDefaultValue(TenantMembershipStatus.Active);
 
+        builder.Property(tm => tm.RoleName)
+            .HasColumnName("RoleName")
+            .HasColumnType("nvarchar(128)")
+            .IsRequired()
+            .HasDefaultValue("TenantUser");
+
         builder.Property(tm => tm.JoinedAtUtc)
             .HasColumnName("JoinedAtUtc")
             .HasColumnType("datetimeoffset")

@@ -29,6 +29,7 @@ using MediatR;
 
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Centerix.Infrastructure.Data;
 
@@ -64,6 +65,9 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
 
     // User <-> Tenant membership (foundation for tenant access control)
     public DbSet<TenantMembership> TenantMemberships { get; set; } = default!;
+
+    // Tenant invitations
+    public DbSet<TenantInvitation> TenantInvitations { get; set; } = default!;
 
     // Platform Staff (ERD v3)
     public DbSet<PlatformUser> PlatformUsers { get; set; } = default!;
@@ -101,6 +105,9 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
         await DispatchDomainEventsAsync(cancellationToken);
         return await base.SaveChangesAsync(cancellationToken);
     }
+
+    public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+        => Database.BeginTransactionAsync(cancellationToken);
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

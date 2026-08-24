@@ -30,7 +30,20 @@ public class CurrentTenant(IMultiTenantContextAccessor<CenterixTenantInfo> multi
 
     public bool IsActive => _multiTenantContextAccessor.MultiTenantContext?.TenantInfo?.IsActive ?? false;
 
-    public DateTime ValidUpTo => _multiTenantContextAccessor.MultiTenantContext?.TenantInfo?.ValidUpTo ?? DateTime.MinValue;
+    /// <summary>
+    /// Subscription expiry of the authorized tenant. The registry stores a non-nullable DateTime,
+    /// where <see cref="DateTime.MinValue"/> is the sentinel for "no expiry configured" (the domain
+    /// <c>Tenant.ValidUpTo</c> is nullable and defaults to null). The sentinel is translated to
+    /// <c>null</c> here so consumers get the explicit domain semantics: null = never expires.
+    /// </summary>
+    public DateTime? ValidUpTo
+    {
+        get
+        {
+            var validUpTo = _multiTenantContextAccessor.MultiTenantContext?.TenantInfo?.ValidUpTo;
+            return validUpTo == DateTime.MinValue ? null : validUpTo;
+        }
+    }
 
     /// <summary>
     /// Establishes the verified tenant context by locking the currently resolved tenant as authorized

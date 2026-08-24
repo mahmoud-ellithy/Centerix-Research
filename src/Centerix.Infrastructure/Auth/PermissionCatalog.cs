@@ -84,5 +84,12 @@ public static class PermissionCatalog
 
         new("TenantCredits",  "Create", "TenantCredits.Create",  "Create a tenant credit"),
         new("TenantCredits",  "Read",   "TenantCredits.Read",    "Read tenant credits"),
+
+        new("Invitations",    "Create", "Invitations.Create",    "Create a tenant invitation"),
+        new("Invitations",    "Read",   "Invitations.Read",      "Read tenant invitations"),
+        new("Invitations",    "Revoke", "Invitations.Revoke",    "Revoke a tenant invitation"),
+
+        new("Memberships",    "Read",   "Memberships.Read",      "Read tenant memberships"),
+        new("Memberships",    "Manage", "Memberships.Manage",    "Manage tenant memberships"),
     ];
 }

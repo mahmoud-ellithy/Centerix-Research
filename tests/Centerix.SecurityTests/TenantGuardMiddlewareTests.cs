@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
+using System.Security.Claims;
 using Xunit;
 
 namespace Centerix.SecurityTests;
@@ -35,7 +36,7 @@ public class TenantGuardMiddlewareTests : IDisposable
         _serviceProvider?.Dispose();
     }
 
-    private (TenantGuardMiddleware middleware, DefaultHttpContext context, ICurrentUser currentUser, ICurrentTenant currentTenant) CreateSut(
+    private (TenantGuardMiddleware middleware, DefaultHttpContext context, ICurrentTenant currentTenant) CreateSut(
         string path = "/api/students",
         string? tenantHeader = null,
         bool isAuthenticated = true,
@@ -51,14 +52,16 @@ public class TenantGuardMiddlewareTests : IDisposable
             context.Request.Headers["tenant"] = tenantHeader;
         }
 
-        var currentUser = Substitute.For<ICurrentUser>();
-        currentUser.IsAuthenticated.Returns(isAuthenticated);
-        currentUser.UserId.Returns(userId ?? string.Empty);
+        if (isAuthenticated)
+        {
+            var identity = new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, userId ?? string.Empty)], "TestAuth");
+            context.User = new ClaimsPrincipal(identity);
+        }
 
         var currentTenant = Substitute.For<ICurrentTenant>();
 
         var middleware = new TenantGuardMiddleware(_next);
-        return (middleware, context, currentUser, currentTenant);
+        return (middleware, context, currentTenant);
     }
 
     private async Task SeedMembershipAsync(string userId, string tenantId, TenantMembershipStatus status)
@@ -68,7 +71,7 @@ public class TenantGuardMiddlewareTests : IDisposable
 
         if (!context.TenantMemberships.Any(m => m.UserId == userId && m.TenantId == tenantId))
         {
-            var membership = TenantMembership.Create(userId, tenantId, status);
+            var membership = TenantMembership.Create(userId, tenantId, "TenantUser", status);
             if (membership.IsSuccess)
             {
                 context.TenantMemberships.Add(membership.Value);
@@ -92,9 +95,9 @@ public class TenantGuardMiddlewareTests : IDisposable
     [InlineData("/swagger/index.html")]
     public async Task InvokeAsync_BypassPaths_CallsNext(string path)
     {
-        var (middleware, context, currentUser, currentTenant) = CreateSut(path, isAuthenticated: false);
+        var (middleware, context, currentTenant) = CreateSut(path, isAuthenticated: false);
 
-        await middleware.InvokeAsync(context, currentUser, currentTenant, await GetDbContextAsync());
+        await middleware.InvokeAsync(context, currentTenant, await GetDbContextAsync());
 
         await _next.Received(1)(Arg.Any<HttpContext>());
     }
@@ -105,9 +108,9 @@ public class TenantGuardMiddlewareTests : IDisposable
     [Fact]
     public async Task InvokeAsync_Unauthenticated_CallsNext()
     {
-        var (middleware, context, currentUser, currentTenant) = CreateSut("/api/auth/login", isAuthenticated: false);
+        var (middleware, context, currentTenant) = CreateSut("/api/auth/login", isAuthenticated: false);
 
-        await middleware.InvokeAsync(context, currentUser, currentTenant, await GetDbContextAsync());
+        await middleware.InvokeAsync(context, currentTenant, await GetDbContextAsync());
 
         await _next.Received(1)(Arg.Any<HttpContext>());
     }
@@ -118,10 +121,10 @@ public class TenantGuardMiddlewareTests : IDisposable
     [Fact]
     public async Task InvokeAsync_NoTenantHeader_Returns403()
     {
-        var (middleware, context, currentUser, currentTenant) = CreateSut("/api/students", tenantHeader: null);
+        var (middleware, context, currentTenant) = CreateSut("/api/students", tenantHeader: null);
         currentTenant.IsResolved.Returns(false);
 
-        await middleware.InvokeAsync(context, currentUser, currentTenant, await GetDbContextAsync());
+        await middleware.InvokeAsync(context, currentTenant, await GetDbContextAsync());
 
         Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
     }
@@ -132,11 +135,11 @@ public class TenantGuardMiddlewareTests : IDisposable
     [Fact]
     public async Task InvokeAsync_NoMembership_Returns403()
     {
-        var (middleware, context, currentUser, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-a");
+        var (middleware, context, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-a");
         currentTenant.IsResolved.Returns(true);
         currentTenant.ResolvedTenantId.Returns("tenant-a");
 
-        await middleware.InvokeAsync(context, currentUser, currentTenant, await GetDbContextAsync());
+        await middleware.InvokeAsync(context, currentTenant, await GetDbContextAsync());
 
         Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
     }
@@ -149,11 +152,11 @@ public class TenantGuardMiddlewareTests : IDisposable
     {
         await SeedMembershipAsync("user-1", "tenant-a", TenantMembershipStatus.Suspended);
 
-        var (middleware, context, currentUser, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-a");
+        var (middleware, context, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-a");
         currentTenant.IsResolved.Returns(true);
         currentTenant.ResolvedTenantId.Returns("tenant-a");
 
-        await middleware.InvokeAsync(context, currentUser, currentTenant, await GetDbContextAsync());
+        await middleware.InvokeAsync(context, currentTenant, await GetDbContextAsync());
 
         Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
     }
@@ -166,13 +169,13 @@ public class TenantGuardMiddlewareTests : IDisposable
     {
         await SeedMembershipAsync("user-1", "tenant-a", TenantMembershipStatus.Active);
 
-        var (middleware, context, currentUser, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-a");
+        var (middleware, context, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-a");
         currentTenant.IsResolved.Returns(true);
         currentTenant.ResolvedTenantId.Returns("tenant-a");
         currentTenant.IsActive.Returns(true);
         currentTenant.ValidUpTo.Returns(DateTime.UtcNow.AddYears(1));
 
-        await middleware.InvokeAsync(context, currentUser, currentTenant, await GetDbContextAsync());
+        await middleware.InvokeAsync(context, currentTenant, await GetDbContextAsync());
 
         currentTenant.Received(1).AuthorizeTenant();
         await _next.Received(1)(Arg.Any<HttpContext>());
@@ -186,13 +189,13 @@ public class TenantGuardMiddlewareTests : IDisposable
     {
         await SeedMembershipAsync("user-1", "tenant-a", TenantMembershipStatus.Active);
 
-        var (middleware, context, currentUser, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-a");
+        var (middleware, context, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-a");
         currentTenant.IsResolved.Returns(true);
         currentTenant.ResolvedTenantId.Returns("tenant-a");
         currentTenant.IsActive.Returns(false);
         currentTenant.ValidUpTo.Returns(DateTime.UtcNow.AddYears(1));
 
-        await middleware.InvokeAsync(context, currentUser, currentTenant, await GetDbContextAsync());
+        await middleware.InvokeAsync(context, currentTenant, await GetDbContextAsync());
 
         currentTenant.Received(1).AuthorizeTenant();
         Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
@@ -206,13 +209,13 @@ public class TenantGuardMiddlewareTests : IDisposable
     {
         await SeedMembershipAsync("user-1", "tenant-a", TenantMembershipStatus.Active);
 
-        var (middleware, context, currentUser, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-a");
+        var (middleware, context, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-a");
         currentTenant.IsResolved.Returns(true);
         currentTenant.ResolvedTenantId.Returns("tenant-a");
         currentTenant.IsActive.Returns(true);
         currentTenant.ValidUpTo.Returns(DateTime.UtcNow.AddDays(-1));
 
-        await middleware.InvokeAsync(context, currentUser, currentTenant, await GetDbContextAsync());
+        await middleware.InvokeAsync(context, currentTenant, await GetDbContextAsync());
 
         currentTenant.Received(1).AuthorizeTenant();
         Assert.Equal(StatusCodes.Status402PaymentRequired, context.Response.StatusCode);
@@ -227,11 +230,11 @@ public class TenantGuardMiddlewareTests : IDisposable
     {
         await SeedMembershipAsync("user-1", "tenant-a", TenantMembershipStatus.Active);
 
-        var (middleware, context, currentUser, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-b");
+        var (middleware, context, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-b");
         currentTenant.IsResolved.Returns(true);
         currentTenant.ResolvedTenantId.Returns("tenant-b");
 
-        await middleware.InvokeAsync(context, currentUser, currentTenant, await GetDbContextAsync());
+        await middleware.InvokeAsync(context, currentTenant, await GetDbContextAsync());
 
         currentTenant.DidNotReceive().AuthorizeTenant();
         Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
@@ -246,13 +249,13 @@ public class TenantGuardMiddlewareTests : IDisposable
         await SeedMembershipAsync("user-2", "tenant-a", TenantMembershipStatus.Active);
         await SeedMembershipAsync("user-2", "tenant-b", TenantMembershipStatus.Active);
 
-        var (middleware, context, currentUser, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-b", userId: "user-2");
+        var (middleware, context, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-b", userId: "user-2");
         currentTenant.IsResolved.Returns(true);
         currentTenant.ResolvedTenantId.Returns("tenant-b");
         currentTenant.IsActive.Returns(true);
         currentTenant.ValidUpTo.Returns(DateTime.UtcNow.AddYears(1));
 
-        await middleware.InvokeAsync(context, currentUser, currentTenant, await GetDbContextAsync());
+        await middleware.InvokeAsync(context, currentTenant, await GetDbContextAsync());
 
         currentTenant.Received(1).AuthorizeTenant();
         await _next.Received(1)(Arg.Any<HttpContext>());
@@ -266,11 +269,11 @@ public class TenantGuardMiddlewareTests : IDisposable
     {
         await SeedMembershipAsync("user-1", "tenant-a", TenantMembershipStatus.Revoked);
 
-        var (middleware, context, currentUser, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-a");
+        var (middleware, context, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-a");
         currentTenant.IsResolved.Returns(true);
         currentTenant.ResolvedTenantId.Returns("tenant-a");
 
-        await middleware.InvokeAsync(context, currentUser, currentTenant, await GetDbContextAsync());
+        await middleware.InvokeAsync(context, currentTenant, await GetDbContextAsync());
 
         Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
     }
@@ -283,11 +286,11 @@ public class TenantGuardMiddlewareTests : IDisposable
     {
         await SeedMembershipAsync("user-1", "tenant-a", TenantMembershipStatus.Invited);
 
-        var (middleware, context, currentUser, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-a");
+        var (middleware, context, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-a");
         currentTenant.IsResolved.Returns(true);
         currentTenant.ResolvedTenantId.Returns("tenant-a");
 
-        await middleware.InvokeAsync(context, currentUser, currentTenant, await GetDbContextAsync());
+        await middleware.InvokeAsync(context, currentTenant, await GetDbContextAsync());
 
         Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
     }
@@ -300,11 +303,11 @@ public class TenantGuardMiddlewareTests : IDisposable
     {
         await SeedMembershipAsync("user-2", "tenant-a", TenantMembershipStatus.Active);
 
-        var (middleware, context, currentUser, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-b", userId: "user-2");
+        var (middleware, context, currentTenant) = CreateSut("/api/students", tenantHeader: "tenant-b", userId: "user-2");
         currentTenant.IsResolved.Returns(true);
         currentTenant.ResolvedTenantId.Returns("tenant-b");
 
-        await middleware.InvokeAsync(context, currentUser, currentTenant, await GetDbContextAsync());
+        await middleware.InvokeAsync(context, currentTenant, await GetDbContextAsync());
 
         currentTenant.DidNotReceive().AuthorizeTenant();
         Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);

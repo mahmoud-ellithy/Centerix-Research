@@ -12,8 +12,6 @@ namespace Centerix.API.Controllers;
 [Route("api/[controller]")]
 public class AuthController(
     UserManager<IdentityUser> userManager,
-    RoleManager<ApplicationRole> roleManager,
-    IAppDbContext dbContext,
     ITokenService tokenService,
     IRefreshTokenService refreshTokenService,
     ILocalizer localizer) : ApiController(localizer)
@@ -75,10 +73,9 @@ public class AuthController(
 
         var roles = await userManager.GetRolesAsync(user);
 
-        // Resolve permission codes from the RolePermission table joined to the user's roles.
-        var permissions = await ResolvePermissionsForRolesAsync(roles);
-
-        var accessToken = tokenService.GenerateAccessToken(user, roles, permissions);
+        // Tenant-specific permissions are now resolved per-request via TenantPermissionResolver,
+        // NOT embedded in the JWT. This ensures permissions cannot leak between tenants.
+        var accessToken = tokenService.GenerateAccessToken(user, roles);
         var refreshToken = await refreshTokenService.IssueAsync(
             userId: user.Id,
             deviceInfo: Request.Headers.UserAgent.ToString(),
@@ -134,37 +131,6 @@ public class AuthController(
 
         await refreshTokenService.RevokeAllAsync(userId);
         return NoContent();
-    }
-
-    private async Task<List<string>> ResolvePermissionsForRolesAsync(IList<string> roles)
-    {
-        if (roles.Count == 0)
-        {
-            return [];
-        }
-
-        var roleIds = new List<string>();
-        foreach (var name in roles)
-        {
-            var role = await roleManager.FindByNameAsync(name);
-            if (role != null)
-            {
-                roleIds.Add(role.Id);
-            }
-        }
-
-        if (roleIds.Count == 0)
-        {
-            return [];
-        }
-
-        var permissionCodes = await (
-            from rp in dbContext.RolePermissions.AsNoTracking()
-            join p in dbContext.Permissions.AsNoTracking() on rp.PermissionId equals p.Id
-            where roleIds.Contains(rp.RoleId)
-            select p.Code).Distinct().ToListAsync();
-
-        return permissionCodes;
     }
 }
 

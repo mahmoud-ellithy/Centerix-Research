@@ -87,8 +87,7 @@ public class RefreshTokenService(
             return RefreshTokenErrors.NotFound;
 
         var roles = await userManager.GetRolesAsync(user);
-        var permissionCodes = await ResolvePermissionsForRolesAsync(roles, cancellationToken);
-        var accessToken = tokenService.GenerateAccessToken(user, roles, permissionCodes);
+        var accessToken = tokenService.GenerateAccessToken(user, roles);
         var accessExpiresAt = DateTime.UtcNow.AddMinutes(_jwtSettings.ExpirationInMinutes);
 
         // Issue the new refresh token.

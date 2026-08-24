@@ -42,7 +42,7 @@ public class JwtSettings
 
 public interface ITokenService
 {
-    string GenerateAccessToken(IdentityUser user, IList<string> roles, IList<string> permissions);
+    string GenerateAccessToken(IdentityUser user, IList<string> roles);
     (string Token, DateTime ExpiresAtUtc) GenerateRefreshToken();
 }
 
@@ -50,12 +50,13 @@ public class JwtTokenService(IOptions<JwtSettings> jwtSettings) : ITokenService
 {
     private readonly JwtSettings _jwtSettings = jwtSettings.Value;
 
-    public string GenerateAccessToken(IdentityUser user, IList<string> roles, IList<string> permissions)
+    public string GenerateAccessToken(IdentityUser user, IList<string> roles)
     {
-        // Intentionally TENANT-AGNOSTIC: no tenant claim is emitted. The active tenant is a client
-        // selection (header/host) verified server-side on every request via TenantMembership in
-        // TenantGuardMiddleware. A JWT tenant claim must never be introduced as a source of truth or
-        // as proof of membership — multi-tenancy is authorized per request, not pinned in the token.
+        // TENANT-AGNOSTIC & PERMISSION-FREE: The JWT contains only identity claims and
+        // global roles. Tenant-specific permissions are resolved per-request via
+        // TenantPermissionResolver from: Membership → Role → RolePermission → Permission.
+        // This ensures permissions cannot leak between tenants and removes the need to
+        // invalidate/reissue tokens when tenant-scoped permissions change.
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, user.Id),
@@ -65,9 +66,6 @@ public class JwtTokenService(IOptions<JwtSettings> jwtSettings) : ITokenService
 
         foreach (var role in roles)
             claims.Add(new Claim(ClaimTypes.Role, role));
-
-        foreach (var permission in permissions)
-            claims.Add(new Claim(Permissions.ClaimType, permission));
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Secret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);

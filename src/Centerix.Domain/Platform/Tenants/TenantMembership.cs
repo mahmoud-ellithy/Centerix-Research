@@ -23,15 +23,17 @@ public class TenantMembership : Entity
 {
     public string UserId { get; private set; } = default!;
     public string TenantId { get; private set; } = default!;
+    public string RoleName { get; private set; } = default!;
     public TenantMembershipStatus Status { get; private set; }
     public DateTimeOffset JoinedAtUtc { get; private set; }
 
     private TenantMembership() { }
 
-    private TenantMembership(string userId, string tenantId, TenantMembershipStatus status)
+    private TenantMembership(string userId, string tenantId, string roleName, TenantMembershipStatus status)
     {
         UserId = userId;
         TenantId = tenantId;
+        RoleName = roleName;
         Status = status;
         JoinedAtUtc = DateTimeOffset.UtcNow;
     }
@@ -39,6 +41,7 @@ public class TenantMembership : Entity
     public static Result<TenantMembership> Create(
         string userId,
         string tenantId,
+        string roleName = "TenantUser",
         TenantMembershipStatus status = TenantMembershipStatus.Active)
     {
         if (string.IsNullOrWhiteSpace(userId))
@@ -47,7 +50,10 @@ public class TenantMembership : Entity
         if (string.IsNullOrWhiteSpace(tenantId))
             return Error.Validation("TenantMembership.TenantId_Required", "Tenant ID is required");
 
-        return new TenantMembership(userId, tenantId, status);
+        if (string.IsNullOrWhiteSpace(roleName))
+            roleName = "TenantUser";
+
+        return new TenantMembership(userId, tenantId, roleName, status);
     }
 
     public Result<Updated> Activate()

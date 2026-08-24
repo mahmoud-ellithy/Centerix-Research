@@ -6,6 +6,7 @@ using Centerix.Infrastructure.Auth;
 using Centerix.Infrastructure.Common;
 using Centerix.Infrastructure.Data;
 using Centerix.Infrastructure.Data.Interceptors;
+using Centerix.Infrastructure.Email;
 using Centerix.Infrastructure.Platform;
 using Centerix.Infrastructure.Tenancy;
 using Finbuckle.MultiTenant;
@@ -41,12 +42,6 @@ public static class DependencyInjection
 
         services.AddScoped<IAuditWriter, AuditWriter>();
 
-        // Tenant registry context — uses its own migrations history table
-        // so it doesn't conflict with AppDbContext in the shared database.
-        services.AddDbContext<TenantDbContext>(options =>
-            options.UseSqlServer(connectionString,
-                sql => sql.MigrationsHistoryTable("__TenantMigrationsHistory")));
-
         // Configure Finbuckle MultiTenant.
         // The tenant is a client SELECTION resolved from the request header or host only. It is
         // never resolved from a token claim: doing so would make the JWT a tenant source of truth,
@@ -58,6 +53,15 @@ public static class DependencyInjection
             .WithHeaderStrategy(TenancyConstants.TenantIdName)
             .WithHostStrategy("tenant") // e.g., tenant1.myapp.com
             .WithEFCoreStore<TenantDbContext, CenterixTenantInfo>();
+
+        // Tenant registry context — uses its own migrations history table
+        // so it doesn't conflict with AppDbContext in the shared database.
+        // NOTE: This MUST come AFTER WithEFCoreStore so that our explicit AddDbContext
+        // overrides the parameterless AddDbContext<TenantDbContext>() called internally
+        // by WithEFCoreStore. This ensures only one database provider is configured.
+        services.AddDbContext<TenantDbContext>(options =>
+            options.UseSqlServer(connectionString,
+                sql => sql.MigrationsHistoryTable("__TenantMigrationsHistory")));
 
         services.AddDbContext<AppDbContext>((sp, options) =>
         {
@@ -118,6 +122,7 @@ public static class DependencyInjection
         // HybridCache
         // Permission-based authorization
         services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
+        services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
 
         // JWT settings (strongly-typed) with startup validation
         services.Configure<JwtSettings>(configuration.GetSection("JwtSettings"));
@@ -134,6 +139,26 @@ public static class DependencyInjection
         services.AddScoped<ITokenService, JwtTokenService>();
         services.AddScoped<IRefreshTokenService, RefreshTokenService>();
 
+        // Tenant-scoped permission resolver
+        services.AddScoped<ITenantPermissionResolver, TenantPermissionResolver>();
+
+        // Identity service abstraction
+        services.AddScoped<IIdentityService, IdentityService>();
+        services.AddScoped<IRoleService, RoleService>();
+
+        // Email sender (development mode: logs to console)
+        services.AddScoped<IEmailSender, DevelopmentEmailSender>();
+
+        // Invitation links: environment-specific base URL, validated at startup (fail fast).
+        services.Configure<InvitationLinkOptions>(configuration.GetSection(InvitationLinkOptions.SectionName));
+        services.AddOptions<InvitationLinkOptions>()
+            .Bind(configuration.GetSection(InvitationLinkOptions.SectionName))
+            .Validate(options => Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var uri)
+                && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp),
+                $"Invitations:BaseUrl must be an absolute http(s) URL pointing at the application front end. " +
+                "Configure it per environment before starting the API.")
+            .ValidateOnStart();
+        services.AddScoped<IInvitationLinkBuilder, InvitationLinkBuilder>();
         services.AddHybridCache();
 
         return services;

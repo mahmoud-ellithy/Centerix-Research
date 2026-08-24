@@ -13,6 +13,7 @@ using Xunit;
 
 namespace Centerix.SecurityTests;
 
+[Collection("Integration")]
 public class C1CrossTenantIsolationTests : IClassFixture<TestWebApplicationFactory>
 {
     private readonly TestWebApplicationFactory _factory;
@@ -31,6 +32,8 @@ public class C1CrossTenantIsolationTests : IClassFixture<TestWebApplicationFacto
 
     private async Task SeedTestDataAsync()
     {
+        await _factory.SeedPermissionsAsync();
+
         using var scope = _factory.Services.CreateScope();
         var scopedProvider = scope.ServiceProvider;
 
@@ -38,21 +41,51 @@ public class C1CrossTenantIsolationTests : IClassFixture<TestWebApplicationFacto
         var appDbContext = scopedProvider.GetRequiredService<AppDbContext>();
         var tenantStore = scopedProvider.GetRequiredService<IMultiTenantStore<CenterixTenantInfo>>();
 
-        // Create tenants
         await CreateTenantIfNotExistsAsync(tenantStore, TenantA, "Tenant A", true);
         await CreateTenantIfNotExistsAsync(tenantStore, TenantB, "Tenant B", true);
         await CreateTenantIfNotExistsAsync(tenantStore, TenantC, "Tenant C", true);
 
-        // Create users
+        await ResetTenantStatusAsync(tenantStore, TenantA, true);
+        await ResetTenantStatusAsync(tenantStore, TenantB, true);
+        await ResetTenantStatusAsync(tenantStore, TenantC, true);
+
         var userA = await CreateUserIfNotExistsAsync(userManager, "user-a@test.com", "UserA@test123");
         var userB = await CreateUserIfNotExistsAsync(userManager, "user-b@test.com", "UserB@test123");
 
-        // Create memberships: User A belongs to Tenant A only
-        await CreateMembershipIfNotExistsAsync(appDbContext, userA.Id, TenantA, TenantMembershipStatus.Active);
+        await ResetMembershipStatusAsync(appDbContext, userA.Id, TenantA, TenantMembershipStatus.Active);
+        await ResetMembershipStatusAsync(appDbContext, userB.Id, TenantA, TenantMembershipStatus.Active);
+        await ResetMembershipStatusAsync(appDbContext, userB.Id, TenantB, TenantMembershipStatus.Active);
+    }
 
-        // User B belongs to Tenant A and Tenant B
-        await CreateMembershipIfNotExistsAsync(appDbContext, userB.Id, TenantA, TenantMembershipStatus.Active);
-        await CreateMembershipIfNotExistsAsync(appDbContext, userB.Id, TenantB, TenantMembershipStatus.Active);
+    private async Task ResetTenantStatusAsync(IMultiTenantStore<CenterixTenantInfo> store, string tenantId, bool isActive)
+    {
+        var tenant = await store.TryGetAsync(tenantId);
+        if (tenant != null && tenant.IsActive != isActive)
+        {
+            tenant.IsActive = isActive;
+            tenant.ValidUpTo = DateTime.UtcNow.AddYears(1);
+            await store.TryUpdateAsync(tenant);
+        }
+    }
+
+    private async Task ResetMembershipStatusAsync(AppDbContext context, string userId, string tenantId, TenantMembershipStatus desiredStatus)
+    {
+        var existing = context.TenantMemberships
+            .FirstOrDefault(m => m.UserId == userId && m.TenantId == tenantId);
+        if (existing == null)
+        {
+            var membership = TenantMembership.Create(userId, tenantId, "TenantUser", desiredStatus);
+            if (membership.IsSuccess)
+            {
+                context.TenantMemberships.Add(membership.Value);
+                await context.SaveChangesAsync();
+            }
+        }
+        else if (existing.Status != desiredStatus && desiredStatus == TenantMembershipStatus.Active)
+        {
+            existing.Activate();
+            await context.SaveChangesAsync();
+        }
     }
 
     private async Task CreateTenantIfNotExistsAsync(IMultiTenantStore<CenterixTenantInfo> store, string id, string name, bool isActive)
@@ -99,7 +132,7 @@ public class C1CrossTenantIsolationTests : IClassFixture<TestWebApplicationFacto
     {
         if (!context.TenantMemberships.Any(m => m.UserId == userId && m.TenantId == tenantId))
         {
-            var membership = TenantMembership.Create(userId, tenantId, status);
+            var membership = TenantMembership.Create(userId, tenantId, "TenantUser", status);
             if (membership.IsSuccess)
             {
                 context.TenantMemberships.Add(membership.Value);

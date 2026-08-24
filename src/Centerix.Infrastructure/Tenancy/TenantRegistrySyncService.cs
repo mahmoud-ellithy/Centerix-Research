@@ -129,7 +129,9 @@ public class TenantRegistrySyncService(
             FirstName = tenant.OwnerFirstName,
             LastName = tenant.OwnerLastName,
             IsActive = tenant.IsActive,
-            ValidUpTo = tenant.ValidUpTo ?? DateTime.UtcNow.AddMonths(1),
+            // Domain rule: null ValidUpTo = no expiration. The registry stores the MinValue sentinel
+            // (non-nullable column); CurrentTenant.ValidUpTo translates it back to null.
+            ValidUpTo = tenant.ValidUpTo ?? DateTime.MinValue,
             Status = (byte)tenant.LifecycleStatus,
             TrialEndsAt = tenant.TrialEndsAt,
             CreatedAt = tenant.CreatedAtUtc.UtcDateTime
@@ -149,7 +151,8 @@ public class TenantRegistrySyncService(
         tenantInfo.Country = tenant.Country;
         tenantInfo.Currency = tenant.Currency;
         tenantInfo.Timezone = tenant.Timezone;
-        tenantInfo.ValidUpTo = tenant.ValidUpTo ?? tenantInfo.ValidUpTo;
+        // Domain rule: null ValidUpTo = no expiration → MinValue sentinel in the registry.
+        tenantInfo.ValidUpTo = tenant.ValidUpTo ?? DateTime.MinValue;
         tenantInfo.TrialEndsAt = tenant.TrialEndsAt;
     }
 }

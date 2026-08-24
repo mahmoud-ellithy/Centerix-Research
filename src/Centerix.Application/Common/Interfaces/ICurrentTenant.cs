@@ -33,7 +33,12 @@ public interface ICurrentTenant
 
     bool IsActive { get; }
 
-    DateTime ValidUpTo { get; }
+    /// <summary>
+    /// Subscription expiry of the authorized tenant, when one is configured.
+    /// Business rule: <c>null</c> means the tenant has NO expiration and is never blocked by
+    /// expiry; a non-null value in the past means the tenant is expired (HTTP 402).
+    /// </summary>
+    DateTime? ValidUpTo { get; }
 
     /// <summary>Marks the currently resolved tenant as authorized for this request, establishing the verified tenant context.</summary>
     void AuthorizeTenant();
