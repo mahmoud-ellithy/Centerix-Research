@@ -36,6 +36,17 @@ public static class Permissions
         public const string Delete = "TenantPlans.Delete";
     }
 
+    /// <summary>
+    /// PLATFORM commercial operations on subscriptions. Deliberately separate from
+    /// TenantPlans.Read (which tenants may hold to VIEW their own subscription):
+    /// assign/renew/suspend/cancel/activate are platform-admin-only workflows.
+    /// </summary>
+    public static class Subscriptions
+    {
+        public const string Read = "Subscriptions.Read";
+        public const string Manage = "Subscriptions.Manage";
+    }
+
     public static class TenantCRMLeads
     {
         public const string Create = "TenantCRMLeads.Create";
@@ -174,9 +185,12 @@ public static class Permissions
 
     public static string[] GetPlatformAdminPermissions() => GetAll();
 
+    // Phase 2 security boundary: tenants may VIEW their own subscription but NEVER manage it.
+    // Commercial operations (assign/renew/suspend/cancel/approve) live exclusively behind
+    // Subscriptions.Manage, which is platform-scoped.
     public static string[] GetTenantAdminPermissions() =>
     [
-        TenantPlans.Create, TenantPlans.Read, TenantPlans.Update, TenantPlans.Delete,
+        TenantPlans.Read,
         TenantCRMLeads.Create, TenantCRMLeads.Read, TenantCRMLeads.Update, TenantCRMLeads.Delete,
         Invitations.Create, Invitations.Read, Invitations.Revoke,
         Memberships.Read, Memberships.Manage,
@@ -214,6 +228,10 @@ public static class Permissions
 
             // Tenant registry management: provisioning, suspension and cancellation of tenants
             Tenants.Create, Tenants.Read, Tenants.Update, Tenants.Delete,
+
+            // Commercial subscription management (approve/assign/renew/suspend/cancel) is a
+            // PLATFORM workflow — never tenant-scoped, regardless of tenant role permissions.
+            Subscriptions.Read, Subscriptions.Manage,
 
             // Global catalogs shared across every tenant (not a tenant's own data)
             Plans.Create, Plans.Read, Plans.Update, Plans.Delete,

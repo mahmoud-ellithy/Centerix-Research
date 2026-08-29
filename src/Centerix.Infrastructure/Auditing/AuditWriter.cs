@@ -2,16 +2,22 @@ namespace Centerix.Infrastructure.Auditing;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Auditing;
+using Centerix.Domain.Platform.Auditing;
 using Centerix.Infrastructure.Data;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Writes <see cref="AuditLog"/> rows. Failures are logged and swallowed so a broken
-/// audit trail never fails the business operation that triggered it.
+/// Writes audit rows through the project's DUAL audit architecture:
+///  - tenant-scoped actions (verified tenant context) → <see cref="AuditLog"/> (AuditLog.TenantId)
+///  - PLATFORM-scoped actions (no tenant context: approval, subscription management, catalogs)
+///    → <see cref="PlatformAuditLog"/>
+/// Failures are logged and swallowed so a broken audit trail never fails the business operation
+/// that triggered it.
 /// </summary>
 public class AuditWriter(
     AppDbContext dbContext,
     ICurrentUser currentUser,
+    ICurrentTenant currentTenant,
     TimeProvider timeProvider,
     ILogger<AuditWriter> logger) : IAuditWriter
 {
@@ -29,24 +35,44 @@ public class AuditWriter(
                 ? currentUser.UserId
                 : null;
 
-            var entry = AuditLog.Create(
-                id: 0,
-                action: action,
-                entityType: entityType,
-                entityId: entityId,
-                userId: userId,
-                ipAddress: null, // populated by middleware/handler if available
-                oldValue: oldValue,
-                newValue: newValue,
-                performedAt: timeProvider.GetUtcNow().UtcDateTime);
+            var tenantId = currentTenant.IsResolved ? currentTenant.TenantId : null;
 
-            if (!entry.IsSuccess)
+            if (!string.IsNullOrEmpty(tenantId))
             {
-                logger.LogWarning("Audit write skipped: {Errors}", string.Join(", ", entry.Errors!.Select(e => e.Code)));
-                return;
+                var entry = AuditLog.Create(
+                    id: 0,
+                    action: action,
+                    entityType: entityType,
+                    entityId: entityId,
+                    userId: userId,
+                    ipAddress: null, // populated by middleware/handler if available
+                    oldValue: oldValue,
+                    newValue: newValue,
+                    performedAt: timeProvider.GetUtcNow().UtcDateTime);
+
+                if (!entry.IsSuccess)
+                {
+                    logger.LogWarning("Audit write skipped: {Errors}", string.Join(", ", entry.Errors!.Select(e => e.Code)));
+                    return;
+                }
+
+                // TenantId is stamped by the TenantInterceptor from the verified context.
+                dbContext.AuditLogs.Add(entry.Value);
+            }
+            else
+            {
+                // Platform-scoped action: no tenant filter applies; the acted-on tenant (when any)
+                // is already part of entityId/newValue supplied by the caller.
+                dbContext.PlatformAuditLogs.Add(PlatformAuditLog.Create(
+                    id: 0,
+                    action: action,
+                    entityType: entityType,
+                    entityId: entityId,
+                    oldValue: oldValue,
+                    newValue: newValue,
+                    ipAddress: null));
             }
 
-            dbContext.AuditLogs.Add(entry.Value);
             await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (Exception ex)
@@ -56,4 +82,3 @@ public class AuditWriter(
         }
     }
 }
-

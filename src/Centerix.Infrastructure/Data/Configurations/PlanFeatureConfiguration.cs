@@ -22,6 +22,11 @@ public class PlanFeatureConfiguration : IEntityTypeConfiguration<PlanFeature>
             .HasForeignKey(pf => pf.FeatureId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        // Database-level uniqueness for the junction (domain check remains as defense in depth).
+        builder.HasIndex(pf => new { pf.PlanId, pf.FeatureId })
+            .IsUnique()
+            .HasDatabaseName("UX_PlanFeatures_PlanId_FeatureId");
+
         builder.Property(pf => pf.CreatedAtUtc)
             .HasColumnName("CreatedAt");
 

@@ -35,6 +35,9 @@ public interface IAppDbContext
     // Tenant invitations
     DbSet<TenantInvitation> TenantInvitations { get; }
 
+    // Commercial subscriptions (Phase 2)
+    DbSet<Domain.Platform.Subscriptions.TenantPlanFeature> TenantPlanFeatures { get; }
+
     DbSet<Plan> Plans { get; }
     DbSet<Feature> Features { get; }
     DbSet<PlanFeature> PlanFeatures { get; }
@@ -85,6 +88,12 @@ public interface IAppDbContext
     DbSet<AttendanceLog> AttendanceLogs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// True when the configured provider is relational (e.g. SQL Server); false for the EF
+    /// InMemory provider used by fast unit tests (which lacks features such as ExecuteUpdate).
+    /// </summary>
+    bool IsRelational { get; }
 
     /// <summary>
     /// Begins a database transaction so multi-step use cases (e.g. identity creation plus

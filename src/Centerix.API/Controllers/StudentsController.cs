@@ -1,4 +1,4 @@
-using Centerix.Application.Common.Interfaces;
+﻿using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Students.Students.Commands;
 using Centerix.Application.Students.Students.Queries;
 using Centerix.Infrastructure.Auth;
@@ -34,6 +34,7 @@ public class StudentsController(ILocalizer localizer, IMediator mediator) : ApiC
 
     [HttpPost]
     [HasPermission(Permissions.Students.Create)]
+    [RequireFeature(FeatureCodes.StudentManagement)]
     public async Task<IActionResult> CreateStudent(CreateStudentCommand command, CancellationToken cancellationToken)
     {
         var result = await mediator.Send(command, cancellationToken);
@@ -70,3 +71,4 @@ public class StudentsController(ILocalizer localizer, IMediator mediator) : ApiC
             Problem);
     }
 }
+

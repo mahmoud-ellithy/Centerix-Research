@@ -1,4 +1,4 @@
-namespace Centerix.Infrastructure.Platform;
+﻿namespace Centerix.Infrastructure.Platform;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform;
@@ -238,78 +238,49 @@ public class PlatformService(
         return Result.Deleted;
     }
 
-    public async Task<Result<IEnumerable<TenantPlanDto>>> GetTenantPlansAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// PLATFORM cross-tenant subscription listing. The tenant query filter on TenantPlan is
+    /// bypassed EXPLICITLY here: platform staff operate outside any tenant context, and this
+    /// method is only reachable through the platform-scoped Subscriptions.Read permission.
+    /// </summary>
+    public async Task<Result<IEnumerable<TenantPlanDto>>> GetSubscriptionsAsync(CancellationToken cancellationToken)
     {
-        var tenantPlans = await _dbContext.TenantPlans
+        var subscriptions = await _dbContext.TenantPlans
+            .IgnoreQueryFilters()
             .Include(tp => tp.Plan)
-            .ProjectToType<TenantPlanDto>()
+            .OrderByDescending(tp => tp.StartsAtUtc)
             .ToListAsync(cancellationToken);
 
-        foreach (var tp in tenantPlans)
+        List<TenantPlanDto> dtos = subscriptions.Select(tp =>
         {
-            var status = (SubscriptionStatus)tp.Status;
-            tp.StatusLabel = _localizer.Translate($"Enum:SubscriptionStatus.{status}");
-        }
+            var dto = new TenantPlanDto
+            {
+                Id = tp.Id,
+                TenantId = tp.TenantId ?? string.Empty,
+                PlanId = tp.PlanId,
+                PlanName = tp.Plan?.DisplayName,
+                SnapshotPrice = tp.SnapshotPrice,
+                SnapshotCurrency = tp.SnapshotCurrency,
+                DurationMonths = tp.DurationMonths,
+                BonusMonths = tp.BonusMonths,
+                StartsAtUtc = tp.StartsAtUtc,
+                BaseEndsAtUtc = tp.BaseEndsAtUtc,
+                EffectiveEndsAtUtc = tp.EffectiveEndsAtUtc,
+                MaxStudents = tp.SnapshotMaxStudents,
+                MaxUsers = tp.SnapshotMaxUsers,
+                MaxBranches = tp.SnapshotMaxBranches,
+                MaxTeachers = tp.SnapshotMaxTeachers,
+                StorageGB = tp.SnapshotStorageGb,
+                SMSQuota = tp.SnapshotSmsQuota,
+                AutoRenew = tp.AutoRenew,
+                Status = (byte)tp.Status
+            };
+            dto.StatusLabel = _localizer.Translate($"Enum:SubscriptionStatus.{tp.Status}");
+            return dto;
+        }).ToList();
 
-        return tenantPlans;
+        return dtos;
     }
-
-    public async Task<Result<Created>> CreateTenantPlanAsync(TenantPlanDto tenantPlanDto, CancellationToken cancellationToken)
-    {
-        var planResult = TenantPlan.Create(
-            Guid.NewGuid(),
-            tenantPlanDto.PlanId,
-            tenantPlanDto.SnapshotPrice,
-            tenantPlanDto.StartsAt,
-            tenantPlanDto.AutoRenew,
-            (SubscriptionStatus)tenantPlanDto.Status);
-
-        if (!planResult.IsSuccess)
-            return planResult.Errors!;
-
-        _dbContext.TenantPlans.Add(planResult.Value);
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        await _auditWriter.WriteAsync(
-            action: "TenantPlan.Create",
-            entityType: nameof(TenantPlan),
-            entityId: planResult.Value.Id.ToString(),
-            newValue: AuditPayload.Serialize(new { planResult.Value.PlanId, planResult.Value.StartsAt, planResult.Value.AutoRenew }),
-            cancellationToken: cancellationToken);
-
-        return Result.Created;
-    }
-
-    public async Task<Result<Updated>> UpdateTenantPlanAsync(Guid id, TenantPlanDto tenantPlanDto, CancellationToken cancellationToken)
-    {
-        var tenantPlan = await _dbContext.TenantPlans.FindAsync([id], cancellationToken: cancellationToken);
-        if (tenantPlan is null)
-        {
-            return Error.NotFound("TenantPlan.NotFound", $"TenantPlan with id '{id}' was not found.");
-        }
-
-        var oldValue = AuditPayload.Serialize(new { tenantPlan.EndsAt, tenantPlan.AutoRenew });
-
-        var updateResult = tenantPlan.Update(
-            tenantPlanDto.EndsAt,
-            tenantPlanDto.AutoRenew);
-
-        if (!updateResult.IsSuccess)
-            return updateResult.Errors!;
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        await _auditWriter.WriteAsync(
-            action: "TenantPlan.Update",
-            entityType: nameof(TenantPlan),
-            entityId: id.ToString(),
-            oldValue: oldValue,
-            newValue: AuditPayload.Serialize(new { tenantPlan.EndsAt, tenantPlan.AutoRenew }),
-            cancellationToken: cancellationToken);
-
-        return Result.Updated;
-    }
-
     public async Task<Result<IEnumerable<TenantCRMLeadDto>>> GetTenantCRMLeadsAsync(CancellationToken cancellationToken)
     {
         var leads = await _dbContext.TenantCRMLeads
@@ -391,3 +362,6 @@ public class PlatformService(
         return Result.Updated;
     }
 }
+
+
+

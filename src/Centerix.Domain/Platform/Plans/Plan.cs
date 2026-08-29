@@ -8,6 +8,17 @@ public class Plan : GlobalAuditableEntity<int>
 {
     public string Code { get; private set; } = default!;
     public string DisplayName { get; private set; } = default!;
+    public string? Description { get; private set; }
+
+    /// <summary>ISO-4217 currency the price is expressed in. Snapshotted onto each subscription.</summary>
+    public string CurrencyCode { get; private set; } = default!;
+
+    /// <summary>Commercial base term in calendar months granted per purchase/renewal period.</summary>
+    public int DurationMonths { get; private set; }
+
+    /// <summary>Promotional bonus months ADDED to every new subscription's term at purchase time.</summary>
+    public int BonusMonths { get; private set; }
+
     public decimal MonthlyPrice { get; private set; }
     public int MaxStudents { get; private set; }
     public int MaxUsers { get; private set; }
@@ -36,7 +47,11 @@ public class Plan : GlobalAuditableEntity<int>
         int maxTeachers,
         int storageGB,
         int smsQuota,
-        bool isActive)
+        bool isActive,
+        string currencyCode,
+        int durationMonths,
+        int bonusMonths,
+        string? description = null)
         : base(id)
     {
         Code = code;
@@ -49,6 +64,10 @@ public class Plan : GlobalAuditableEntity<int>
         StorageGB = storageGB;
         SMSQuota = smsQuota;
         IsActive = isActive;
+        CurrencyCode = currencyCode;
+        DurationMonths = durationMonths;
+        BonusMonths = bonusMonths;
+        Description = description;
     }
 
     public static Result<Plan> Create(
@@ -62,7 +81,11 @@ public class Plan : GlobalAuditableEntity<int>
         int maxTeachers,
         int storageGB,
         int smsQuota,
-        bool isActive = true)
+        bool isActive = true,
+        string? description = null,
+        string currencyCode = "USD",
+        int durationMonths = 1,
+        int bonusMonths = 0)
     {
         if (string.IsNullOrWhiteSpace(code))
             return PlanErrors.CodeRequired;
@@ -76,7 +99,19 @@ public class Plan : GlobalAuditableEntity<int>
         if (maxStudents < 0 || maxUsers < 0 || maxBranches < 0 || maxTeachers < 0 || storageGB < 0 || smsQuota < 0)
             return PlanErrors.InvalidLimits;
 
-        var plan = new Plan(id, code, displayName, monthlyPrice, maxStudents, maxUsers, maxBranches, maxTeachers, storageGB, smsQuota, isActive);
+        if (string.IsNullOrWhiteSpace(currencyCode) || currencyCode.Trim().Length != 3)
+            return PlanErrors.InvalidCurrency;
+
+        if (durationMonths <= 0)
+            return PlanErrors.InvalidDuration;
+
+        if (bonusMonths < 0)
+            return PlanErrors.InvalidBonus;
+
+        var plan = new Plan(
+            id, code, displayName, monthlyPrice, maxStudents, maxUsers, maxBranches, maxTeachers,
+            storageGB, smsQuota, isActive,
+            currencyCode.Trim().ToUpperInvariant(), durationMonths, bonusMonths, description);
 
         plan.AddDomainEvent(new Events.PlanCreatedEvent(plan));
 
@@ -93,7 +128,11 @@ public class Plan : GlobalAuditableEntity<int>
         int maxTeachers,
         int storageGB,
         int smsQuota,
-        bool isActive)
+        bool isActive,
+        string? description = null,
+        string? currencyCode = null,
+        int? durationMonths = null,
+        int? bonusMonths = null)
     {
         if (string.IsNullOrWhiteSpace(code))
             return PlanErrors.CodeRequired;
@@ -107,6 +146,18 @@ public class Plan : GlobalAuditableEntity<int>
         if (maxStudents < 0 || maxUsers < 0 || maxBranches < 0 || maxTeachers < 0 || storageGB < 0 || smsQuota < 0)
             return PlanErrors.InvalidLimits;
 
+        var effectiveCurrency = currencyCode ?? CurrencyCode;
+        if (string.IsNullOrWhiteSpace(effectiveCurrency) || effectiveCurrency.Trim().Length != 3)
+            return PlanErrors.InvalidCurrency;
+
+        var effectiveDuration = durationMonths ?? DurationMonths;
+        if (effectiveDuration <= 0)
+            return PlanErrors.InvalidDuration;
+
+        var effectiveBonus = bonusMonths ?? BonusMonths;
+        if (effectiveBonus < 0)
+            return PlanErrors.InvalidBonus;
+
         Code = code;
         DisplayName = displayName;
         MonthlyPrice = monthlyPrice;
@@ -117,7 +168,13 @@ public class Plan : GlobalAuditableEntity<int>
         StorageGB = storageGB;
         SMSQuota = smsQuota;
         IsActive = isActive;
+        Description = description;
+        CurrencyCode = effectiveCurrency.Trim().ToUpperInvariant();
+        DurationMonths = effectiveDuration;
+        BonusMonths = effectiveBonus;
 
+        // NOTE: existing TenantPlan subscriptions keep their purchased snapshot; this update
+        // only affects FUTURE subscriptions (see TenantPlan snapshot design).
         return Result.Updated;
     }
 

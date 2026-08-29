@@ -84,27 +84,40 @@ public class TenantRegistrySyncService(
 
     /// <summary>
     /// Saves both AppDbContext and TenantDbContext within a single database transaction.
-    /// Uses BeginTransactionAsync on AppDbContext's connection, then enlists TenantDbContext
-    /// via UseTransactionAsync so both contexts share the same DbConnection and DbTransaction.
-    /// If either save fails, both are rolled back atomically.
+    /// Relational providers share ONE DbTransaction via UseTransactionAsync; the EF InMemory
+    /// test provider has no relational transactions, so each context uses its own (no-op)
+    /// transaction there while preserving the same all-or-nothing save sequence.
+    /// If either save fails, everything rolls back atomically.
     /// </summary>
     private async Task SaveBothAtomicallyAsync(CancellationToken cancellationToken)
     {
-        await using var transaction = await _appDbContext.Database.BeginTransactionAsync(cancellationToken);
+        var useSharedTransaction = _appDbContext.Database.IsRelational();
+
+        await using var appTransaction = await _appDbContext.Database.BeginTransactionAsync(cancellationToken);
+        await using var tenantTransaction = useSharedTransaction
+            ? null
+            : await _tenantDbContext.Database.BeginTransactionAsync(cancellationToken);
 
         try
         {
-            await _tenantDbContext.Database.UseTransactionAsync(
-                transaction.GetDbTransaction(), cancellationToken);
+            if (useSharedTransaction)
+            {
+                await _tenantDbContext.Database.UseTransactionAsync(
+                    appTransaction.GetDbTransaction(), cancellationToken);
+            }
 
             await _appDbContext.SaveChangesAsync(cancellationToken);
             await _tenantDbContext.SaveChangesAsync(cancellationToken);
 
-            await transaction.CommitAsync(cancellationToken);
+            await appTransaction.CommitAsync(cancellationToken);
+            if (tenantTransaction is not null)
+                await tenantTransaction.CommitAsync(cancellationToken);
         }
         catch
         {
-            await transaction.RollbackAsync(cancellationToken);
+            await appTransaction.RollbackAsync(cancellationToken);
+            if (tenantTransaction is not null)
+                await tenantTransaction.RollbackAsync(cancellationToken);
             throw;
         }
     }

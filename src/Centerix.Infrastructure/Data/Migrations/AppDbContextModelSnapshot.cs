@@ -771,6 +771,9 @@ namespace Centerix.Infrastructure.Data.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int>("BonusMonths")
+                        .HasColumnType("int");
+
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasMaxLength(30)
@@ -785,10 +788,22 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasColumnType("nvarchar(450)")
                         .HasColumnName("CreatedBy");
 
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<string>("DisplayName")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("DurationMonths")
+                        .HasColumnType("int");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
@@ -871,7 +886,9 @@ namespace Centerix.Infrastructure.Data.Migrations
 
                     b.HasIndex("FeatureId");
 
-                    b.HasIndex("PlanId");
+                    b.HasIndex("PlanId", "FeatureId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PlanFeatures_PlanId_FeatureId");
 
                     b.ToTable("PlanFeatures", "Platform");
                 });
@@ -1415,6 +1432,10 @@ namespace Centerix.Infrastructure.Data.Migrations
 
                     b.HasIndex("TenantId");
 
+                    b.HasIndex("TenantId", "LimitType")
+                        .IsUnique()
+                        .HasDatabaseName("UX_TenantLimitOverrides_TenantId_LimitType");
+
                     b.ToTable("TenantLimitOverrides", "Platform");
                 });
 
@@ -1424,8 +1445,17 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTime?>("ActivatedAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<bool>("AutoRenew")
                         .HasColumnType("bit");
+
+                    b.Property<DateTime>("BaseEndsAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("BonusMonths")
+                        .HasColumnType("int");
 
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("datetimeoffset")
@@ -1436,7 +1466,10 @@ namespace Centerix.Infrastructure.Data.Migrations
                         .HasColumnType("nvarchar(450)")
                         .HasColumnName("CreatedBy");
 
-                    b.Property<DateTime?>("EndsAt")
+                    b.Property<int>("DurationMonths")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("EffectiveEndsAtUtc")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("LastModifiedBy")
@@ -1451,11 +1484,40 @@ namespace Centerix.Infrastructure.Data.Migrations
                     b.Property<int>("PlanId")
                         .HasColumnType("int");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("SnapshotCurrency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<int>("SnapshotMaxBranches")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SnapshotMaxStudents")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SnapshotMaxTeachers")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SnapshotMaxUsers")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("SnapshotPrice")
                         .HasPrecision(10, 2)
                         .HasColumnType("decimal(10,2)");
 
-                    b.Property<DateTime>("StartsAt")
+                    b.Property<int>("SnapshotSmsQuota")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SnapshotStorageGb")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("StartsAtUtc")
                         .HasColumnType("datetime2");
 
                     b.Property<byte>("Status")
@@ -1468,11 +1530,59 @@ namespace Centerix.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("EffectiveEndsAtUtc")
+                        .HasDatabaseName("IX_TenantPlans_EffectiveEndsAtUtc");
+
                     b.HasIndex("PlanId");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("TenantId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_TenantPlans_TenantId_NonTerminalStatus")
+                        .HasFilter("[Status] IN (1, 4)");
+
+                    b.HasIndex("TenantId", "Status")
+                        .HasDatabaseName("IX_TenantPlans_TenantId_Status");
 
                     b.ToTable("TenantPlans", "Platform");
+                });
+
+            modelBuilder.Entity("Centerix.Domain.Platform.Subscriptions.TenantPlanFeature", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("CreatedAt");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("FeatureCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("LastModifiedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTimeOffset>("LastModifiedUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("TenantPlanId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FeatureCode")
+                        .HasDatabaseName("IX_TenantPlanFeatures_FeatureCode");
+
+                    b.HasIndex("TenantPlanId", "FeatureCode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_TenantPlanFeatures_PlanId_FeatureCode");
+
+                    b.ToTable("TenantPlanFeatures", "Platform");
                 });
 
             modelBuilder.Entity("Centerix.Domain.Platform.Subscriptions.UsageCounters.TenantUsageCounter", b =>
@@ -2562,6 +2672,17 @@ namespace Centerix.Infrastructure.Data.Migrations
                     b.Navigation("Plan");
                 });
 
+            modelBuilder.Entity("Centerix.Domain.Platform.Subscriptions.TenantPlanFeature", b =>
+                {
+                    b.HasOne("Centerix.Domain.Platform.Subscriptions.TenantPlan", "TenantPlan")
+                        .WithMany("Features")
+                        .HasForeignKey("TenantPlanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("TenantPlan");
+                });
+
             modelBuilder.Entity("Centerix.Domain.Platform.Tenants.TenantInvitation", b =>
                 {
                     b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", null)
@@ -2736,6 +2857,11 @@ namespace Centerix.Infrastructure.Data.Migrations
                     b.Navigation("PricingTiers");
 
                     b.Navigation("TenantAddOns");
+                });
+
+            modelBuilder.Entity("Centerix.Domain.Platform.Subscriptions.TenantPlan", b =>
+                {
+                    b.Navigation("Features");
                 });
 
             modelBuilder.Entity("Centerix.Domain.Students.Lookups.AcademicStage", b =>

@@ -2,6 +2,7 @@ namespace Centerix.Application.Students.Students.Commands;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Subscriptions;
 using Centerix.Domain.Students.Enums;
 using Centerix.Domain.Students.Students;
 
@@ -22,14 +23,27 @@ public record CreateStudentCommand(
     StudentStatus Status,
     DateOnly EnrolledAt) : IRequest<Result<Created>>;
 
+/// <summary>
+/// Reference wiring of the reusable Phase 2 enforcement pipeline: the FEATURE gate lives on the
+/// endpoint ([RequireFeature]) while the LIMIT gate runs here — permission alone is not enough
+/// when the tenant's subscription quota is exhausted.
+/// </summary>
 public class CreateStudentHandler(
     IAppDbContext dbContext,
+    ICurrentTenant currentTenant,
+    ILimitService limitService,
     IAuditWriter auditWriter) : IRequestHandler<CreateStudentCommand, Result<Created>>
 {
     public async Task<Result<Created>> Handle(
         CreateStudentCommand request,
         CancellationToken cancellationToken)
     {
+        // Commercial gate: plan/override limit on active subscription (atomic slot reservation).
+        var limitResult = await limitService.ReserveAsync(
+            currentTenant.TenantId!, LimitTypeCodes.Students, cancellationToken);
+        if (!limitResult.IsSuccess)
+            return limitResult.Errors!;
+
         var studentResult = Student.Create(
             Guid.NewGuid(),
             request.BranchId,
@@ -48,11 +62,22 @@ public class CreateStudentHandler(
 
         if (!studentResult.IsSuccess)
         {
+            await limitService.ReleaseAsync(currentTenant.TenantId!, LimitTypeCodes.Students, cancellationToken);
             return studentResult.Errors!;
         }
 
         dbContext.Students.Add(studentResult.Value);
-        await dbContext.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            // Rollback releases the reserved counter slot along with the uncommitted insert.
+            await limitService.ReleaseAsync(currentTenant.TenantId!, LimitTypeCodes.Students, cancellationToken);
+            throw;
+        }
 
         await auditWriter.WriteAsync(
             action: "Student.Create",

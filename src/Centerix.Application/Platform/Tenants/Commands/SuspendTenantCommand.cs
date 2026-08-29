@@ -10,11 +10,16 @@ public record SuspendTenantCommand(Guid Id, string Reason) : IRequest<Result<Upd
 
 public class SuspendTenantHandler(
     IAppDbContext dbContext,
+    IPlatformAdminGuard platformAdminGuard,
     ITenantRegistrySync tenantRegistrySync,
     IAuditWriter auditWriter) : IRequestHandler<SuspendTenantCommand, Result<Updated>>
 {
     public async Task<Result<Updated>> Handle(SuspendTenantCommand request, CancellationToken cancellationToken)
     {
+        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        if (!guardResult.IsSuccess)
+            return guardResult.Errors!;
+
         var tenant = await dbContext.Tenants.FindAsync([request.Id], cancellationToken: cancellationToken);
         if (tenant is null)
         {

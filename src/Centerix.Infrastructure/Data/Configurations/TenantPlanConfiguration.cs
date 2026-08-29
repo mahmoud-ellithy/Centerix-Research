@@ -12,7 +12,22 @@ public class TenantPlanConfiguration : IEntityTypeConfiguration<TenantPlan>
 
         builder.HasKey(tp => tp.Id);
 
+        // Optimistic concurrency: subscription state changes (renew/suspend/expire races) are
+        // serialized by SQL Server rowversion instead of silent last-write-wins.
+        builder.Property(tp => tp.RowVersion)
+            .IsRowVersion();
+
+        // Commercial snapshot — frozen at creation/renewal, never derived from the live Plan.
         builder.Property(tp => tp.SnapshotPrice).HasPrecision(10, 2);
+        builder.Property(tp => tp.SnapshotCurrency)
+            .HasMaxLength(3)
+            .IsRequired();
+        builder.Property(tp => tp.DurationMonths).IsRequired();
+        builder.Property(tp => tp.BonusMonths).IsRequired();
+
+        builder.Property(tp => tp.StartsAtUtc).IsRequired();
+        builder.Property(tp => tp.BaseEndsAtUtc).IsRequired();
+        builder.Property(tp => tp.EffectiveEndsAtUtc).IsRequired();
 
         builder.HasOne(tp => tp.Plan)
             .WithMany(p => p.TenantPlans)
@@ -37,6 +52,21 @@ public class TenantPlanConfiguration : IEntityTypeConfiguration<TenantPlan>
             .HasColumnName("ModifiedBy")
             .HasMaxLength(450);
 
-        builder.HasIndex(tp => tp.TenantId);
+        // DATABASE-LEVEL single-non-terminal-subscription invariant: at most one Active or
+        // Suspended subscription per tenant. History rows (Expired/Cancelled/Pending) do not
+        // participate. Application checks remain as defense in depth only.
+        builder.HasIndex(tp => tp.TenantId)
+            .HasFilter($"[{nameof(TenantPlan.Status)}] IN (1, 4)")
+            .IsUnique()
+            .HasDatabaseName("UX_TenantPlans_TenantId_NonTerminalStatus");
+
+        // Fast path for "current subscription for tenant" resolution.
+        builder.HasIndex(tp => new { tp.TenantId, tp.Status })
+            .HasDatabaseName("IX_TenantPlans_TenantId_Status");
+
+        builder.HasIndex(tp => tp.EffectiveEndsAtUtc)
+            .HasDatabaseName("IX_TenantPlans_EffectiveEndsAtUtc");
+
+        builder.Navigation(tp => tp.Features).UsePropertyAccessMode(PropertyAccessMode.Field);
     }
 }

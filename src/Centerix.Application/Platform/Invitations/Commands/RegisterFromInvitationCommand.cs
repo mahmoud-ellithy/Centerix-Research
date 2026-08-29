@@ -43,10 +43,12 @@ public class RegisterFromInvitationValidator : AbstractValidator<RegisterFromInv
 /// step rolls back EVERYTHING — no orphan IdentityUser, no membership row, and the invitation stays
 /// Pending (still usable). Compensating deletes are not needed and have been removed.
 ///
-/// Concurrency: races surface as constraint violations inside the transaction and roll back cleanly —
-/// duplicate e-mails via the unique index on AspNetUsers.NormalizedEmail/UserName, duplicate
-/// memberships via the (UserId, TenantId) primary key, double-acceptance via the invitation status
-/// check plus the unique TokenHash index.
+/// Concurrency: the invitation is claimed via an atomic conditional UPDATE
+/// (<c>Status = Accepted WHERE Status = Pending</c>) inside the transaction — exactly one
+/// concurrent caller wins; losers return a conflict and their uncommitted writes roll back.
+/// Identity's default indexes are non-unique, so this claim is the serialization point for
+/// double-registration. Duplicate memberships surface as (UserId, TenantId) primary-key
+/// violations and roll back cleanly; TokenHash is uniquely indexed.
 /// </remarks>
 public class RegisterFromInvitationHandler(
     IAppDbContext dbContext,
@@ -96,7 +98,40 @@ public class RegisterFromInvitationHandler(
             return Error.Conflict("Invitation.UserAlreadyExists",
                 "An account already exists for this email. Please log in and accept the invitation.");
 
-        // 5. Create the IdentityUser (same DbContext/transaction).
+        // 5. Atomic single-use claim: flip Pending → Accepted ONLY while still pending.
+        // Identity's default indexes on AspNetUsers are NON-unique, so nothing else serializes
+        // two concurrent registrations with the same e-mail. On relational providers this
+        // conditional ExecuteUpdate is the serialization point: exactly one concurrent caller
+        // gets affected rows == 1 (a single atomic UPDATE ... WHERE Status = Pending); every
+        // other transaction fails here, returns conflict, and its uncommitted writes roll back.
+        //
+        // The EF InMemory provider does not support ExecuteUpdate* (it is used only by the fast
+        // unit-test host, never in production), so there the already-loaded tracked entity acts
+        // as the guard: its status was validated as Pending in step 2 and step 8 persists the
+        // transition through the domain method. True multi-writer concurrency is proven against
+        // real SQL Server by the Testcontainers integration suite.
+        int claimed;
+        if (dbContext.IsRelational)
+        {
+            claimed = await dbContext.TenantInvitations
+                .Where(i => i.Id == invitation.Id && i.Status == InvitationStatus.Pending)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(i => i.Status, InvitationStatus.Accepted),
+                    cancellationToken);
+        }
+        else if (invitation.Status == InvitationStatus.Pending)
+        {
+            claimed = 1;
+        }
+        else
+        {
+            claimed = 0;
+        }
+
+        if (claimed != 1)
+            return TenantMembershipErrors.InvitationAlreadyAccepted;
+
+        // 6. Create the IdentityUser (same DbContext/transaction).
         var (userId, succeeded, errors) = await identityService.CreateUserAsync(
             invitation.Email,
             invitation.NormalizedEmail,
@@ -113,7 +148,7 @@ public class RegisterFromInvitationHandler(
                 $"Failed to create account: {string.Join(", ", errors)}");
         }
 
-        // 6. Create TenantMembership.
+        // 7. Create TenantMembership.
         var membershipResult = TenantMembership.Create(
             userId,
             invitation.TenantId,
@@ -125,7 +160,7 @@ public class RegisterFromInvitationHandler(
 
         dbContext.TenantMemberships.Add(membershipResult.Value);
 
-        // 7. Mark invitation as accepted.
+        // 8. Mark invitation as accepted (tracker already holds the claimed state).
         var acceptResult = invitation.Accept(userId);
         if (!acceptResult.IsSuccess)
             return acceptResult.Errors!;

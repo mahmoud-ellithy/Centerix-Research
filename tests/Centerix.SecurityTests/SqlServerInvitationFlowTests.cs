@@ -277,7 +277,10 @@ public class SqlServerInvitationFlowTests
         using var scope = _env.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Equal(1, db.Users.Count(u => u.NormalizedEmail == email.ToUpperInvariant()));
-        Assert.Equal(1, db.TenantMemberships.Count(m => m.TenantId == tenantId));
+
+        // Exactly ONE membership for the winning user (the tenant also holds the seeded admin).
+        var winner = db.Users.Single(u => u.NormalizedEmail == email.ToUpperInvariant());
+        Assert.Equal(1, db.TenantMemberships.Count(m => m.UserId == winner.Id && m.TenantId == tenantId));
         Assert.Equal(
             InvitationStatus.Accepted,
             db.TenantInvitations.Single(i => i.NormalizedEmail == email.ToUpperInvariant()).Status);
@@ -392,9 +395,16 @@ public class SqlServerInvitationFlowTests
 
         var second = TenantMembership.Create(user.Id, tenantId);
         Assert.True(second.IsSuccess);
-        db.TenantMemberships.Add(second.Value);
 
-        await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+        // Insert via a SEPARATE context: the same context already tracks the first membership
+        // with the identical (UserId, TenantId) key and would throw an identity-map conflict at
+        // Add() time instead of the real database PK violation this test proves.
+        using (var secondScope = _env.Factory.Services.CreateScope())
+        {
+            var secondDb = secondScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            secondDb.TenantMemberships.Add(second.Value);
+            await Assert.ThrowsAsync<DbUpdateException>(() => secondDb.SaveChangesAsync());
+        }
     }
 
     [Fact]

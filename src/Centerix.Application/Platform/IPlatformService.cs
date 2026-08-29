@@ -16,9 +16,9 @@ public interface IPlatformService
     Task<Result<Updated>> UpdateFeatureAsync(int id, FeatureDto feature, CancellationToken cancellationToken);
     Task<Result<Deleted>> DeleteFeatureAsync(int id, CancellationToken cancellationToken);
 
-    Task<Result<IEnumerable<TenantPlanDto>>> GetTenantPlansAsync(CancellationToken cancellationToken);
-    Task<Result<Created>> CreateTenantPlanAsync(TenantPlanDto tenantPlanDto, CancellationToken cancellationToken);
-    Task<Result<Updated>> UpdateTenantPlanAsync(Guid id, TenantPlanDto tenantPlanDto, CancellationToken cancellationToken);
+    // Subscription listing (platform view). Creation/update/cancellation are EXPLICIT business
+    // workflows (MediatR commands), not generic CRUD — see Platform/Subscriptions.
+    Task<Result<IEnumerable<TenantPlanDto>>> GetSubscriptionsAsync(CancellationToken cancellationToken);
 
     Task<Result<IEnumerable<TenantCRMLeadDto>>> GetTenantCRMLeadsAsync(CancellationToken cancellationToken);
     Task<Result<Created>> CreateTenantCRMLeadAsync(TenantCRMLeadDto leadDto, CancellationToken cancellationToken);

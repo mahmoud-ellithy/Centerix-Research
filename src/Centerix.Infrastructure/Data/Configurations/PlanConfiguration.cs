@@ -23,6 +23,19 @@ public class PlanConfiguration : IEntityTypeConfiguration<Plan>
             .HasMaxLength(100)
             .IsRequired();
 
+        builder.Property(p => p.Description)
+            .HasMaxLength(500);
+
+        builder.Property(p => p.CurrencyCode)
+            .HasMaxLength(3)
+            .IsRequired();
+
+        builder.Property(p => p.DurationMonths)
+            .IsRequired();
+
+        builder.Property(p => p.BonusMonths)
+            .IsRequired();
+
         builder.Property(p => p.MonthlyPrice)
             .HasPrecision(10, 2);
 

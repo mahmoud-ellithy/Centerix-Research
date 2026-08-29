@@ -1,4 +1,4 @@
-using Centerix.Application.Common.Interfaces;
+﻿using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform.Tenants.Commands;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Tenants;
@@ -23,6 +23,26 @@ public class C2TenantRegistrySyncTests
             "EG", "EGP", "Africa/Cairo",
             "Test", "Owner", $"{slug}@test.com", IsolationMode.Shared);
         return result.Value;
+    }
+
+    /// <summary>
+    /// Phase 2: tenants are created PendingApproval and become operational only through platform
+    /// approval (+ activation). Helpers produce an operational tenant for suspend/reactivate tests.
+    /// </summary>
+    private static Tenant CreateOperationalTenant(string slug = "ops")
+    {
+        var tenant = CreatePersistedTenant(slug);
+        Assert.True(tenant.Approve().IsSuccess);   // PendingApproval â†’ Provisioning
+        Assert.True(tenant.Activate().IsSuccess);  // Provisioning â†’ Active
+        return tenant;
+    }
+
+    private static IPlatformAdminGuard CreatePlatformAdminGuard()
+    {
+        var guard = Substitute.For<IPlatformAdminGuard>();
+        guard.EnsurePlatformAdmin()
+            .Returns(Centerix.Domain.Common.Results.Result.Updated);
+        return guard;
     }
 
     private static IAuditWriter CreateMockAuditWriter()
@@ -69,8 +89,11 @@ public class C2TenantRegistrySyncTests
         Assert.Equal("slug1", captured!.Slug);
         Assert.Equal("sub1", captured.Subdomain);
         Assert.Equal("Display", captured.DisplayName);
-        Assert.Equal(LifecycleStatus.Provisioning, captured.LifecycleStatus);
-        Assert.True(captured.IsActive);
+
+        // Phase 2 state machine: new tenants start PendingApproval and are NOT operational
+        // until platform approval + provisioning completion.
+        Assert.Equal(LifecycleStatus.PendingApproval, captured.LifecycleStatus);
+        Assert.False(captured.IsActive);
     }
 
     [Fact]
@@ -110,12 +133,12 @@ public class C2TenantRegistrySyncTests
     public async Task SuspendTenant_CallsSyncLifecycleAsync()
     {
         var db = Substitute.For<IAppDbContext>();
-        var tenant = CreatePersistedTenant("sus");
+        var tenant = CreateOperationalTenant("sus");
         db.Tenants.FindAsync(Arg.Any<object[]>(), Arg.Any<CancellationToken>())
             .Returns(tenant);
         var sync = Substitute.For<ITenantRegistrySync>();
 
-        var handler = new SuspendTenantHandler(db, sync, CreateMockAuditWriter());
+        var handler = new SuspendTenantHandler(db, CreatePlatformAdminGuard(), sync, CreateMockAuditWriter());
         var result = await handler.Handle(
             new SuspendTenantCommand(tenant.Id, "reason"), CancellationToken.None);
 
@@ -128,7 +151,7 @@ public class C2TenantRegistrySyncTests
     public async Task SuspendTenant_StateIsSuspendedBeforeSync()
     {
         var db = Substitute.For<IAppDbContext>();
-        var tenant = CreatePersistedTenant("sus2");
+        var tenant = CreateOperationalTenant("sus2");
         db.Tenants.FindAsync(Arg.Any<object[]>(), Arg.Any<CancellationToken>())
             .Returns(tenant);
         Tenant? captured = null;
@@ -136,7 +159,7 @@ public class C2TenantRegistrySyncTests
         sync.SyncLifecycleAsync(Arg.Any<Tenant>(), Arg.Any<CancellationToken>())
             .Returns(ci => { captured = ci.Arg<Tenant>(); return Task.CompletedTask; });
 
-        var handler = new SuspendTenantHandler(db, sync, CreateMockAuditWriter());
+        var handler = new SuspendTenantHandler(db, CreatePlatformAdminGuard(), sync, CreateMockAuditWriter());
         await handler.Handle(new SuspendTenantCommand(tenant.Id, "why"), CancellationToken.None);
 
         Assert.NotNull(captured);
@@ -149,13 +172,13 @@ public class C2TenantRegistrySyncTests
     public async Task ActivateTenant_CallsSyncLifecycleAsync()
     {
         var db = Substitute.For<IAppDbContext>();
-        var tenant = CreatePersistedTenant("act");
+        var tenant = CreateOperationalTenant("act");
         tenant.Suspend("test");
         db.Tenants.FindAsync(Arg.Any<object[]>(), Arg.Any<CancellationToken>())
             .Returns(tenant);
         var sync = Substitute.For<ITenantRegistrySync>();
 
-        var handler = new ReactivateTenantHandler(db, sync, CreateMockAuditWriter());
+        var handler = new ReactivateTenantHandler(db, CreatePlatformAdminGuard(), sync, CreateMockAuditWriter());
         var result = await handler.Handle(
             new ReactivateTenantCommand(tenant.Id), CancellationToken.None);
 
@@ -168,7 +191,7 @@ public class C2TenantRegistrySyncTests
     public async Task ActivateTenant_StateIsActiveBeforeSync()
     {
         var db = Substitute.For<IAppDbContext>();
-        var tenant = CreatePersistedTenant("act2");
+        var tenant = CreateOperationalTenant("act2");
         tenant.Suspend("test");
         db.Tenants.FindAsync(Arg.Any<object[]>(), Arg.Any<CancellationToken>())
             .Returns(tenant);
@@ -177,7 +200,7 @@ public class C2TenantRegistrySyncTests
         sync.SyncLifecycleAsync(Arg.Any<Tenant>(), Arg.Any<CancellationToken>())
             .Returns(ci => { captured = ci.Arg<Tenant>(); return Task.CompletedTask; });
 
-        var handler = new ReactivateTenantHandler(db, sync, CreateMockAuditWriter());
+        var handler = new ReactivateTenantHandler(db, CreatePlatformAdminGuard(), sync, CreateMockAuditWriter());
         await handler.Handle(new ReactivateTenantCommand(tenant.Id), CancellationToken.None);
 
         Assert.NotNull(captured);
@@ -194,7 +217,7 @@ public class C2TenantRegistrySyncTests
             .Returns(tenant);
         var sync = Substitute.For<ITenantRegistrySync>();
 
-        var handler = new CancelTenantHandler(db, sync, CreateMockAuditWriter());
+        var handler = new CancelTenantHandler(db, CreatePlatformAdminGuard(), sync, CreateMockAuditWriter());
         var result = await handler.Handle(
             new CancelTenantCommand(tenant.Id), CancellationToken.None);
 
@@ -215,7 +238,7 @@ public class C2TenantRegistrySyncTests
         sync.SyncLifecycleAsync(Arg.Any<Tenant>(), Arg.Any<CancellationToken>())
             .Returns(ci => { captured = ci.Arg<Tenant>(); return Task.CompletedTask; });
 
-        var handler = new CancelTenantHandler(db, sync, CreateMockAuditWriter());
+        var handler = new CancelTenantHandler(db, CreatePlatformAdminGuard(), sync, CreateMockAuditWriter());
         await handler.Handle(new CancelTenantCommand(tenant.Id), CancellationToken.None);
 
         Assert.NotNull(captured);
@@ -270,7 +293,7 @@ public class C2TenantRegistrySyncTests
         db.Tenants.FindAsync(Arg.Any<object[]>(), Arg.Any<CancellationToken>())
             .Returns((Tenant?)null);
         var sync = Substitute.For<ITenantRegistrySync>();
-        var handler = new SuspendTenantHandler(db, sync, CreateMockAuditWriter());
+        var handler = new SuspendTenantHandler(db, CreatePlatformAdminGuard(), sync, CreateMockAuditWriter());
 
         var result = await handler.Handle(
             new SuspendTenantCommand(Guid.NewGuid(), "reason"), CancellationToken.None);
@@ -287,7 +310,7 @@ public class C2TenantRegistrySyncTests
         db.Tenants.FindAsync(Arg.Any<object[]>(), Arg.Any<CancellationToken>())
             .Returns((Tenant?)null);
         var sync = Substitute.For<ITenantRegistrySync>();
-        var handler = new CancelTenantHandler(db, sync, CreateMockAuditWriter());
+        var handler = new CancelTenantHandler(db, CreatePlatformAdminGuard(), sync, CreateMockAuditWriter());
 
         var result = await handler.Handle(
             new CancelTenantCommand(Guid.NewGuid()), CancellationToken.None);
@@ -301,12 +324,12 @@ public class C2TenantRegistrySyncTests
     public async Task SuspendTenant_ReturnsErrorForAlreadySuspended()
     {
         var db = Substitute.For<IAppDbContext>();
-        var tenant = CreatePersistedTenant("dup");
+        var tenant = CreateOperationalTenant("dup");
         tenant.Suspend("first");
         db.Tenants.FindAsync(Arg.Any<object[]>(), Arg.Any<CancellationToken>())
             .Returns(tenant);
         var sync = Substitute.For<ITenantRegistrySync>();
-        var handler = new SuspendTenantHandler(db, sync, CreateMockAuditWriter());
+        var handler = new SuspendTenantHandler(db, CreatePlatformAdminGuard(), sync, CreateMockAuditWriter());
 
         var result = await handler.Handle(
             new SuspendTenantCommand(tenant.Id, "second"), CancellationToken.None);
@@ -320,12 +343,12 @@ public class C2TenantRegistrySyncTests
     public async Task ActivateTenant_ReturnsErrorForAlreadyActive()
     {
         var db = Substitute.For<IAppDbContext>();
-        var tenant = CreatePersistedTenant("alr");
+        var tenant = CreateOperationalTenant("alr");
         tenant.Activate();
         db.Tenants.FindAsync(Arg.Any<object[]>(), Arg.Any<CancellationToken>())
             .Returns(tenant);
         var sync = Substitute.For<ITenantRegistrySync>();
-        var handler = new ReactivateTenantHandler(db, sync, CreateMockAuditWriter());
+        var handler = new ReactivateTenantHandler(db, CreatePlatformAdminGuard(), sync, CreateMockAuditWriter());
 
         var result = await handler.Handle(
             new ReactivateTenantCommand(tenant.Id), CancellationToken.None);
@@ -344,7 +367,7 @@ public class C2TenantRegistrySyncTests
         db.Tenants.FindAsync(Arg.Any<object[]>(), Arg.Any<CancellationToken>())
             .Returns(tenant);
         var sync = Substitute.For<ITenantRegistrySync>();
-        var handler = new CancelTenantHandler(db, sync, CreateMockAuditWriter());
+        var handler = new CancelTenantHandler(db, CreatePlatformAdminGuard(), sync, CreateMockAuditWriter());
 
         var result = await handler.Handle(
             new CancelTenantCommand(tenant.Id), CancellationToken.None);
@@ -363,7 +386,7 @@ public class C2TenantRegistrySyncTests
         db.Tenants.FindAsync(Arg.Any<object[]>(), Arg.Any<CancellationToken>())
             .Returns(tenant);
         var sync = Substitute.For<ITenantRegistrySync>();
-        var handler = new ReactivateTenantHandler(db, sync, CreateMockAuditWriter());
+        var handler = new ReactivateTenantHandler(db, CreatePlatformAdminGuard(), sync, CreateMockAuditWriter());
 
         var result = await handler.Handle(
             new ReactivateTenantCommand(tenant.Id), CancellationToken.None);
@@ -375,12 +398,12 @@ public class C2TenantRegistrySyncTests
     public async Task SuspendTenant_ReturnsErrorForCancelled()
     {
         var db = Substitute.For<IAppDbContext>();
-        var tenant = CreatePersistedTenant("canc2");
+        var tenant = CreateOperationalTenant("canc2");
         tenant.Cancel();
         db.Tenants.FindAsync(Arg.Any<object[]>(), Arg.Any<CancellationToken>())
             .Returns(tenant);
         var sync = Substitute.For<ITenantRegistrySync>();
-        var handler = new SuspendTenantHandler(db, sync, CreateMockAuditWriter());
+        var handler = new SuspendTenantHandler(db, CreatePlatformAdminGuard(), sync, CreateMockAuditWriter());
 
         var result = await handler.Handle(
             new SuspendTenantCommand(tenant.Id, "reason"), CancellationToken.None);
@@ -389,17 +412,27 @@ public class C2TenantRegistrySyncTests
     }
 
     [Fact]
-    public void TenantLifecycle_Provisioning_IsActive()
+    public void TenantLifecycle_Created_IsPendingApproval_AndInactive()
     {
         var tenant = CreatePersistedTenant();
+        Assert.Equal(LifecycleStatus.PendingApproval, tenant.LifecycleStatus);
+        Assert.False(tenant.IsActive);
+    }
+
+    [Fact]
+    public void TenantLifecycle_Approved_IsProvisioning_AndStillInactive()
+    {
+        var tenant = CreatePersistedTenant();
+        var result = tenant.Approve();
+        Assert.True(result.IsSuccess);
         Assert.Equal(LifecycleStatus.Provisioning, tenant.LifecycleStatus);
-        Assert.True(tenant.IsActive);
+        Assert.False(tenant.IsActive);
     }
 
     [Fact]
     public void TenantLifecycle_Suspended_IsInactive()
     {
-        var tenant = CreatePersistedTenant();
+        var tenant = CreateOperationalTenant();
         tenant.Suspend("reason");
         Assert.Equal(LifecycleStatus.Suspended, tenant.LifecycleStatus);
         Assert.False(tenant.IsActive);
@@ -417,11 +450,27 @@ public class C2TenantRegistrySyncTests
     [Fact]
     public void TenantLifecycle_ActivateFromSuspended_SetsIsActive()
     {
-        var tenant = CreatePersistedTenant();
+        var tenant = CreateOperationalTenant();
         tenant.Suspend("reason");
         tenant.Activate();
         Assert.Equal(LifecycleStatus.Active, tenant.LifecycleStatus);
         Assert.True(tenant.IsActive);
+    }
+
+    [Fact]
+    public void TenantLifecycle_CannotActivateFromPendingApproval()
+    {
+        var tenant = CreatePersistedTenant();
+        var result = tenant.Activate();
+        Assert.False(result.IsSuccess);
+    }
+
+    [Fact]
+    public void TenantLifecycle_CannotApproveTwice()
+    {
+        var tenant = CreatePersistedTenant();
+        Assert.True(tenant.Approve().IsSuccess);
+        Assert.False(tenant.Approve().IsSuccess);
     }
 
     [Fact]
@@ -452,3 +501,4 @@ public class C2TenantRegistrySyncTests
         Assert.True(Guid.TryParse(registryId, out _));
     }
 }
+

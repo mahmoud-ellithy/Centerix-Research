@@ -1,6 +1,7 @@
 namespace Centerix.Domain.Platform.Tenants;
 
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Tenants.Enums;
 
 public static class TenantErrors
 {
@@ -54,4 +55,18 @@ public static class TenantErrors
 
     public static Error CannotCancelFromSuspended =>
         Error.Conflict("Tenant.CannotCancelFromSuspended", "Cannot cancel a suspended tenant directly");
+
+    public static Error RejectionReasonRequired =>
+        Error.Validation("Tenant.RejectionReason_Required", "A rejection reason is required");
+
+    public static Error SuspensionReasonRequired =>
+        Error.Validation("Tenant.SuspensionReason_Required", "A suspension reason is required");
+
+    public static Error CannotApprove(LifecycleStatus current) =>
+        Error.Conflict("Tenant.CannotApprove",
+            $"Tenant approval requires PendingApproval status; current status is '{current}'");
+
+    public static Error CannotReject(LifecycleStatus current) =>
+        Error.Conflict("Tenant.CannotReject",
+            $"Tenant rejection requires PendingApproval status; current status is '{current}'");
 }

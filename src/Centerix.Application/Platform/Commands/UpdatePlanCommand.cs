@@ -17,14 +17,22 @@ public record UpdatePlanCommand(
     int MaxTeachers,
     int StorageGB,
     int SMSQuota,
-    bool IsActive) : IRequest<Result<Updated>>;
+    bool IsActive,
+    string? Description = null,
+    string? CurrencyCode = null,
+    int? DurationMonths = null,
+    int? BonusMonths = null) : IRequest<Result<Updated>>;
 
 public class UpdatePlanHandler(
     IAppDbContext dbContext,
+    IPlatformAdminGuard platformAdminGuard,
     IAuditWriter auditWriter) : IRequestHandler<UpdatePlanCommand, Result<Updated>>
 {
     public async Task<Result<Updated>> Handle(UpdatePlanCommand request, CancellationToken cancellationToken)
     {
+        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        if (!guardResult.IsSuccess)
+            return guardResult.Errors!;
         var plan = await dbContext.Plans.FindAsync([request.Id], cancellationToken: cancellationToken);
         if (plan is null)
         {
@@ -36,10 +44,13 @@ public class UpdatePlanHandler(
             plan.Code,
             plan.DisplayName,
             plan.MonthlyPrice,
+            plan.CurrencyCode,
+            plan.DurationMonths,
+            plan.BonusMonths,
             plan.IsActive
         });
 
-        plan.Update(
+        var updateResult = plan.Update(
             request.Code,
             request.DisplayName,
             request.MonthlyPrice,
@@ -49,8 +60,16 @@ public class UpdatePlanHandler(
             request.MaxTeachers,
             request.StorageGB,
             request.SMSQuota,
-            request.IsActive);
+            request.IsActive,
+            request.Description,
+            request.CurrencyCode,
+            request.DurationMonths,
+            request.BonusMonths);
 
+        if (!updateResult.IsSuccess)
+            return updateResult.Errors!;
+
+        // NOTE: existing subscriptions keep their purchased snapshot; this only affects future grants.
         await dbContext.SaveChangesAsync(cancellationToken);
 
         await auditWriter.WriteAsync(
@@ -63,6 +82,9 @@ public class UpdatePlanHandler(
                 plan.Code,
                 plan.DisplayName,
                 plan.MonthlyPrice,
+                plan.CurrencyCode,
+                plan.DurationMonths,
+                plan.BonusMonths,
                 plan.IsActive
             }),
             cancellationToken: cancellationToken);

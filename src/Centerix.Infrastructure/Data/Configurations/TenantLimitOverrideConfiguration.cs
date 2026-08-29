@@ -39,5 +39,11 @@ public class TenantLimitOverrideConfiguration : IEntityTypeConfiguration<TenantL
             .HasMaxLength(450);
 
         builder.HasIndex(o => o.TenantId);
+
+        // One override per (tenant, limit type) — overrides REPLACE plan limits, so duplicates
+        // would be ambiguous. Enforced in the database.
+        builder.HasIndex(o => new { o.TenantId, o.LimitType })
+            .IsUnique()
+            .HasDatabaseName("UX_TenantLimitOverrides_TenantId_LimitType");
     }
 }

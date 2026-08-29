@@ -1,6 +1,7 @@
 using System.Text;
 using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform;
+using Centerix.Application.Platform.Subscriptions;
 using Centerix.Infrastructure.Auditing;
 using Centerix.Infrastructure.Auth;
 using Centerix.Infrastructure.Common;
@@ -123,6 +124,14 @@ public static class DependencyInjection
         // Permission-based authorization
         services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
         services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
+        services.AddScoped<IAuthorizationHandler, FeatureAuthorizationHandler>();
+
+        // Phase 2: subscription state, feature entitlement and plan-limit enforcement
+        services.AddScoped<ISubscriptionStateService, SubscriptionStateService>();
+        services.AddScoped<IFeatureAccessService, FeatureAccessService>();
+        services.AddScoped<ILimitService, LimitService>();
+        services.AddScoped<IPlatformAdminGuard, PlatformAdminGuard>();
+        services.AddScoped<ISubscriptionFactory, SubscriptionFactory>();
 
         // JWT settings (strongly-typed) with startup validation
         services.Configure<JwtSettings>(configuration.GetSection("JwtSettings"));

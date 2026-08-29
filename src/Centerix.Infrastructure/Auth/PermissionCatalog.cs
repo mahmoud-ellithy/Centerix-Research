@@ -30,6 +30,10 @@ public static class PermissionCatalog
         new("TenantPlans",     "Update", "TenantPlans.Update",     "Update a tenant subscription"),
         new("TenantPlans",     "Delete", "TenantPlans.Delete",     "Cancel a tenant subscription"),
 
+        // Phase 2: platform-only commercial subscription workflows.
+        new("Subscriptions",   "Read",   "Subscriptions.Read",    "View all tenant subscriptions (platform)"),
+        new("Subscriptions",   "Manage", "Subscriptions.Manage",  "Approve tenants and manage subscriptions (platform)"),
+
         new("TenantCRMLeads", "Create", "TenantCRMLeads.Create", "Create a CRM lead"),
         new("TenantCRMLeads", "Read",   "TenantCRMLeads.Read",   "Read CRM leads"),
         new("TenantCRMLeads", "Update", "TenantCRMLeads.Update", "Update a CRM lead"),

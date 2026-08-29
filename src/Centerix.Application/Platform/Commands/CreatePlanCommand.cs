@@ -16,16 +16,24 @@ public record CreatePlanCommand(
     int MaxTeachers,
     int StorageGB,
     int SMSQuota,
-    bool IsActive) : IRequest<Result<Created>>;
+    bool IsActive,
+    string? Description = null,
+    string CurrencyCode = "USD",
+    int DurationMonths = 1,
+    int BonusMonths = 0) : IRequest<Result<Created>>;
 
 public class CreatePlanHandler(
     IAppDbContext dbContext,
+    IPlatformAdminGuard platformAdminGuard,
     IAuditWriter auditWriter) : IRequestHandler<CreatePlanCommand, Result<Created>>
 {
     public async Task<Result<Created>> Handle(
         CreatePlanCommand request,
         CancellationToken cancellationToken)
     {
+        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        if (!guardResult.IsSuccess)
+            return guardResult.Errors!;
         var planResult = Plan.Create(
             0,
             request.Code,
@@ -37,7 +45,11 @@ public class CreatePlanHandler(
             request.MaxTeachers,
             request.StorageGB,
             request.SMSQuota,
-            request.IsActive);
+            request.IsActive,
+            request.Description,
+            request.CurrencyCode,
+            request.DurationMonths,
+            request.BonusMonths);
 
         if (!planResult.IsSuccess)
         {
@@ -56,6 +68,9 @@ public class CreatePlanHandler(
                 planResult.Value.Code,
                 planResult.Value.DisplayName,
                 planResult.Value.MonthlyPrice,
+                planResult.Value.CurrencyCode,
+                planResult.Value.DurationMonths,
+                planResult.Value.BonusMonths,
                 planResult.Value.IsActive
             }),
             cancellationToken: cancellationToken);

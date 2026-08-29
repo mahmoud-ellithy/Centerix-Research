@@ -1,9 +1,10 @@
 using Centerix.Infrastructure.Data;
-using Centerix.Infrastructure.Data.Interceptors;
 using Centerix.Infrastructure.Tenancy;
 using Finbuckle.MultiTenant;
+using Finbuckle.MultiTenant.Abstractions;
+using Finbuckle.MultiTenant.EntityFrameworkCore.Stores.EFCoreStore;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Testcontainers.MsSql;
 using Xunit;
@@ -133,16 +134,19 @@ public sealed class SqlServerDatabaseFixture : IAsyncLifetime
 
 /// <summary>
 /// <see cref="TestWebApplicationFactory"/> variant targeting real SQL Server: applies actual
-/// migrations, registers production interceptors and uses the production history-table split.
+/// migrations and uses the production history-table split. The multi-tenant store is already
+/// the production EFCoreStore (inherited from the base factory).
 /// </summary>
 public sealed class SqlServerWebApplicationFactory(string masterConnectionString) : TestWebApplicationFactory
 {
     private readonly string _connectionString = masterConnectionString;
 
+    // NOTE: must NOT resolve services (e.g. SaveChanges interceptors) inside this callback.
+    // DbContextOptions<AppDbContext> is a singleton constructed ON DEMAND while the container
+    // is already mid-resolution of that very call site; re-entering the container here creates
+    // a circular dependency that deadlocks the resolver (verified via dotnet-stack).
     protected override void ConfigureAppDatabase(IServiceProvider services, DbContextOptionsBuilder options)
-        => options
-            .UseSqlServer(_connectionString)
-            .AddInterceptors(services.GetServices<ISaveChangesInterceptor>());
+        => options.UseSqlServer(_connectionString);
 
     protected override void ConfigureTenantDatabase(IServiceProvider services, DbContextOptionsBuilder options)
         => options.UseSqlServer(_connectionString,
@@ -152,53 +156,76 @@ public sealed class SqlServerWebApplicationFactory(string masterConnectionString
 /// <summary>
 /// Collection fixture sharing ONE migrated SQL Server database and ONE booted HTTP host across all
 /// relational integration test classes, so the migration chain executes exactly once per run.
+/// DisableParallelization keeps the real-SQL-Server workloads from contending with the
+/// InMemory suites for connection-pool/server capacity (observed login timeouts otherwise).
 /// </summary>
-[CollectionDefinition("SqlServerIntegration")]
+[CollectionDefinition("SqlServerIntegration", DisableParallelization = true)]
 public sealed class SqlServerIntegrationCollection : ICollectionFixture<SqlServerIntegrationFactory>;
 
 public sealed class SqlServerIntegrationFactory : IAsyncLifetime
 {
+    private static readonly string DiagnosticsLogPath =
+        Path.Combine(Path.GetTempPath(), "centerix-sqltest.log");
+
     private readonly SqlServerDatabaseFixture _database = new();
 
     public SqlServerWebApplicationFactory Factory { get; private set; } = null!;
     public HttpClient Client { get; private set; } = null!;
     public CapturingEmailSender EmailSender => Factory.EmailSender;
 
+    /// <summary>
+    /// Console output from xUnit fixtures can stay buffered under VSTest, so every stage is
+    /// mirrored into %TEMP%\centerix-sqltest.log (flushed immediately) for diagnosis.
+    /// </summary>
+    internal static void Log(string message)
+    {
+        Console.WriteLine(message);
+        try
+        {
+            File.AppendAllText(DiagnosticsLogPath, $"{DateTime.UtcNow:HH:mm:ss.fff} {message}{Environment.NewLine}");
+        }
+        catch
+        {
+            // Diagnostics only; never fail the suite over log IO.
+        }
+    }
+
     public async Task InitializeAsync()
     {
         await _database.InitializeAsync();
-        Console.WriteLine($"[SqlServerFixture] Using database {_database.DatabaseName}");
+        Log($"[SqlServerFixture] Using database {_database.DatabaseName}");
 
         Factory = new SqlServerWebApplicationFactory(_database.ConnectionString);
         Client = Factory.CreateClient();
-        Console.WriteLine("[SqlServerFixture] Test host built.");
+        Log("[SqlServerFixture] Test host built.");
 
         // Apply the real migration chain for BOTH contexts before any request touches the
         // database. TenantDbContext goes FIRST: AppDbContext's AddTenantMemberships migration
-        // creates a raw-SQL FK referencing Platform.TenantRegistry.
-        using (var scope = Factory.Services.CreateScope())
+        // creates a raw-SQL FK referencing Platform.TenantRegistry. Both contexts are built
+        // standalone (the IDesignTimeDbContextFactory pattern) so migration bootstrap never
+        // resolves runtime-only services (IMediator/ICurrentTenant) from the host container,
+        // and the history-table split matches production configuration.
+        var tenantOptions = new DbContextOptionsBuilder<TenantDbContext>()
+            .UseSqlServer(_database.ConnectionString,
+                sql => sql.MigrationsHistoryTable("__TenantMigrationsHistory"))
+            .Options;
+        await using (var tenantDbContext = new TenantDbContext(tenantOptions))
         {
-            var tenantDbContext = scope.ServiceProvider.GetRequiredService<TenantDbContext>();
             await tenantDbContext.Database.MigrateAsync();
-            Console.WriteLine("[SqlServerFixture] TenantDbContext migrated.");
         }
+        Log("[SqlServerFixture] TenantDbContext migrated.");
 
-        using (var scope = Factory.Services.CreateScope())
+        var appOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlServer(_database.ConnectionString)
+            .Options;
+        await using (var appDbContext = new AppDbContext(appOptions, null!, null!))
         {
-            Console.WriteLine("[SqlServerFixture] AppDbContext scope created.");
-            var appDbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            Console.WriteLine("[SqlServerFixture] AppDbContext resolved.");
             var canConnect = await appDbContext.Database.CanConnectAsync();
-            Console.WriteLine($"[SqlServerFixture] CanConnect={canConnect}");
+            Log($"[SqlServerFixture] AppDbContext CanConnect={canConnect}");
             var pending = await appDbContext.Database.GetPendingMigrationsAsync();
-            Console.WriteLine($"[SqlServerFixture] {pending.Count()} pending migrations.");
-            foreach (var migration in pending)
-            {
-                Console.WriteLine($"[SqlServerFixture] Applying {migration}...");
-                await appDbContext.Database.MigrateAsync(migration);
-                Console.WriteLine($"[SqlServerFixture] Applied {migration}.");
-            }
-            Console.WriteLine("[SqlServerFixture] AppDbContext migrated.");
+            Log($"[SqlServerFixture] {pending.Count()} pending AppDbContext migrations.");
+            await appDbContext.Database.MigrateAsync();
+            Log("[SqlServerFixture] AppDbContext migrated.");
         }
     }
 

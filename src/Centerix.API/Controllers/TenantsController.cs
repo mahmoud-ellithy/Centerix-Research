@@ -44,6 +44,52 @@ public class TenantsController(ILocalizer localizer, IMediator mediator) : ApiCo
             Problem);
     }
 
+    /// <summary>PLATFORM-ONLY: approves a pending tenant and assigns its first subscription.</summary>
+    [HttpPost("{id:guid}/approve")]
+    [HasPermission(Permissions.Subscriptions.Manage)]
+    public async Task<IActionResult> ApproveTenant(Guid id, ApproveTenantCommand command, CancellationToken cancellationToken)
+    {
+        if (id != command.TenantId)
+        {
+            return BadRequest(new { detail = "Route id does not match command tenant id." });
+        }
+
+        var result = await mediator.Send(command, cancellationToken);
+
+        return result.Match(
+            _ => StatusCode(StatusCodes.Status201Created),
+            Problem);
+    }
+
+    /// <summary>PLATFORM-ONLY: rejects a pending tenant application.</summary>
+    [HttpPost("{id:guid}/reject")]
+    [HasPermission(Permissions.Tenants.Update)]
+    public async Task<IActionResult> RejectTenant(Guid id, RejectTenantCommand command, CancellationToken cancellationToken)
+    {
+        if (id != command.TenantId)
+        {
+            return BadRequest(new { detail = "Route id does not match command tenant id." });
+        }
+
+        var result = await mediator.Send(command, cancellationToken);
+
+        return result.Match(
+            _ => NoContent(),
+            Problem);
+    }
+
+    /// <summary>PLATFORM-ONLY: completes provisioning (Provisioning → Active).</summary>
+    [HttpPost("{id:guid}/activate")]
+    [HasPermission(Permissions.Tenants.Update)]
+    public async Task<IActionResult> ActivateTenant(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(new ActivateTenantCommand(id), cancellationToken);
+
+        return result.Match(
+            _ => NoContent(),
+            Problem);
+    }
+
     [HttpPut("{id:guid}")]
     [HasPermission(Permissions.Tenants.Update)]
     public async Task<IActionResult> UpdateTenant(Guid id, UpdateTenantCommand command, CancellationToken cancellationToken)

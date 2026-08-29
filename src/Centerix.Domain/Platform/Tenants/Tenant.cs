@@ -1,4 +1,4 @@
-namespace Centerix.Domain.Platform.Tenants;
+﻿namespace Centerix.Domain.Platform.Tenants;
 
 using Centerix.Domain.Common;
 using Centerix.Domain.Common.Results;
@@ -7,7 +7,7 @@ using Centerix.Domain.Platform.Tenants.Events;
 
 /// <summary>
 /// Central registry for every subscribed center in the platform.
-/// Platform-scoped (NOT IHasTenantId — this IS the tenant).
+/// Platform-scoped (NOT IHasTenantId â€” this IS the tenant).
 /// </summary>
 public class Tenant : AuditableEntity
 {
@@ -62,7 +62,11 @@ public class Tenant : AuditableEntity
         OwnerEmail = ownerEmail;
         IsolationMode = isolationMode;
         LifecycleStatus = lifecycleStatus;
-        IsActive = true;
+
+        // A tenant only becomes operational (IsActive=true) through platform approval +
+        // provisioning completion. PendingApproval starts INACTIVE so the tenant guard blocks
+        // every tenant-scoped request until the platform activates it.
+        IsActive = lifecycleStatus == LifecycleStatus.Active || lifecycleStatus == LifecycleStatus.Provisioning;
     }
 
     public static Result<Tenant> Create(
@@ -117,7 +121,7 @@ public class Tenant : AuditableEntity
             id, slug.ToLowerInvariant(), subdomain.ToLowerInvariant(),
             displayName, country.ToUpperInvariant(), currency.ToUpperInvariant(),
             timezone, ownerFirstName, ownerLastName, ownerEmail,
-            isolationMode, LifecycleStatus.Provisioning);
+            isolationMode, LifecycleStatus.PendingApproval);
 
         tenant.LogoUrl = logoUrl;
         tenant.PrimaryColor = primaryColor;
@@ -147,10 +151,53 @@ public class Tenant : AuditableEntity
         return Result.Updated;
     }
 
+    /// <summary>
+    /// Platform Admin approves the tenant application. Only PendingApproval tenants can be
+    /// approved; approval moves the tenant into Provisioning (subscription assignment happens
+    /// in the same application transaction by the caller).
+    /// </summary>
+    public Result<Updated> Approve()
+    {
+        if (LifecycleStatus != LifecycleStatus.PendingApproval)
+            return TenantErrors.CannotApprove(LifecycleStatus);
+
+        LifecycleStatus = LifecycleStatus.Provisioning;
+        IsActive = false;
+
+        AddDomainEvent(new TenantApprovedEvent(Id));
+
+        return Result.Updated;
+    }
+
+    /// <summary>
+    /// Platform Admin rejects the tenant application. Terminal for this phase.
+    /// </summary>
+    public Result<Updated> Reject(string reason)
+    {
+        if (LifecycleStatus != LifecycleStatus.PendingApproval)
+            return TenantErrors.CannotReject(LifecycleStatus);
+
+        if (string.IsNullOrWhiteSpace(reason))
+            return TenantErrors.RejectionReasonRequired;
+
+        LifecycleStatus = LifecycleStatus.Rejected;
+        IsActive = false;
+        SuspendedReason = reason.Trim();
+
+        AddDomainEvent(new TenantRejectedEvent(Id, SuspendedReason));
+
+        return Result.Updated;
+    }
+
     public Result<Updated> Activate()
     {
         if (LifecycleStatus == LifecycleStatus.Active)
             return TenantErrors.AlreadyActive;
+
+        // Commercial gate: a PendingApproval tenant MUST NOT be activated without platform
+        // approval (Approve), and a Rejected application cannot self-activate.
+        if (LifecycleStatus == LifecycleStatus.PendingApproval || LifecycleStatus == LifecycleStatus.Rejected)
+            return TenantErrors.InvalidLifecycleStatus;
 
         if (LifecycleStatus == LifecycleStatus.Cancelled)
             return TenantErrors.AlreadyCancelled;
@@ -168,14 +215,18 @@ public class Tenant : AuditableEntity
         if (LifecycleStatus == LifecycleStatus.Suspended)
             return TenantErrors.AlreadySuspended;
 
-        if (LifecycleStatus == LifecycleStatus.Cancelled)
-            return TenantErrors.AlreadyCancelled;
+        // Suspension is an operational action on a live/provisioning tenant.
+        if (LifecycleStatus is not (LifecycleStatus.Active or LifecycleStatus.Provisioning))
+            return TenantErrors.InvalidLifecycleStatus;
+
+        if (string.IsNullOrWhiteSpace(reason))
+            return TenantErrors.SuspensionReasonRequired;
 
         LifecycleStatus = LifecycleStatus.Suspended;
         IsActive = false;
-        SuspendedReason = reason;
+        SuspendedReason = reason.Trim();
 
-        AddDomainEvent(new TenantSuspendedEvent(Id, reason));
+        AddDomainEvent(new TenantSuspendedEvent(Id, SuspendedReason));
 
         return Result.Updated;
     }
@@ -208,3 +259,4 @@ public class Tenant : AuditableEntity
         ValidUpTo = validUpTo;
     }
 }
+

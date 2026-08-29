@@ -46,11 +46,16 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
 
             ReplaceDbContext<TenantDbContext>(services, ConfigureTenantDatabase);
 
+            // Production uses EFCoreStore<TenantDbContext> as the single source of truth for
+            // tenant resolution; the test host mirrors that exactly so lifecycle syncs performed
+            // by ITenantRegistrySync are visible to the multi-tenant pipeline (an in-memory
+            // store double would silently diverge after any SyncLifecycle call).
             var storeDescriptor = services.FirstOrDefault(
                 d => d.ServiceType == typeof(IMultiTenantStore<CenterixTenantInfo>));
             if (storeDescriptor != null) services.Remove(storeDescriptor);
 
-            services.AddSingleton<IMultiTenantStore<CenterixTenantInfo>, InMemoryTenantStore>();
+            services.AddScoped<IMultiTenantStore<CenterixTenantInfo>,
+                Finbuckle.MultiTenant.EntityFrameworkCore.Stores.EFCoreStore.EFCoreStore<TenantDbContext, CenterixTenantInfo>>();
 
             // Replace the development e-mail sender with a capturing double so tests can recover
             // raw invitation tokens (they are never persisted server-side).
@@ -77,9 +82,13 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
 
     /// <summary>
     /// Database configuration for <see cref="TenantDbContext"/>. Defaults to EF InMemory.
+    /// The TransactionIgnoredWarning suppression lets registry-sync dual-writes open their
+    /// (no-op) transactions exactly like the relational path.
     /// </summary>
     protected virtual void ConfigureTenantDatabase(IServiceProvider services, DbContextOptionsBuilder options)
-        => options.UseInMemoryDatabase($"{_databaseName}_Tenant");
+        => options
+            .UseInMemoryDatabase($"{_databaseName}_Tenant")
+            .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning));
 
     private void ReplaceDbContext<TContext>(
         IServiceCollection services,

@@ -1,4 +1,4 @@
-using System.Linq.Expressions;
+﻿using System.Linq.Expressions;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Auditing;
@@ -52,6 +52,7 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     public DbSet<Feature> Features { get; set; } = default!;
     public DbSet<PlanFeature> PlanFeatures { get; set; } = default!;
     public DbSet<TenantPlan> TenantPlans { get; set; } = default!;
+    public DbSet<TenantPlanFeature> TenantPlanFeatures { get; set; } = default!;
     public DbSet<Invoice> Invoices { get; set; } = default!;
     public DbSet<InvoiceLine> InvoiceLines { get; set; } = default!;
     public DbSet<PlatformPayment> PlatformPayments { get; set; } = default!;
@@ -105,6 +106,8 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
         await DispatchDomainEventsAsync(cancellationToken);
         return await base.SaveChangesAsync(cancellationToken);
     }
+
+    public bool IsRelational => Database.IsRelational();
 
     public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
         => Database.BeginTransactionAsync(cancellationToken);
@@ -164,3 +167,4 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
         }
     }
 }
+

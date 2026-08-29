@@ -27,6 +27,16 @@ public class PermissionPolicyProvider(IOptions<AuthorizationOptions> options) : 
         if (policy != null)
             return policy;
 
+        // Feature policies ("Feature:{code}") gate TENANT commercial entitlements; everything
+        // else is treated as a permission code (existing behavior).
+        if (policyName.StartsWith("Feature:", StringComparison.Ordinal))
+        {
+            return new AuthorizationPolicyBuilder()
+                .RequireAuthenticatedUser()
+                .AddRequirements(new FeatureRequirement(policyName["Feature:".Length..]))
+                .Build();
+        }
+
         return new AuthorizationPolicyBuilder()
             .AddRequirements(new PermissionRequirement(policyName))
             .Build();

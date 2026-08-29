@@ -21,4 +21,17 @@ public static class PlanErrors
 
     public static Error AlreadyActive =>
         Error.Conflict("Plan.AlreadyActive", "Plan is already active");
+
+    public static Error InvalidCurrency =>
+        Error.Validation("Plan.InvalidCurrency", "Currency must be a 3-letter ISO-4217 code");
+
+    public static Error InvalidDuration =>
+        Error.Validation("Plan.InvalidDuration", "Duration must be at least one month");
+
+    public static Error InvalidBonus =>
+        Error.Validation("Plan.InvalidBonus", "Bonus months cannot be negative");
+
+    public static Error InUseBySubscriptions =>
+        Error.Conflict("Plan.InUseBySubscriptions",
+            "Plan has subscriptions and cannot be deleted; deactivate it instead");
 }

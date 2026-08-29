@@ -10,11 +10,16 @@ public record ReactivateTenantCommand(Guid Id) : IRequest<Result<Updated>>;
 
 public class ReactivateTenantHandler(
     IAppDbContext dbContext,
+    IPlatformAdminGuard platformAdminGuard,
     ITenantRegistrySync tenantRegistrySync,
     IAuditWriter auditWriter) : IRequestHandler<ReactivateTenantCommand, Result<Updated>>
 {
     public async Task<Result<Updated>> Handle(ReactivateTenantCommand request, CancellationToken cancellationToken)
     {
+        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        if (!guardResult.IsSuccess)
+            return guardResult.Errors!;
+
         var tenant = await dbContext.Tenants.FindAsync([request.Id], cancellationToken: cancellationToken);
         if (tenant is null)
         {
