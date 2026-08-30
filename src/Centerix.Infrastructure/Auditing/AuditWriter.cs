@@ -56,8 +56,11 @@ public class AuditWriter(
                     return;
                 }
 
-                // TenantId is stamped by the TenantInterceptor from the verified context.
+                // TenantId is stamped by the TenantInterceptor from the verified context, and also
+                // explicitly via StampAddedTenantIds so the InMemory test provider (which does not
+                // invoke the interceptor) still produces a complete AuditLog row.
                 dbContext.AuditLogs.Add(entry.Value);
+                dbContext.StampAddedTenantIds(tenantId);
             }
             else
             {

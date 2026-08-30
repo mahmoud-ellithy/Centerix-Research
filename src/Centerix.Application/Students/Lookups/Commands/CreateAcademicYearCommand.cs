@@ -13,6 +13,7 @@ public record CreateAcademicYearCommand(
 
 public class CreateAcademicYearHandler(
     IAppDbContext dbContext,
+    ICurrentTenant currentTenant,
     IAuditWriter auditWriter) : IRequestHandler<CreateAcademicYearCommand, Result<Created>>
 {
     public async Task<Result<Created>> Handle(
@@ -31,6 +32,7 @@ public class CreateAcademicYearHandler(
         }
 
         dbContext.AcademicYears.Add(result.Value);
+        dbContext.StampAddedTenantIds(currentTenant.TenantId!);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         await auditWriter.WriteAsync(

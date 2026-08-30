@@ -3,10 +3,14 @@ namespace Centerix.Application.Students.Students.Commands;
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Subscriptions;
+using Centerix.Domain.Students.Branches;
 using Centerix.Domain.Students.Enums;
+using Centerix.Domain.Students.Lookups;
 using Centerix.Domain.Students.Students;
 
 using MediatR;
+
+using Microsoft.EntityFrameworkCore;
 
 public record CreateStudentCommand(
     Guid BranchId,
@@ -44,6 +48,27 @@ public class CreateStudentHandler(
         if (!limitResult.IsSuccess)
             return limitResult.Errors!;
 
+        // Tenant-scoped referential integrity: branch / stage / year must exist within the
+        // resolved tenant (FailClosed — query filter ensures cross-tenant FK lookups return
+        // null and surface as clean 404 rather than a relational FK violation 500).
+        var branchExists = await dbContext.Branches
+            .AsNoTracking()
+            .AnyAsync(b => b.Id == request.BranchId, cancellationToken);
+        if (!branchExists)
+            return BranchErrors.NotFound;
+
+        var stageExists = await dbContext.AcademicStages
+            .AsNoTracking()
+            .AnyAsync(s => s.Id == request.StageId, cancellationToken);
+        if (!stageExists)
+            return AcademicStageErrors.NotFound;
+
+        var yearExists = await dbContext.AcademicYears
+            .AsNoTracking()
+            .AnyAsync(y => y.Id == request.YearId, cancellationToken);
+        if (!yearExists)
+            return AcademicYearErrors.NotFound;
+
         var studentResult = Student.Create(
             Guid.NewGuid(),
             request.BranchId,
@@ -67,6 +92,7 @@ public class CreateStudentHandler(
         }
 
         dbContext.Students.Add(studentResult.Value);
+        dbContext.StampAddedTenantIds(currentTenant.TenantId!);
 
         try
         {

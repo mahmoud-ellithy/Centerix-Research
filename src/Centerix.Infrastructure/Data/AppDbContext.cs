@@ -1,4 +1,4 @@
-﻿using System.Linq.Expressions;
+using System.Linq.Expressions;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Auditing;
@@ -105,6 +105,20 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     {
         await DispatchDomainEventsAsync(cancellationToken);
         return await base.SaveChangesAsync(cancellationToken);
+    }
+
+
+    public void StampAddedTenantIds(string tenantId)
+    {
+        if (string.IsNullOrEmpty(tenantId)) return;
+
+        foreach (var entry in ChangeTracker.Entries<IHasTenantId>())
+        {
+            if (entry.State == EntityState.Added)
+            {
+                entry.Property(nameof(IHasTenantId.TenantId)).CurrentValue = tenantId;
+            }
+        }
     }
 
     public bool IsRelational => Database.IsRelational();

@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Centerix.SecurityTests;
@@ -18,6 +19,9 @@ namespace Centerix.SecurityTests;
 public class TestWebApplicationFactory : WebApplicationFactory<Program>
 {
     private readonly string _databaseName = $"SecurityTestDb_{Guid.NewGuid():N}";
+
+    /// <summary>Captured server logs for the lifetime of this factory (used by HTTP tests).</summary>
+    public List<string> ServerLogs { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -38,6 +42,13 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
                 .Build();
 
             config.AddConfiguration(testConfig);
+        });
+
+        builder.ConfigureLogging(logging =>
+        {
+            logging.ClearProviders();
+            logging.AddProvider(new TestListLoggerProvider(ServerLogs));
+            logging.SetMinimumLevel(LogLevel.Warning);
         });
 
         builder.ConfigureServices(services =>
@@ -106,7 +117,18 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
 
         foreach (var d in toRemove) services.Remove(d);
 
-        services.AddDbContext<TContext>(configureOptions);
+        // NOTE: Interceptors (TenantInterceptor, AuditableEntityInterceptor) are intentionally
+        // NOT wired into the test InMemory DbContext. Production wires them through
+        // sp.GetServices<ISaveChangesInterceptor>() inside AddDbContext's factory, which lets
+        // EF Core stamp TenantId and audit fields at save time. We don't do that here because
+        // (a) the InMemory provider's interaction with save-changes interceptors is observed
+        // to deadlock the test host (root cause tracked separately), and (b) Phase 3 handlers
+        // stamp TenantId explicitly at the handler layer so the interceptor is not required
+        // for tenant-correctness inside the test surface.
+        services.AddDbContext<TContext>((sp, options) =>
+        {
+            configureOptions(sp, options);
+        });
     }
 
     public async Task SeedPermissionsAsync()
@@ -211,9 +233,30 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
         return new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    /// <summary>
-    /// Capturing e-mail sender shared by every host built from this factory. Call
+    /// <summary>Capturing e-mail sender shared by every host built from this factory. Call
     /// <see cref="CapturingEmailSender.Clear"/> between tests that assert on sent mail.
     /// </summary>
     public CapturingEmailSender EmailSender { get; } = new();
+}
+
+/// <summary>
+/// Minimal in-memory logger provider for tests that want to inspect server-side warnings/errors.
+/// </summary>
+public sealed class TestListLoggerProvider(List<string> sink) : ILoggerProvider
+{
+    public ILogger CreateLogger(string categoryName) => new TestListLogger(categoryName, sink);
+
+    public void Dispose() { }
+
+    private sealed class TestListLogger(string category, List<string> sink) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Warning;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            sink.Add($"[{logLevel}] {category}: {formatter(state, exception)}");
+            if (exception is not null) sink.Add(exception.ToString());
+        }
+    }
 }

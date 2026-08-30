@@ -1,5 +1,7 @@
 using Centerix.Domain.Auditing;
 using Centerix.Domain.Authentication;
+using Centerix.Domain.Common;
+using Centerix.Domain.Common;
 using Centerix.Domain.Platform.Auditing;
 using Centerix.Domain.Platform.Authorization;
 using Centerix.Domain.Platform.Billing.Credits;
@@ -88,6 +90,15 @@ public interface IAppDbContext
     DbSet<AttendanceLog> AttendanceLogs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Stamps the AUTHORIZED tenant id on every <see cref="IHasTenantId"/> entity currently in the
+    /// change tracker with state <c>Added</c>. Mirrors what <c>TenantInterceptor</c> does on
+    /// the relational path; the test InMemory provider does not invoke the interceptor, so
+    /// tenant-aware handlers call this immediately before <see cref="SaveChangesAsync"/> to
+    /// avoid a save-time <c>TenantId required</c> failure. Safe to call when no entities are tracked.
+    /// </summary>
+    void StampAddedTenantIds(string tenantId);
 
     /// <summary>
     /// True when the configured provider is relational (e.g. SQL Server); false for the EF
