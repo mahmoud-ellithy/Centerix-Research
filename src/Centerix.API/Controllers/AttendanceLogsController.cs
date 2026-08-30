@@ -16,9 +16,7 @@ public class AttendanceLogsController(ILocalizer localizer, IMediator mediator) 
     {
         var result = await mediator.Send(new GetAttendanceLogsQuery(), cancellationToken);
 
-        return result.Match(
-            logs => Ok(logs),
-            Problem);
+        return Ok(result);
     }
 
     [HttpGet("{id}")]
