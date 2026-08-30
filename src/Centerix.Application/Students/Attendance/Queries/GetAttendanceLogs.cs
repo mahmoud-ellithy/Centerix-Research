@@ -7,19 +7,19 @@ using Centerix.Domain.Common.Results;
 using Microsoft.EntityFrameworkCore;
 using MediatR;
 
-public record GetAttendanceLogsQuery : IRequest<Result<IEnumerable<AttendanceLogDto>>>, ICachedQuery
+public record GetAttendanceLogsQuery : IRequest<IEnumerable<AttendanceLogDto>>, ICachedQuery
 {
     public string GetCacheKey() => "all-attendance-logs";
 }
 
 public class GetAttendanceLogsHandler(IAppDbContext dbContext)
-    : IRequestHandler<GetAttendanceLogsQuery, Result<IEnumerable<AttendanceLogDto>>>
+    : IRequestHandler<GetAttendanceLogsQuery, IEnumerable<AttendanceLogDto>>
 {
-    public async Task<Result<IEnumerable<AttendanceLogDto>>> Handle(
+    public async Task<IEnumerable<AttendanceLogDto>> Handle(
         GetAttendanceLogsQuery request,
         CancellationToken cancellationToken)
     {
-        var logs = await dbContext.AttendanceLogs
+        return await dbContext.AttendanceLogs
             .AsNoTracking()
             .Include(a => a.Student)
             .Select(a => new AttendanceLogDto
@@ -35,7 +35,5 @@ public class GetAttendanceLogsHandler(IAppDbContext dbContext)
                 StudentName = a.Student.FullNameAr,
             })
             .ToListAsync(cancellationToken);
-
-        return logs;
     }
 }

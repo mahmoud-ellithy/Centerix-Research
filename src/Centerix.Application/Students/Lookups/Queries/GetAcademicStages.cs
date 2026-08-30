@@ -10,22 +10,20 @@ using Mapster;
 
 using MediatR;
 
-public record GetAcademicStagesQuery : IRequest<Result<IEnumerable<AcademicStageDto>>>, ICachedQuery
+public record GetAcademicStagesQuery : IRequest<IEnumerable<AcademicStageDto>>, ICachedQuery
 {
     public string GetCacheKey() => "all-academic-stages";
 }
 
-public class GetAcademicStagesHandler(IAppDbContext dbContext) : IRequestHandler<GetAcademicStagesQuery, Result<IEnumerable<AcademicStageDto>>>
+public class GetAcademicStagesHandler(IAppDbContext dbContext) : IRequestHandler<GetAcademicStagesQuery, IEnumerable<AcademicStageDto>>
 {
-    public async Task<Result<IEnumerable<AcademicStageDto>>> Handle(
+    public async Task<IEnumerable<AcademicStageDto>> Handle(
         GetAcademicStagesQuery request,
         CancellationToken cancellationToken)
     {
-        var stages = await dbContext.AcademicStages
+        return await dbContext.AcademicStages
             .OrderBy(s => s.SortOrder)
             .ProjectToType<AcademicStageDto>()
             .ToListAsync(cancellationToken);
-
-        return stages;
     }
 }

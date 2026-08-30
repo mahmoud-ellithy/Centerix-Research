@@ -14,11 +14,9 @@ public class AcademicStagesController(ILocalizer localizer, IMediator mediator) 
     [HasPermission(Permissions.AcademicStages.Read)]
     public async Task<IActionResult> GetAcademicStages(CancellationToken cancellationToken)
     {
-        var result = await mediator.Send(new GetAcademicStagesQuery(), cancellationToken);
+        var stages = await mediator.Send(new GetAcademicStagesQuery(), cancellationToken);
 
-        return result.Match(
-            stages => Ok(stages),
-            Problem);
+        return Ok(stages);
     }
 
     [HttpGet("{id}")]

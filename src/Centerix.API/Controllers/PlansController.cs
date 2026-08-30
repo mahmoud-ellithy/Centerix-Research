@@ -14,11 +14,9 @@ public class PlansController(ILocalizer localizer, IMediator mediator) : ApiCont
     [HasPermission(Permissions.Plans.Read)]
     public async Task<IActionResult> GetPlans(CancellationToken cancellationToken)
     {
-        var result = await mediator.Send(new GetPlansQuery(), cancellationToken);
+        var plans = await mediator.Send(new GetPlansQuery(), cancellationToken);
 
-        return result.Match(
-            plans => Ok(plans),
-            Problem);
+        return Ok(plans);
     }
 
     [HttpGet("{id}")]

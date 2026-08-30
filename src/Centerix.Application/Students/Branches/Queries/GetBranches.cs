@@ -10,21 +10,19 @@ using Mapster;
 
 using MediatR;
 
-public record GetBranchesQuery : IRequest<Result<IEnumerable<BranchDto>>>, ICachedQuery
+public record GetBranchesQuery : IRequest<IEnumerable<BranchDto>>, ICachedQuery
 {
     public string GetCacheKey() => "all-branches";
 }
 
-public class GetBranchesHandler(IAppDbContext dbContext) : IRequestHandler<GetBranchesQuery, Result<IEnumerable<BranchDto>>>
+public class GetBranchesHandler(IAppDbContext dbContext) : IRequestHandler<GetBranchesQuery, IEnumerable<BranchDto>>
 {
-    public async Task<Result<IEnumerable<BranchDto>>> Handle(
+    public async Task<IEnumerable<BranchDto>> Handle(
         GetBranchesQuery request,
         CancellationToken cancellationToken)
     {
-        var branches = await dbContext.Branches
+        return await dbContext.Branches
             .ProjectToType<BranchDto>()
             .ToListAsync(cancellationToken);
-
-        return branches;
     }
 }

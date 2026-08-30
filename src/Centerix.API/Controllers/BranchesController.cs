@@ -14,11 +14,9 @@ public class BranchesController(ILocalizer localizer, IMediator mediator) : ApiC
     [HasPermission(Permissions.Branches.Read)]
     public async Task<IActionResult> GetBranches(CancellationToken cancellationToken)
     {
-        var result = await mediator.Send(new GetBranchesQuery(), cancellationToken);
+        var branches = await mediator.Send(new GetBranchesQuery(), cancellationToken);
 
-        return result.Match(
-            branches => Ok(branches),
-            Problem);
+        return Ok(branches);
     }
 
     [HttpGet("{id}")]

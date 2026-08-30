@@ -7,19 +7,19 @@ using Centerix.Domain.Common.Results;
 using Microsoft.EntityFrameworkCore;
 using MediatR;
 
-public record GetAcademicYearsQuery : IRequest<Result<IEnumerable<AcademicYearDto>>>, ICachedQuery
+public record GetAcademicYearsQuery : IRequest<IEnumerable<AcademicYearDto>>, ICachedQuery
 {
     public string GetCacheKey() => "all-academic-years";
 }
 
 public class GetAcademicYearsHandler(IAppDbContext dbContext)
-    : IRequestHandler<GetAcademicYearsQuery, Result<IEnumerable<AcademicYearDto>>>
+    : IRequestHandler<GetAcademicYearsQuery, IEnumerable<AcademicYearDto>>
 {
-    public async Task<Result<IEnumerable<AcademicYearDto>>> Handle(
+    public async Task<IEnumerable<AcademicYearDto>> Handle(
         GetAcademicYearsQuery request,
         CancellationToken cancellationToken)
     {
-        var years = await dbContext.AcademicYears
+        return await dbContext.AcademicYears
             .Include(y => y.Stage)
             .Select(y => new AcademicYearDto
             {
@@ -30,7 +30,5 @@ public class GetAcademicYearsHandler(IAppDbContext dbContext)
                 StageName = y.Stage.DisplayName
             })
             .ToListAsync(cancellationToken);
-
-        return years;
     }
 }

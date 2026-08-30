@@ -14,11 +14,9 @@ public class AcademicYearsController(ILocalizer localizer, IMediator mediator) :
     [HasPermission(Permissions.AcademicYears.Read)]
     public async Task<IActionResult> GetAcademicYears(CancellationToken cancellationToken)
     {
-        var result = await mediator.Send(new GetAcademicYearsQuery(), cancellationToken);
+        var years = await mediator.Send(new GetAcademicYearsQuery(), cancellationToken);
 
-        return result.Match(
-            years => Ok(years),
-            Problem);
+        return Ok(years);
     }
 
     [HttpGet("{id}")]
