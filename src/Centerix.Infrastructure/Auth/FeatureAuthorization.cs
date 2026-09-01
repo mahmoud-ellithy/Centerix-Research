@@ -66,6 +66,9 @@ public static class FeatureCodes
 {
     /// <summary>Core student-management capability (gates Students module writes).</summary>
     public const string StudentManagement = "Students";
+
+    /// <summary>Core teacher-management capability (gates Teachers/Subjects module writes and salary configs).</summary>
+    public const string TeacherManagement = "Teachers";
 }
 
 public class RequireFeatureAttribute(string featureCode) : AuthorizeAttribute(PolicyName(featureCode))

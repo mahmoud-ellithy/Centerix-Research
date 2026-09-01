@@ -6,6 +6,8 @@ using Centerix.Domain.Students.Lookups;
 
 using MediatR;
 
+using Microsoft.EntityFrameworkCore;
+
 public record CreateAcademicYearCommand(
     int StageId,
     string YearCode,
@@ -20,6 +22,16 @@ public class CreateAcademicYearHandler(
         CreateAcademicYearCommand request,
         CancellationToken cancellationToken)
     {
+        // The IHasTenantId query filter scopes this lookup to the current tenant,
+        // so a missing row means either the stage doesn't exist or it belongs to
+        // another tenant — both surface as 404 (never 500, never silently created).
+        var stageExists = await dbContext.AcademicStages
+            .AnyAsync(x => x.Id == request.StageId, cancellationToken);
+        if (!stageExists)
+        {
+            return AcademicYearErrors.StageNotFound;
+        }
+
         var result = AcademicYear.Create(
             0,
             request.StageId,

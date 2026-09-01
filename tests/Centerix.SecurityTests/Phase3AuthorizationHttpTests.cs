@@ -368,7 +368,7 @@ public class Phase3AuthorizationHttpTests : IClassFixture<TestWebApplicationFact
 
         var update = await _client.SendAsync(Put(
             $"/api/branches/{branchId}",
-            new { name = "Cairo HQ", address = "new", phone = "01000000001", managerId = (Guid?)null },
+            new { id = branchId, name = "Cairo HQ", address = "new", phone = "01000000001", managerId = (Guid?)null },
             s.TenantAdminToken, s.Identifier));
         Assert.Equal(HttpStatusCode.NoContent, update.StatusCode);
 
@@ -379,7 +379,7 @@ public class Phase3AuthorizationHttpTests : IClassFixture<TestWebApplicationFact
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            Assert.True((await db.Branches.IgnoreQueryFilters().SingleAsync()).IsDeleted());
+            Assert.True((await db.Branches.IgnoreQueryFilters().SingleAsync(b => b.TenantId == s.TenantId.ToString())).IsDeleted());
         }
     }
 
@@ -540,7 +540,7 @@ public class Phase3AuthorizationHttpTests : IClassFixture<TestWebApplicationFact
 
         // Stage + year + branch must exist in this tenant.
         var branchCreate = await _client.SendAsync(Post(
-            "/api/branches", BranchPayload(), s.TenantAdminToken, s.Identifier));
+            "/api/branches", BranchPayload("Cairo"), s.TenantAdminToken, s.Identifier));
         Assert.Equal(HttpStatusCode.Created, branchCreate.StatusCode);
 
         var stageCreate = await _client.SendAsync(Post(

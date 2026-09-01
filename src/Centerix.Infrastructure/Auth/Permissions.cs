@@ -91,6 +91,43 @@ public static class Permissions
         public const string Update = "AcademicYears.Update";
     }
 
+    public static class Subjects
+    {
+        public const string Create = "Subjects.Create";
+        public const string Read = "Subjects.Read";
+        public const string Update = "Subjects.Update";
+        public const string Delete = "Subjects.Delete";
+    }
+
+    public static class Teachers
+    {
+        public const string Create = "Teachers.Create";
+        public const string Read = "Teachers.Read";
+        public const string Update = "Teachers.Update";
+        public const string Delete = "Teachers.Delete";
+    }
+
+    public static class TeacherSalaryConfigs
+    {
+        public const string Create = "TeacherSalaryConfigs.Create";
+        public const string Read = "TeacherSalaryConfigs.Read";
+        public const string Update = "TeacherSalaryConfigs.Update";
+        public const string Delete = "TeacherSalaryConfigs.Delete";
+    }
+
+    public static class SalaryPayments
+    {
+        public const string Create = "SalaryPayments.Create";
+        public const string Read = "SalaryPayments.Read";
+        public const string Update = "SalaryPayments.Update";
+    }
+
+    public static class TeacherRatings
+    {
+        public const string Create = "TeacherRatings.Create";
+        public const string Read = "TeacherRatings.Read";
+    }
+
     public static class AddOnCatalogs
     {
         public const string Create = "AddOnCatalogs.Create";
@@ -194,6 +231,11 @@ public static class Permissions
         TenantCRMLeads.Create, TenantCRMLeads.Read, TenantCRMLeads.Update, TenantCRMLeads.Delete,
         Invitations.Create, Invitations.Read, Invitations.Revoke,
         Memberships.Read, Memberships.Manage,
+        Subjects.Create, Subjects.Read, Subjects.Update, Subjects.Delete,
+        Teachers.Create, Teachers.Read, Teachers.Update, Teachers.Delete,
+        TeacherSalaryConfigs.Create, TeacherSalaryConfigs.Read, TeacherSalaryConfigs.Update, TeacherSalaryConfigs.Delete,
+        SalaryPayments.Create, SalaryPayments.Read, SalaryPayments.Update,
+        TeacherRatings.Create, TeacherRatings.Read,
     ];
 
     public static string[] GetTenantUserPermissions() =>
@@ -201,6 +243,11 @@ public static class Permissions
         TenantPlans.Read,
         TenantCRMLeads.Read,
         Memberships.Read,
+        Subjects.Read,
+        Teachers.Read,
+        TeacherSalaryConfigs.Read,
+        SalaryPayments.Read,
+        TeacherRatings.Read,
     ];
 
     /// <summary>

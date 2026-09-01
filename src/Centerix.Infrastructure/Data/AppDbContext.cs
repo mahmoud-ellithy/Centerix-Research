@@ -24,6 +24,11 @@ using Centerix.Domain.Students.Attendance;
 using Centerix.Domain.Students.Branches;
 using Centerix.Domain.Students.Lookups;
 using Centerix.Domain.Students.Students;
+using Centerix.Domain.Teachers.SalaryPayments;
+using Centerix.Domain.Teachers.Subjects;
+using Centerix.Domain.Teachers.Teachers;
+using Centerix.Domain.Teachers.TeacherRatings;
+using Centerix.Domain.Teachers.TeacherSalaryConfigs;
 
 using MediatR;
 
@@ -100,6 +105,13 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     public DbSet<AcademicYear> AcademicYears { get; set; } = default!;
     public DbSet<Student> Students { get; set; } = default!;
     public DbSet<AttendanceLog> AttendanceLogs { get; set; } = default!;
+
+    // Education module (M-02)
+    public DbSet<Subject> Subjects { get; set; } = default!;
+    public DbSet<Teacher> Teachers { get; set; } = default!;
+    public DbSet<TeacherSalaryConfig> TeacherSalaryConfigs { get; set; } = default!;
+    public DbSet<SalaryPayment> SalaryPayments { get; set; } = default!;
+    public DbSet<TeacherRating> TeacherRatings { get; set; } = default!;
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {

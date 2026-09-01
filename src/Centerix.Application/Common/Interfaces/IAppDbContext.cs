@@ -1,7 +1,6 @@
 using Centerix.Domain.Auditing;
 using Centerix.Domain.Authentication;
 using Centerix.Domain.Common;
-using Centerix.Domain.Common;
 using Centerix.Domain.Platform.Auditing;
 using Centerix.Domain.Platform.Authorization;
 using Centerix.Domain.Platform.Billing.Credits;
@@ -21,6 +20,11 @@ using Centerix.Domain.Students.Attendance;
 using Centerix.Domain.Students.Branches;
 using Centerix.Domain.Students.Lookups;
 using Centerix.Domain.Students.Students;
+using Centerix.Domain.Teachers.SalaryPayments;
+using Centerix.Domain.Teachers.Subjects;
+using Centerix.Domain.Teachers.Teachers;
+using Centerix.Domain.Teachers.TeacherRatings;
+using Centerix.Domain.Teachers.TeacherSalaryConfigs;
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -88,6 +92,13 @@ public interface IAppDbContext
     DbSet<AcademicYear> AcademicYears { get; }
     DbSet<Student> Students { get; }
     DbSet<AttendanceLog> AttendanceLogs { get; }
+
+    // Education module (M-02)
+    DbSet<Subject> Subjects { get; }
+    DbSet<Teacher> Teachers { get; }
+    DbSet<TeacherSalaryConfig> TeacherSalaryConfigs { get; }
+    DbSet<SalaryPayment> SalaryPayments { get; }
+    DbSet<TeacherRating> TeacherRatings { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 

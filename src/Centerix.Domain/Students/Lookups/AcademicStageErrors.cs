@@ -31,6 +31,9 @@ public static class AcademicYearErrors
     public static Error NotFound =>
         Error.NotFound("AcademicYear.NotFound", "Academic year was not found");
 
+    public static Error StageNotFound =>
+        Error.NotFound("AcademicYear.StageNotFound", "The specified academic stage was not found in this tenant");
+
     public static Error DuplicateYearCode =>
         Error.Conflict("AcademicYear.DuplicateCode", "An academic year with this code already exists in this stage");
 }

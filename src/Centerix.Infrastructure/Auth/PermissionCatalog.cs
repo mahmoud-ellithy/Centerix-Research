@@ -55,6 +55,28 @@ public static class PermissionCatalog
         new("AcademicYears",  "Read",   "AcademicYears.Read",     "Read academic years"),
         new("AcademicYears",  "Update", "AcademicYears.Update",   "Update an academic year"),
 
+        new("Subjects",       "Create", "Subjects.Create",        "Create a subject"),
+        new("Subjects",       "Read",   "Subjects.Read",          "Read subjects"),
+        new("Subjects",       "Update", "Subjects.Update",        "Update a subject"),
+        new("Subjects",       "Delete", "Subjects.Delete",        "Delete a subject"),
+
+        new("Teachers",       "Create", "Teachers.Create",        "Create a teacher"),
+        new("Teachers",       "Read",   "Teachers.Read",          "Read teachers"),
+        new("Teachers",       "Update", "Teachers.Update",        "Update a teacher"),
+        new("Teachers",       "Delete", "Teachers.Delete",        "Soft-delete a teacher"),
+
+        new("TeacherSalaryConfigs", "Create", "TeacherSalaryConfigs.Create", "Create a teacher salary config"),
+        new("TeacherSalaryConfigs", "Read",   "TeacherSalaryConfigs.Read",   "Read teacher salary configs"),
+        new("TeacherSalaryConfigs", "Update", "TeacherSalaryConfigs.Update", "Update a teacher salary config"),
+        new("TeacherSalaryConfigs", "Delete", "TeacherSalaryConfigs.Delete", "Delete a teacher salary config"),
+
+        new("SalaryPayments", "Create", "SalaryPayments.Create",  "Create a salary payment"),
+        new("SalaryPayments", "Read",   "SalaryPayments.Read",    "Read salary payments"),
+        new("SalaryPayments", "Update", "SalaryPayments.Update",  "Mark a salary payment as paid/cancelled"),
+
+        new("TeacherRatings", "Create", "TeacherRatings.Create",  "Submit a teacher rating"),
+        new("TeacherRatings", "Read",   "TeacherRatings.Read",    "Read teacher ratings"),
+
         new("Branches",       "Create", "Branches.Create",        "Create a branch"),
         new("Branches",       "Read",   "Branches.Read",          "Read branches"),
         new("Branches",       "Update", "Branches.Update",        "Update a branch"),
