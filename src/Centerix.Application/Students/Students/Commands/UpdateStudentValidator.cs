@@ -26,7 +26,7 @@ public class UpdateStudentValidator : AbstractValidator<UpdateStudentCommand>
             .MaximumLength(200);
 
         RuleFor(x => x.Phone)
-            .MaximumLength(20);
+            .MaximumLength(30);
 
         RuleFor(x => x.DiscountValue)
             .GreaterThanOrEqualTo(0)

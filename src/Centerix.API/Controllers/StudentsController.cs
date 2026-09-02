@@ -1,4 +1,4 @@
-﻿using Centerix.Application.Common.Interfaces;
+using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Students.Students.Commands;
 using Centerix.Application.Students.Students.Queries;
 using Centerix.Infrastructure.Auth;
@@ -46,6 +46,7 @@ public class StudentsController(ILocalizer localizer, IMediator mediator) : ApiC
 
     [HttpPut("{id}")]
     [HasPermission(Permissions.Students.Update)]
+    [RequireFeature(FeatureCodes.StudentManagement)]
     public async Task<IActionResult> UpdateStudent(Guid id, UpdateStudentCommand command, CancellationToken cancellationToken)
     {
         if (id != command.Id)
@@ -62,6 +63,7 @@ public class StudentsController(ILocalizer localizer, IMediator mediator) : ApiC
 
     [HttpDelete("{id}")]
     [HasPermission(Permissions.Students.Delete)]
+    [RequireFeature(FeatureCodes.StudentManagement)]
     public async Task<IActionResult> DeleteStudent(Guid id, CancellationToken cancellationToken)
     {
         var result = await mediator.Send(new DeleteStudentCommand(id), cancellationToken);

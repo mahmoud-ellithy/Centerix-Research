@@ -1,3 +1,4 @@
+using FluentValidation;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -17,6 +18,32 @@ public class GlobalExceptionHandler(
         CancellationToken cancellationToken)
     {
         logger.LogError(exception, "Unhandled exception occurred during request processing.");
+
+        if (exception is ValidationException validationException)
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+
+            var errors = validationException.Errors
+                .Select(e => new
+                {
+                    propertyName = e.PropertyName,
+                    errorMessage = e.ErrorMessage
+                })
+                .ToList();
+
+            return await problemDetailsService.TryWriteAsync(new ProblemDetailsContext
+            {
+                HttpContext = httpContext,
+                Exception = exception,
+                ProblemDetails = new ProblemDetails
+                {
+                    Type = "https://tools.ietf.org/html/rfc9110#section-15.4.2",
+                    Title = localizer.Translate("Error:Validation"),
+                    Detail = "One or more validation errors occurred.",
+                    Extensions = { ["errors"] = errors }
+                }
+            });
+        }
 
         httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
 

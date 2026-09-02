@@ -892,4 +892,385 @@ public class Phase3AuthorizationHttpTests : IClassFixture<TestWebApplicationFact
         Assert.False(denied.IsSuccessStatusCode);
         Assert.NotEqual(HttpStatusCode.InternalServerError, denied.StatusCode);
     }
+
+    // ==================================================================
+    // Students: feature-gate enforcement on update and delete
+    // ==================================================================
+
+    [Fact]
+    [Trait("Category", "Phase3Http")]
+    public async Task Students_FeatureMissing_Update_IsDenied()
+    {
+        // Tenant has permission but NOT the StudentManagement feature.
+        var s = await SeedActiveTenantAsync(withStudentsFeature: false);
+
+        var branchCreate = await _client.SendAsync(Post(
+            "/api/branches", BranchPayload(), s.TenantAdminToken, s.Identifier));
+        Assert.Equal(HttpStatusCode.Created, branchCreate.StatusCode);
+
+        Guid branchId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            branchId = db.Branches.IgnoreQueryFilters().Single(b => b.TenantId == s.TenantId.ToString()).Id;
+        }
+
+        await _client.SendAsync(Post(
+            "/api/academicstages",
+            new { code = "K1", displayName = "K1", sortOrder = (byte)1 },
+            s.TenantAdminToken, s.Identifier));
+        int stageId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            stageId = db.AcademicStages.IgnoreQueryFilters().Single(x => x.TenantId == s.TenantId.ToString()).Id;
+        }
+
+        await _client.SendAsync(Post(
+            "/api/academicyears",
+            new { stageId, yearCode = "Y1", yearName = "Year 1" },
+            s.TenantAdminToken, s.Identifier));
+        int yearId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            yearId = db.AcademicYears.IgnoreQueryFilters().Single(y => y.TenantId == s.TenantId.ToString()).Id;
+        }
+
+        // Create a student while the feature is active (it was active at seed time for the
+        // supporting catalog — we only revoked it by passing withStudentsFeature: false).
+        // Since the feature is absent, even the branch/stage/year creates may be denied;
+        // so we first create the student with feature enabled to get an ID, then test update.
+        //
+        // Simpler approach: seed with feature, create student, then verify update is still
+        // gated correctly. But to isolate the feature gate on update specifically, we
+        // create the student via direct DB access and test the update endpoint under the
+        // feature-denied state.
+        Guid studentId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var student = Domain.Students.Students.Student.Create(
+                Guid.NewGuid(), branchId, stageId, yearId,
+                "طالب اختبار", "Test Student",
+                DateOnly.FromDateTime(DateTime.UtcNow),
+                Domain.Students.Enums.Gender.Male,
+                "01000000000", "QR-TEST",
+                null, null,
+                Domain.Students.Enums.StudentStatus.Active,
+                DateOnly.FromDateTime(DateTime.UtcNow)).Value;
+            db.Students.Add(student);
+            db.StampAddedTenantIds(s.TenantId.ToString());
+            await db.SaveChangesAsync();
+            studentId = student.Id;
+        }
+
+        var update = await _client.SendAsync(Put(
+            $"/api/students/{studentId}",
+            new
+            {
+                id = studentId,
+                branchId,
+                stageId,
+                yearId,
+                fullNameAr = "محدث",
+                fullNameEn = (string?)"Updated",
+                gender = 1,
+                phone = "01000000000",
+                status = 0
+            },
+            s.TenantAdminToken, s.Identifier));
+
+        Assert.Equal(HttpStatusCode.Forbidden, update.StatusCode);
+    }
+
+    [Fact]
+    [Trait("Category", "Phase3Http")]
+    public async Task Students_FeatureMissing_Delete_IsDenied()
+    {
+        // Tenant has permission but NOT the StudentManagement feature.
+        var s = await SeedActiveTenantAsync(withStudentsFeature: false);
+
+        var branchCreate = await _client.SendAsync(Post(
+            "/api/branches", BranchPayload(), s.TenantAdminToken, s.Identifier));
+        Assert.Equal(HttpStatusCode.Created, branchCreate.StatusCode);
+
+        Guid branchId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            branchId = db.Branches.IgnoreQueryFilters().Single(b => b.TenantId == s.TenantId.ToString()).Id;
+        }
+
+        await _client.SendAsync(Post(
+            "/api/academicstages",
+            new { code = "K1", displayName = "K1", sortOrder = (byte)1 },
+            s.TenantAdminToken, s.Identifier));
+        int stageId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            stageId = db.AcademicStages.IgnoreQueryFilters().Single(x => x.TenantId == s.TenantId.ToString()).Id;
+        }
+
+        await _client.SendAsync(Post(
+            "/api/academicyears",
+            new { stageId, yearCode = "Y1", yearName = "Year 1" },
+            s.TenantAdminToken, s.Identifier));
+        int yearId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            yearId = db.AcademicYears.IgnoreQueryFilters().Single(y => y.TenantId == s.TenantId.ToString()).Id;
+        }
+
+        // Create a student directly in the DB so we have an ID to test delete against.
+        Guid studentId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var student = Domain.Students.Students.Student.Create(
+                Guid.NewGuid(), branchId, stageId, yearId,
+                "طالب اختبار", "Test Student",
+                DateOnly.FromDateTime(DateTime.UtcNow),
+                Domain.Students.Enums.Gender.Male,
+                "01000000000", "QR-TEST2",
+                null, null,
+                Domain.Students.Enums.StudentStatus.Active,
+                DateOnly.FromDateTime(DateTime.UtcNow)).Value;
+            db.Students.Add(student);
+            db.StampAddedTenantIds(s.TenantId.ToString());
+            await db.SaveChangesAsync();
+            studentId = student.Id;
+        }
+
+        var deleted = await _client.SendAsync(Delete(
+            $"/api/students/{studentId}", s.TenantAdminToken, s.Identifier));
+
+        Assert.Equal(HttpStatusCode.Forbidden, deleted.StatusCode);
+    }
+
+    // ==================================================================
+    // Students: validation behavior (M-01)
+    // ==================================================================
+
+    [Fact]
+    [Trait("Category", "Phase3Http")]
+    public async Task Students_CreateWithEmptyFullNameAr_ReturnsBadRequest_NotFiveHundred()
+    {
+        var s = await SeedActiveTenantAsync();
+
+        var branchCreate = await _client.SendAsync(Post(
+            "/api/branches", BranchPayload(), s.TenantAdminToken, s.Identifier));
+        Assert.Equal(HttpStatusCode.Created, branchCreate.StatusCode);
+
+        Guid branchId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            branchId = db.Branches.IgnoreQueryFilters().Single(b => b.TenantId == s.TenantId.ToString()).Id;
+        }
+
+        await _client.SendAsync(Post(
+            "/api/academicstages",
+            new { code = "K1", displayName = "K1", sortOrder = (byte)1 },
+            s.TenantAdminToken, s.Identifier));
+        int stageId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            stageId = db.AcademicStages.IgnoreQueryFilters().Single(x => x.TenantId == s.TenantId.ToString()).Id;
+        }
+
+        await _client.SendAsync(Post(
+            "/api/academicyears",
+            new { stageId, yearCode = "Y1", yearName = "Year 1" },
+            s.TenantAdminToken, s.Identifier));
+        int yearId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            yearId = db.AcademicYears.IgnoreQueryFilters().Single(y => y.TenantId == s.TenantId.ToString()).Id;
+        }
+
+        // Empty fullNameAr should be caught by CreateStudentValidator → ValidationBehavior
+        var badCreate = await _client.SendAsync(Post(
+            "/api/students",
+            new
+            {
+                branchId,
+                stageId,
+                yearId,
+                fullNameAr = "",
+                qrCode = "QR-VALID1",
+                enrolledAt = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd")
+            },
+            s.TenantAdminToken, s.Identifier));
+
+        Assert.Equal(HttpStatusCode.BadRequest, badCreate.StatusCode);
+        Assert.NotEqual(HttpStatusCode.InternalServerError, badCreate.StatusCode);
+    }
+
+    [Fact]
+    [Trait("Category", "Phase3Http")]
+    public async Task Students_UpdateWithEmptyFullNameAr_ReturnsBadRequest_NotFiveHundred()
+    {
+        var s = await SeedActiveTenantAsync();
+
+        var branchCreate = await _client.SendAsync(Post(
+            "/api/branches", BranchPayload(), s.TenantAdminToken, s.Identifier));
+        Assert.Equal(HttpStatusCode.Created, branchCreate.StatusCode);
+
+        Guid branchId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            branchId = db.Branches.IgnoreQueryFilters().Single(b => b.TenantId == s.TenantId.ToString()).Id;
+        }
+
+        await _client.SendAsync(Post(
+            "/api/academicstages",
+            new { code = "K1", displayName = "K1", sortOrder = (byte)1 },
+            s.TenantAdminToken, s.Identifier));
+        int stageId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            stageId = db.AcademicStages.IgnoreQueryFilters().Single(x => x.TenantId == s.TenantId.ToString()).Id;
+        }
+
+        await _client.SendAsync(Post(
+            "/api/academicyears",
+            new { stageId, yearCode = "Y1", yearName = "Year 1" },
+            s.TenantAdminToken, s.Identifier));
+        int yearId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            yearId = db.AcademicYears.IgnoreQueryFilters().Single(y => y.TenantId == s.TenantId.ToString()).Id;
+        }
+
+        // Create a valid student first.
+        var create = await _client.SendAsync(Post(
+            "/api/students", StudentPayload(branchId, stageId, yearId),
+            s.TenantAdminToken, s.Identifier));
+        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+
+        Guid studentId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var student = db.Students.IgnoreQueryFilters().Single(x => x.TenantId == s.TenantId.ToString());
+            studentId = student.Id;
+        }
+
+        // Update with empty fullNameAr — should be caught by UpdateStudentValidator.
+        var badUpdate = await _client.SendAsync(Put(
+            $"/api/students/{studentId}",
+            new
+            {
+                id = studentId,
+                branchId,
+                stageId,
+                yearId,
+                fullNameAr = "",
+                status = 0
+            },
+            s.TenantAdminToken, s.Identifier));
+
+        Assert.Equal(HttpStatusCode.BadRequest, badUpdate.StatusCode);
+        Assert.NotEqual(HttpStatusCode.InternalServerError, badUpdate.StatusCode);
+    }
+
+    // ==================================================================
+    // Students: cross-tenant referential integrity on update (M-02)
+    // ==================================================================
+
+    [Fact]
+    [Trait("Category", "Phase3Http")]
+    public async Task Students_CrossTenantUpdateBranch_IsRejected()
+    {
+        var sA = await SeedActiveTenantAsync();
+        var sB = await SeedActiveTenantAsync();
+
+        // Tenant A creates a branch.
+        var branchA = await _client.SendAsync(Post(
+            "/api/branches", BranchPayload("A-Branch"),
+            sA.TenantAdminToken, sA.Identifier));
+        Assert.Equal(HttpStatusCode.Created, branchA.StatusCode);
+
+        Guid branchAId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            branchAId = db.Branches.IgnoreQueryFilters().Single(b => b.Name == "A-Branch").Id;
+        }
+
+        // Tenant B creates its own branch, stage, and year.
+        var branchB = await _client.SendAsync(Post(
+            "/api/branches", BranchPayload("B-Branch"),
+            sB.TenantAdminToken, sB.Identifier));
+        Assert.Equal(HttpStatusCode.Created, branchB.StatusCode);
+
+        Guid branchBId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            branchBId = db.Branches.IgnoreQueryFilters().Single(b => b.Name == "B-Branch").Id;
+        }
+
+        await _client.SendAsync(Post(
+            "/api/academicstages",
+            new { code = "K1", displayName = "K1", sortOrder = (byte)1 },
+            sB.TenantAdminToken, sB.Identifier));
+        int stageId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            stageId = db.AcademicStages.IgnoreQueryFilters().Single(x => x.TenantId == sB.TenantId.ToString()).Id;
+        }
+
+        await _client.SendAsync(Post(
+            "/api/academicyears",
+            new { stageId, yearCode = "Y1", yearName = "Year 1" },
+            sB.TenantAdminToken, sB.Identifier));
+        int yearId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            yearId = db.AcademicYears.IgnoreQueryFilters().Single(y => y.TenantId == sB.TenantId.ToString()).Id;
+        }
+
+        // Create a student in Tenant B.
+        var create = await _client.SendAsync(Post(
+            "/api/students", StudentPayload(branchBId, stageId, yearId),
+            sB.TenantAdminToken, sB.Identifier));
+        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+
+        Guid studentId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var student = db.Students.IgnoreQueryFilters().Single(x => x.TenantId == sB.TenantId.ToString());
+            studentId = student.Id;
+        }
+
+        // Tenant B tries to update the student to point at Tenant A's branch.
+        // The tenant-scoped AnyAsync check in UpdateStudentHandler must reject this.
+        var crossUpdate = await _client.SendAsync(Put(
+            $"/api/students/{studentId}",
+            new
+            {
+                id = studentId,
+                branchId = branchAId,
+                stageId,
+                yearId,
+                fullNameAr = "محدث",
+                fullNameEn = (string?)"Updated",
+                status = 0
+            },
+            sB.TenantAdminToken, sB.Identifier));
+
+        Assert.Equal(HttpStatusCode.NotFound, crossUpdate.StatusCode);
+    }
 }

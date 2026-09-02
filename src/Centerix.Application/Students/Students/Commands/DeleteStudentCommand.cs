@@ -10,6 +10,7 @@ public record DeleteStudentCommand(Guid Id) : IRequest<Result<Updated>>;
 
 public class DeleteStudentHandler(
     IAppDbContext dbContext,
+    ICurrentTenant currentTenant,
     IAuditWriter auditWriter) : IRequestHandler<DeleteStudentCommand, Result<Updated>>
 {
     public async Task<Result<Updated>> Handle(
@@ -18,6 +19,15 @@ public class DeleteStudentHandler(
     {
         var student = await dbContext.Students.FindAsync([request.Id], cancellationToken: cancellationToken);
         if (student is null)
+        {
+            return StudentErrors.NotFound;
+        }
+
+        // Explicit tenant ownership assertion — mirrors the same defensive pattern used in
+        // UpdateStudentHandler. The global query filter on IHasTenantId ensures FindAsync
+        // only returns rows for the current tenant, but we assert explicitly here so that
+        // any future change to the filter cannot silently expose cross-tenant deletion.
+        if (student.TenantId != currentTenant.TenantId)
         {
             return StudentErrors.NotFound;
         }
