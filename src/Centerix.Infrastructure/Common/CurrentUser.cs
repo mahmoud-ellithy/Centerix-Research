@@ -1,16 +1,22 @@
 using Centerix.Application.Common.Interfaces;
 using Centerix.Infrastructure.Auth;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using System.Security.Claims;
 
 namespace Centerix.Infrastructure.Common;
 
+// NOTE: Do NOT constructor-inject ITenantPermissionResolver (or anything that transitively depends
+// on AppDbContext) here. CurrentUser is constructed while the ISaveChangesInterceptor instances are
+// resolved inside the AppDbContext options pipeline (AddInfrastructure), so a dependency back to
+// AppDbContext creates a circular dependency that deadlocks startup during MigrateAsync (the app
+// hangs before binding ports, so no URL is ever printed). Resolve it lazily from the request scope.
 public class CurrentUser(
     IHttpContextAccessor httpContextAccessor,
-    ITenantPermissionResolver permissionResolver) : ICurrentUser
+    IServiceProvider serviceProvider) : ICurrentUser
 {
     private readonly IHttpContextAccessor _httpContextAccessor = httpContextAccessor;
-    private readonly ITenantPermissionResolver _permissionResolver = permissionResolver;
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
 
     private List<string>? _tenantPermissions;
 
@@ -52,7 +58,10 @@ public class CurrentUser(
     {
         try
         {
-            _tenantPermissions = (await _permissionResolver.ResolveAsync(cancellationToken)).ToList();
+            // Lazy resolution: the scoped resolver depends on AppDbContext, so it must never be
+            // constructed while the DbContext options/interceptors pipeline is being built.
+            var permissionResolver = _serviceProvider.GetRequiredService<ITenantPermissionResolver>();
+            _tenantPermissions = (await permissionResolver.ResolveAsync(cancellationToken)).ToList();
         }
         catch
         {

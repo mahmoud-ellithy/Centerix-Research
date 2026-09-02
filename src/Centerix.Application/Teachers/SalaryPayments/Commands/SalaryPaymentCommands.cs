@@ -104,7 +104,7 @@ public class MarkSalaryPaymentPaidHandler(
             payment.PaidAt
         });
 
-        var result = payment.MarkPaid(DateTimeOffset.UtcNow);
+        var result = payment.MarkPaid(DateTime.UtcNow);
         if (!result.IsSuccess)
             return result.Errors!;
 

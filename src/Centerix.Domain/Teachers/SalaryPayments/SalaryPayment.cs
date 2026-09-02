@@ -16,7 +16,7 @@ public class SalaryPayment : AuditableEntity<Guid>
     public decimal NetAmount { get; private set; }
 
     public SalaryPaymentStatus Status { get; private set; }
-    public DateTimeOffset? PaidAt { get; private set; }
+    public DateTime? PaidAt { get; private set; }
 
     public Teacher Teacher { get; private set; } = default!;
 
@@ -30,7 +30,7 @@ public class SalaryPayment : AuditableEntity<Guid>
         decimal grossAmount,
         decimal netAmount,
         SalaryPaymentStatus status,
-        DateTimeOffset? paidAt)
+        DateTime? paidAt)
         : base(id)
     {
         TeacherId = teacherId;
@@ -50,7 +50,7 @@ public class SalaryPayment : AuditableEntity<Guid>
         decimal grossAmount,
         decimal netAmount,
         SalaryPaymentStatus status,
-        DateTimeOffset? paidAt)
+        DateTime? paidAt)
     {
         if (teacherId == Guid.Empty)
             return SalaryPaymentErrors.TeacherIdRequired;
@@ -73,7 +73,7 @@ public class SalaryPayment : AuditableEntity<Guid>
         return new SalaryPayment(id, teacherId, periodMonth, periodYear, grossAmount, netAmount, status, paidAt);
     }
 
-    public Result<Updated> MarkPaid(DateTimeOffset paidAt)
+    public Result<Updated> MarkPaid(DateTime paidAt)
     {
         if (Status == SalaryPaymentStatus.Paid)
             return SalaryPaymentErrors.DuplicatePayment;

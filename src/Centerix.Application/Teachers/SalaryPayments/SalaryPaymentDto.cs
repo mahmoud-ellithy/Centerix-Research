@@ -9,6 +9,6 @@ public class SalaryPaymentDto
     public decimal GrossAmount { get; set; }
     public decimal NetAmount { get; set; }
     public string Status { get; set; } = default!;
-    public DateTimeOffset? PaidAt { get; set; }
+    public DateTime? PaidAt { get; set; }
     public string? TeacherName { get; set; }
 }
