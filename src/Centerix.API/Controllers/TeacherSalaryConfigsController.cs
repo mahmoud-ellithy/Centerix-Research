@@ -46,6 +46,7 @@ public class TeacherSalaryConfigsController(ILocalizer localizer, IMediator medi
 
     [HttpPut("{id}")]
     [HasPermission(Permissions.TeacherSalaryConfigs.Update)]
+    [RequireFeature(FeatureCodes.TeacherManagement)]
     public async Task<IActionResult> UpdateConfig(int id, UpdateTeacherSalaryConfigCommand command, CancellationToken cancellationToken)
     {
         if (id != command.Id)
@@ -62,6 +63,7 @@ public class TeacherSalaryConfigsController(ILocalizer localizer, IMediator medi
 
     [HttpDelete("{id}")]
     [HasPermission(Permissions.TeacherSalaryConfigs.Delete)]
+    [RequireFeature(FeatureCodes.TeacherManagement)]
     public async Task<IActionResult> DeleteConfig(int id, CancellationToken cancellationToken)
     {
         var result = await mediator.Send(new DeleteTeacherSalaryConfigCommand(id), cancellationToken);

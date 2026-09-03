@@ -54,6 +54,9 @@ public class SalaryPaymentConfiguration : IEntityTypeConfiguration<SalaryPayment
         builder.Property(p => p.CreatedBy).HasColumnName("CreatedBy");
         builder.Property(p => p.LastModifiedBy).HasColumnName("ModifiedBy");
 
+        builder.Property(p => p.RowVersion)
+            .IsRowVersion();
+
         builder.HasIndex(p => new { p.TeacherId, p.PeriodYear, p.PeriodMonth })
             .IsUnique()
             .HasDatabaseName("UX_SalaryPayments_Teacher_Period");

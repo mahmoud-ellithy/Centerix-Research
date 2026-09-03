@@ -1,6 +1,7 @@
 using FluentValidation;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 using Centerix.Application.Common.Interfaces;
@@ -41,6 +42,26 @@ public class GlobalExceptionHandler(
                     Title = localizer.Translate("Error:Validation"),
                     Detail = "One or more validation errors occurred.",
                     Extensions = { ["errors"] = errors }
+                }
+            });
+        }
+
+        // Optimistic concurrency conflict (Teacher RowVersion, SalaryPayment RowVersion):
+        // the row was modified by another request between the read and the save. This is a
+        // client-retryable conflict, mapped to 409 consistent with ErrorKind.Conflict.
+        if (exception is DbUpdateConcurrencyException)
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status409Conflict;
+
+            return await problemDetailsService.TryWriteAsync(new ProblemDetailsContext
+            {
+                HttpContext = httpContext,
+                Exception = exception,
+                ProblemDetails = new ProblemDetails
+                {
+                    Type = "https://tools.ietf.org/html/rfc9110#section-15.5.10",
+                    Title = localizer.Translate("Error:Concurrency"),
+                    Detail = "The record was modified by another request. Reload the record and try again.",
                 }
             });
         }

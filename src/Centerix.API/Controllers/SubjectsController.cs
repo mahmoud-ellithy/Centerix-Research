@@ -46,6 +46,7 @@ public class SubjectsController(ILocalizer localizer, IMediator mediator) : ApiC
 
     [HttpPut("{id}")]
     [HasPermission(Permissions.Subjects.Update)]
+    [RequireFeature(FeatureCodes.TeacherManagement)]
     public async Task<IActionResult> UpdateSubject(int id, UpdateSubjectCommand command, CancellationToken cancellationToken)
     {
         if (id != command.Id)
@@ -62,6 +63,7 @@ public class SubjectsController(ILocalizer localizer, IMediator mediator) : ApiC
 
     [HttpDelete("{id}")]
     [HasPermission(Permissions.Subjects.Delete)]
+    [RequireFeature(FeatureCodes.TeacherManagement)]
     public async Task<IActionResult> DeleteSubject(int id, CancellationToken cancellationToken)
     {
         var result = await mediator.Send(new DeleteSubjectCommand(id), cancellationToken);

@@ -157,8 +157,15 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
         {
             if (typeof(IHasTenantId).IsAssignableFrom(entityType.ClrType) && !entityType.IsOwned())
             {
+                // Soft-deletable aggregates (Teacher, Student, Branch) must keep BOTH invariants:
+                // tenant isolation AND the soft-delete tombstone filter. Their per-configuration
+                // HasQueryFilter(DeletedAtUtc == null) would otherwise be replaced here (EF keeps
+                // one filter per type — last wins), so those types get the composed filter instead.
+                var isSoftDeletable = typeof(SoftDeletableEntity).IsAssignableFrom(entityType.ClrType);
                 var apply = typeof(AppDbContext)
-                    .GetMethod(nameof(ApplyFilterFor), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                    .GetMethod(
+                        isSoftDeletable ? nameof(ApplySoftDeleteFilterFor) : nameof(ApplyFilterFor),
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
                     .MakeGenericMethod(entityType.ClrType);
                 apply.Invoke(this, new object[] { builder });
             }
@@ -169,6 +176,14 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
         where TEntity : class, IHasTenantId
     {
         builder.Entity<TEntity>().HasQueryFilter(e => e.TenantId == _currentTenant.TenantId);
+    }
+
+    private void ApplySoftDeleteFilterFor<TEntity>(ModelBuilder builder)
+        where TEntity : SoftDeletableEntity, IHasTenantId
+    {
+        builder.Entity<TEntity>().HasQueryFilter(e =>
+            e.TenantId == _currentTenant.TenantId &&
+            e.DeletedAtUtc == null);
     }
 
     private async Task DispatchDomainEventsAsync(CancellationToken cancellationToken)

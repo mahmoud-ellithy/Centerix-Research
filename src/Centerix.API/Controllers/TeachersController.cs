@@ -46,6 +46,7 @@ public class TeachersController(ILocalizer localizer, IMediator mediator) : ApiC
 
     [HttpPut("{id}")]
     [HasPermission(Permissions.Teachers.Update)]
+    [RequireFeature(FeatureCodes.TeacherManagement)]
     public async Task<IActionResult> UpdateTeacher(Guid id, UpdateTeacherCommand command, CancellationToken cancellationToken)
     {
         if (id != command.Id)
@@ -62,6 +63,7 @@ public class TeachersController(ILocalizer localizer, IMediator mediator) : ApiC
 
     [HttpDelete("{id}")]
     [HasPermission(Permissions.Teachers.Delete)]
+    [RequireFeature(FeatureCodes.TeacherManagement)]
     public async Task<IActionResult> DeleteTeacher(Guid id, CancellationToken cancellationToken)
     {
         var result = await mediator.Send(new DeleteTeacherCommand(id), cancellationToken);

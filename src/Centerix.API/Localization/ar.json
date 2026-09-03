@@ -57,6 +57,7 @@
   "Enum:ErrorKind.Unauthorized": "غير مصرح",
   "Enum:ErrorKind.Forbidden": "محظور",
   "Error:Application": "خطأ في التطبيق",
+  "Error:Concurrency": "تعارض في التزامن",
   "Error:TenantDeactivated": "المستأجر معطل",
   "Error:TenantDeactivatedDetail": "حساب المستأجر الخاص بك معطل",
   "Error:TenantExpired": "انتهت صلاحية المستأجر",

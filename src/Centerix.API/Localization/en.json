@@ -57,6 +57,7 @@
   "Enum:ErrorKind.Unauthorized": "Unauthorized",
   "Enum:ErrorKind.Forbidden": "Forbidden",
   "Error:Application": "Application error",
+  "Error:Concurrency": "Concurrency conflict",
   "Error:TenantDeactivated": "Tenant deactivated",
   "Error:TenantDeactivatedDetail": "Your tenant account has been deactivated.",
   "Error:TenantExpired": "Tenant expired",

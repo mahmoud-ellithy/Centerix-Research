@@ -2,7 +2,6 @@ namespace Centerix.Application.Teachers.SalaryPayments.Commands;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
-using Centerix.Domain.Teachers.Enums;
 using Centerix.Domain.Teachers.SalaryPayments;
 using Centerix.Domain.Teachers.Teachers;
 
@@ -17,8 +16,7 @@ public record CreateSalaryPaymentCommand(
     byte PeriodMonth,
     short PeriodYear,
     decimal GrossAmount,
-    decimal NetAmount,
-    SalaryPaymentStatus Status) : IRequest<Result<Created>>;
+    decimal NetAmount) : IRequest<Result<Created>>;
 
 public class CreateSalaryPaymentValidator : AbstractValidator<CreateSalaryPaymentCommand>
 {
@@ -53,9 +51,7 @@ public class CreateSalaryPaymentHandler(
             request.PeriodMonth,
             request.PeriodYear,
             request.GrossAmount,
-            request.NetAmount,
-            request.Status,
-            paidAt: null);
+            request.NetAmount);
 
         if (!result.IsSuccess)
             return result.Errors!;

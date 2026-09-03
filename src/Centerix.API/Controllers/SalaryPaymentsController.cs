@@ -46,6 +46,7 @@ public class SalaryPaymentsController(ILocalizer localizer, IMediator mediator) 
 
     [HttpPost("{id}/mark-paid")]
     [HasPermission(Permissions.SalaryPayments.Update)]
+    [RequireFeature(FeatureCodes.TeacherManagement)]
     public async Task<IActionResult> MarkPaid(Guid id, CancellationToken cancellationToken)
     {
         var result = await mediator.Send(new MarkSalaryPaymentPaidCommand(id), cancellationToken);
@@ -57,6 +58,7 @@ public class SalaryPaymentsController(ILocalizer localizer, IMediator mediator) 
 
     [HttpPost("{id}/cancel")]
     [HasPermission(Permissions.SalaryPayments.Update)]
+    [RequireFeature(FeatureCodes.TeacherManagement)]
     public async Task<IActionResult> Cancel(Guid id, CancellationToken cancellationToken)
     {
         var result = await mediator.Send(new CancelSalaryPaymentCommand(id), cancellationToken);

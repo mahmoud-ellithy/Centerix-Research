@@ -23,7 +23,7 @@ public class CreateStudentValidator : AbstractValidator<CreateStudentCommand>
             .MaximumLength(200);
 
         RuleFor(x => x.Phone)
-            .MaximumLength(20);
+            .MaximumLength(30);
 
         RuleFor(x => x.QRCode)
             .NotEmpty()
