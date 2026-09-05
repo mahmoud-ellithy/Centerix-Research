@@ -8,16 +8,17 @@ using MediatR;
 
 /// <summary>
 /// Command to create a new Contract with immutable commercial snapshot.
+/// Tenant is NOT accepted from the client; it is resolved from the authenticated tenant context.
 /// </summary>
 public record CreateContractCommand(
     Guid ContractId,
-    string TenantId,
     string ContractNumber,
     int PlanId,
     DateTime EffectiveAtUtc,
     DateTime EndsAtUtc,
     int DurationMonths,
     decimal MonthlyListPrice,
+    decimal ContractualMonthlyValue,
     string CurrencyCode,
     decimal ContractedAmount,
     decimal DiscountAmount,
@@ -50,28 +51,37 @@ public record CreateBenefitRequest(
 /// <summary>
 /// Handler for CreateContractCommand. Creates the Contract aggregate
 /// and persists the immutable commercial snapshot.
+/// Tenant is resolved from ICurrentTenant — never from client input.
 /// </summary>
 public class CreateContractHandler : IRequestHandler<CreateContractCommand, Result<Guid>>
 {
     private readonly IAppDbContext _dbContext;
+    private readonly ICurrentTenant _currentTenant;
 
-    public CreateContractHandler(IAppDbContext dbContext)
+    public CreateContractHandler(IAppDbContext dbContext, ICurrentTenant currentTenant)
     {
         _dbContext = dbContext;
+        _currentTenant = currentTenant;
     }
 
     public async Task<Result<Guid>> Handle(CreateContractCommand request, CancellationToken cancellationToken)
     {
+        // Resolve tenant from authenticated context — NEVER trust client-supplied TenantId
+        var tenantId = _currentTenant.TenantId;
+        if (string.IsNullOrWhiteSpace(tenantId))
+            return ContractErrors.TenantNotResolved;
+
         // Create the Contract aggregate
         var contractResult = Contract.Create(
             request.ContractId,
-            request.TenantId,
+            tenantId,
             request.ContractNumber,
             request.PlanId,
             request.EffectiveAtUtc,
             request.EndsAtUtc,
             request.DurationMonths,
             request.MonthlyListPrice,
+            request.ContractualMonthlyValue,
             request.CurrencyCode,
             request.ContractedAmount,
             request.DiscountAmount,
@@ -82,9 +92,14 @@ public class CreateContractHandler : IRequestHandler<CreateContractCommand, Resu
 
         var contract = contractResult.Value;
 
-        // Add pricing tier snapshots
+        // Validate and add pricing tier snapshots
+        var seenDurations = new HashSet<int>();
         foreach (var tierRequest in request.PricingTiers)
         {
+            // Domain-level duplicate duration validation
+            if (!seenDurations.Add(tierRequest.DurationMonths))
+                return ContractErrors.PricingTier.DuplicateDuration(tierRequest.DurationMonths);
+
             var tierResult = ContractPricingTier.Create(
                 tierRequest.Id,
                 contract.Id,
@@ -96,6 +111,10 @@ public class CreateContractHandler : IRequestHandler<CreateContractCommand, Resu
 
             if (!tierResult.IsSuccess)
                 return tierResult.Errors!;
+
+            // Validate tier currency matches contract currency
+            if (!string.Equals(tierResult.Value.CurrencyCode, contract.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+                return ContractErrors.PricingTier.CurrencyMismatch(contract.CurrencyCode);
 
             contract.AddPricingTier(tierResult.Value);
         }
@@ -114,6 +133,10 @@ public class CreateContractHandler : IRequestHandler<CreateContractCommand, Resu
 
             if (!benefitResult.IsSuccess)
                 return benefitResult.Errors!;
+
+            // Validate benefit currency matches contract currency
+            if (!string.Equals(benefitResult.Value.CurrencyCode, contract.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+                return ContractErrors.Benefit.CurrencyMismatch(contract.CurrencyCode);
 
             var addBenefitResult = contract.AddBenefit(benefitResult.Value);
             if (!addBenefitResult.IsSuccess)

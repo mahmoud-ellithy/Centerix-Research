@@ -32,6 +32,9 @@ public static class ContractErrors
     public static Error InvalidDiscountAmount =>
         Error.Validation("Contract.DiscountAmount_Invalid", "Discount amount cannot be negative.");
 
+    public static Error DiscountExceedsGrossValue =>
+        Error.Validation("Contract.DiscountExceedsGrossValue", "Discount amount cannot exceed the gross commercial value");
+
     public static Error InvalidDateRange =>
         Error.Validation("Contract.DateRange_Invalid", "End date must be after effective date.");
 
@@ -68,8 +71,9 @@ public static class ContractErrors
         public static Error InvalidCurrency =>
             Error.Validation("Contract.PricingTier.Currency_Invalid", "Currency code must be a valid ISO-4217 code (3 characters).");
 
-        public static Error DuplicateDuration =>
-            Error.Conflict("Contract.PricingTier.DuplicateDuration", "A pricing tier with this duration already exists.");
+        public static Error DuplicateDuration(int duration) =>
+            Error.Validation("Contract.PricingTier.DuplicateDuration",
+                $"A pricing tier with duration {duration} months already exists in this contract.");
     }
 
     public static class Benefit

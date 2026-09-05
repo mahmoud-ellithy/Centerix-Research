@@ -11,6 +11,9 @@ public static class ContractErrors
     public static Error TenantIdRequired =>
         Error.Validation("Contract.TenantId_Required", "Tenant is required");
 
+    public static Error TenantNotResolved =>
+        Error.Validation("Contract.TenantNotResolved", "No authorized tenant context found. Cannot create contract.");
+
     public static Error PlanIdRequired =>
         Error.Validation("Contract.PlanId_Required", "Plan ID is required");
 
@@ -23,6 +26,9 @@ public static class ContractErrors
     public static Error MonthlyListPriceInvalid =>
         Error.Validation("Contract.MonthlyListPrice_Invalid", "Monthly list price cannot be negative");
 
+    public static Error ContractualMonthlyValueInvalid =>
+        Error.Validation("Contract.ContractualMonthlyValue_Invalid", "Contractual monthly value cannot be negative");
+
     public static Error CurrencyInvalid =>
         Error.Validation("Contract.Currency_Invalid", "Currency must be a 3-letter ISO-4217 code");
 
@@ -34,6 +40,12 @@ public static class ContractErrors
 
     public static Error DiscountAmountInvalid =>
         Error.Validation("Contract.DiscountAmount_Invalid", "Discount amount cannot be negative");
+
+    public static Error DiscountExceedsGrossValue =>
+        Error.Validation("Contract.Discount_Exceeds_GrossValue", "Discount amount cannot exceed the gross commercial value");
+
+    public static Error ContractedAmountExceedsGrossValue =>
+        Error.Validation("Contract.ContractedAmount_Exceeds_GrossValue", "Contracted amount cannot exceed the gross commercial value");
 
     public static Error EndsAtBeforeEffectiveAt =>
         Error.Validation("Contract.EndsAt_Before_EffectiveAt", "End date must be on or after effective date");
@@ -51,44 +63,56 @@ public static class ContractErrors
 
     public static Error BenefitExceedsLimit =>
         Error.Validation("Contract.BenefitExceedsLimit",
-            "The total value of benefits exceeds three months of the contract's subscription value");
+            "The total value of benefits exceeds three months of the contract's contractual monthly value");
 
     public static class PricingTier
     {
         public static Error IdRequired =>
-            Error.Validation("ContractPricingTier.Id_Required", "Pricing tier ID is required");
+            Error.Validation("Contract.PricingTier.Id_Required", "Pricing tier ID is required");
 
         public static Error ContractIdRequired =>
-            Error.Validation("ContractPricingTier.ContractId_Required", "Contract ID is required");
+            Error.Validation("Contract.PricingTier.ContractId_Required", "Contract ID is required");
 
         public static Error InvalidDuration =>
-            Error.Validation("ContractPricingTier.Duration_Invalid", "Duration must be at least one month");
+            Error.Validation("Contract.PricingTier.Duration_Invalid", "Duration must be at least one month");
 
         public static Error InvalidPrice =>
-            Error.Validation("ContractPricingTier.Price_Invalid", "Tier price cannot be negative");
+            Error.Validation("Contract.PricingTier.Price_Invalid", "Tier price cannot be negative");
 
         public static Error InvalidMonthlyListPrice =>
-            Error.Validation("ContractPricingTier.MonthlyListPrice_Invalid", "Monthly list price cannot be negative");
+            Error.Validation("Contract.PricingTier.MonthlyListPrice_Invalid", "Monthly list price cannot be negative");
 
         public static Error InvalidCurrency =>
-            Error.Validation("ContractPricingTier.Currency_Invalid", "Currency must be a 3-letter ISO-4217 code");
+            Error.Validation("Contract.PricingTier.Currency_Invalid", "Currency must be a 3-letter ISO-4217 code");
+
+        public static Error DuplicateDuration(int duration) =>
+            Error.Validation("Contract.PricingTier.DuplicateDuration",
+                $"A pricing tier with duration {duration} months already exists in this contract");
+
+        public static Error CurrencyMismatch(string expectedCurrency) =>
+            Error.Validation("Contract.PricingTier.CurrencyMismatch",
+                $"Pricing tier currency must match contract currency '{expectedCurrency}'");
     }
 
     public static class Benefit
     {
         public static Error IdRequired =>
-            Error.Validation("ContractBenefit.Id_Required", "Benefit ID is required");
+            Error.Validation("Contract.Benefit.Id_Required", "Benefit ID is required");
 
         public static Error ContractIdRequired =>
-            Error.Validation("ContractBenefit.ContractId_Required", "Contract ID is required");
+            Error.Validation("Contract.Benefit.ContractId_Required", "Contract ID is required");
 
         public static Error NameRequired =>
-            Error.Validation("ContractBenefit.Name_Required", "Benefit name is required");
+            Error.Validation("Contract.Benefit.Name_Required", "Benefit name is required");
 
         public static Error InvalidValue =>
-            Error.Validation("ContractBenefit.Value_Invalid", "Benefit value cannot be negative");
+            Error.Validation("Contract.Benefit.Value_Invalid", "Benefit value cannot be negative");
 
         public static Error InvalidCurrency =>
-            Error.Validation("ContractBenefit.Currency_Invalid", "Currency must be a 3-letter ISO-4217 code");
+            Error.Validation("Contract.Benefit.Currency_Invalid", "Currency must be a 3-letter ISO-4217 code");
+
+        public static Error CurrencyMismatch(string expectedCurrency) =>
+            Error.Validation("Contract.Benefit.CurrencyMismatch",
+                $"Benefit currency must match contract currency '{expectedCurrency}'");
     }
 }

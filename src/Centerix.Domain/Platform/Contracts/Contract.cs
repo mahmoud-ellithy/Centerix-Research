@@ -14,8 +14,10 @@ using Centerix.Domain.Platform.Subscriptions;
 /// </summary>
 /// <remarks>
 /// Commercial snapshot rationale:
-/// - MonthlyListPrice, PricingTiers, ContractedAmount: the agreed commercial terms;
-///   a later plan repricing must not change what the tenant pays under this Contract.
+/// - MonthlyListPrice, ContractualMonthlyValue, PricingTiers, ContractedAmount: the agreed
+///   commercial terms; a later plan repricing must not change what the tenant pays under this Contract.
+/// - ContractualMonthlyValue: the explicit monthly value used for the 3-month benefit cap calculation.
+///   This is distinct from Plan list price and is frozen at contract creation.
 /// - EffectiveAtUtc/EndsAtUtc, DurationMonths: the agreed contract term frozen at creation.
 ///
 /// Lifecycle: Draft -> PendingApproval -> Active -> Suspended -> Expired/Terminated
@@ -47,6 +49,12 @@ public class Contract : AuditableEntity<Guid>
     /// Used for calculations when no specific pricing tier applies.
     /// </summary>
     public decimal MonthlyListPrice { get; private set; }
+
+    /// <summary>
+    /// The contractual monthly value used for the 3-month benefit cap calculation.
+    /// This is an immutable snapshot value distinct from Plan list price.
+    /// </summary>
+    public decimal ContractualMonthlyValue { get; private set; }
 
     /// <summary>Currency code (ISO-4217, e.g., EGP, USD).</summary>
     public string CurrencyCode { get; private set; } = default!;
@@ -84,6 +92,7 @@ public class Contract : AuditableEntity<Guid>
         DateTime endsAtUtc,
         int durationMonths,
         decimal monthlyListPrice,
+        decimal contractualMonthlyValue,
         string currencyCode,
         decimal contractedAmount,
         decimal discountAmount,
@@ -98,6 +107,7 @@ public class Contract : AuditableEntity<Guid>
         EndsAtUtc = endsAtUtc;
         DurationMonths = durationMonths;
         MonthlyListPrice = monthlyListPrice;
+        ContractualMonthlyValue = contractualMonthlyValue;
         CurrencyCode = currencyCode;
         ContractedAmount = contractedAmount;
         DiscountAmount = discountAmount;
@@ -116,6 +126,7 @@ public class Contract : AuditableEntity<Guid>
         DateTime endsAtUtc,
         int durationMonths,
         decimal monthlyListPrice,
+        decimal contractualMonthlyValue,
         string currencyCode,
         decimal contractedAmount,
         decimal discountAmount = 0,
@@ -142,6 +153,9 @@ public class Contract : AuditableEntity<Guid>
         if (monthlyListPrice < 0)
             return ContractErrors.MonthlyListPriceInvalid;
 
+        if (contractualMonthlyValue < 0)
+            return ContractErrors.ContractualMonthlyValueInvalid;
+
         if (contractedAmount < 0)
             return ContractErrors.ContractedAmountInvalid;
 
@@ -154,6 +168,15 @@ public class Contract : AuditableEntity<Guid>
         if (endsAtUtc != default && endsAtUtc < effectiveAtUtc)
             return ContractErrors.EndsAtBeforeEffectiveAt;
 
+        // Validate discount does not exceed the gross commercial base (monthly * duration)
+        var grossValue = monthlyListPrice * durationMonths;
+        if (discountAmount > grossValue)
+            return ContractErrors.DiscountExceedsGrossValue;
+
+        // Validate contracted amount is consistent: should not exceed gross value
+        if (contractedAmount > grossValue)
+            return ContractErrors.ContractedAmountExceedsGrossValue;
+
         var contract = new Contract(
             id,
             tenantId.Trim(),
@@ -164,6 +187,7 @@ public class Contract : AuditableEntity<Guid>
             endsAtUtc,
             durationMonths,
             monthlyListPrice,
+            contractualMonthlyValue,
             currencyCode.Trim().ToUpperInvariant(),
             contractedAmount,
             discountAmount,
@@ -246,23 +270,38 @@ public class Contract : AuditableEntity<Guid>
 
     /// <summary>
     /// Adds a pricing tier snapshot to this contract.
+    /// Validates no duplicate duration exists within this contract.
     /// </summary>
-    public void AddPricingTier(ContractPricingTier tier)
+    public Result<Updated> AddPricingTier(ContractPricingTier tier)
     {
         if (tier == null) throw new ArgumentNullException(nameof(tier));
+
+        // Validate no duplicate duration within this contract
+        if (_pricingTiers.Any(t => t.DurationMonths == tier.DurationMonths))
+            return ContractErrors.PricingTier.DuplicateDuration(tier.DurationMonths);
+
+        // Validate tier currency matches contract currency
+        if (!string.Equals(tier.CurrencyCode, CurrencyCode, StringComparison.OrdinalIgnoreCase))
+            return ContractErrors.PricingTier.CurrencyMismatch(CurrencyCode);
+
         _pricingTiers.Add(tier);
+        return Result.Updated;
     }
 
     /// <summary>
     /// Adds a benefit/gift to this contract. Validates the financial invariant:
-    /// total benefit value must not exceed three months of the contract's subscription value.
+    /// total benefit value must not exceed three months of the contract's contractual monthly value.
     /// </summary>
     public Result<Updated> AddBenefit(ContractBenefit benefit)
     {
         if (benefit == null) throw new ArgumentNullException(nameof(benefit));
 
+        // Validate benefit currency matches contract currency
+        if (!string.Equals(benefit.CurrencyCode, CurrencyCode, StringComparison.OrdinalIgnoreCase))
+            return ContractErrors.Benefit.CurrencyMismatch(CurrencyCode);
+
         var currentTotal = _benefits.Sum(b => b.ContractualValue);
-        var threeMonthsValue = MonthlyListPrice * 3;
+        var threeMonthsValue = ContractualMonthlyValue * 3;
 
         if (currentTotal + benefit.ContractualValue > threeMonthsValue)
             return ContractErrors.BenefitExceedsLimit;

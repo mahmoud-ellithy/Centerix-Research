@@ -15,7 +15,7 @@ using Centerix.Domain.Platform.Contracts.Enums;
 ///   Physical Gift: Desktop Computer, Value = 8,000
 ///
 /// The financial invariant requires that the total value of all benefits under a Contract
-/// must not exceed three months of the customer's contractual subscription value.
+/// must not exceed three months of the customer's contractual monthly value.
 /// </remarks>
 public class ContractBenefit : Entity
 {
@@ -42,6 +42,9 @@ public class ContractBenefit : Entity
 
     /// <summary>UTC timestamp when the benefit was granted/delivered.</summary>
     public DateTime? GrantedAtUtc { get; private set; }
+
+    /// <summary>The Contract this benefit belongs to.</summary>
+    public Contract Contract { get; private set; } = default!;
 
     private ContractBenefit() { }
 

@@ -34,6 +34,17 @@ public class TenantPlanConfiguration : IEntityTypeConfiguration<TenantPlan>
             .HasForeignKey(tp => tp.PlanId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // Explicit FK to Contract: a subscription may be linked to a commercial agreement.
+        // DeleteBehavior.Restrict: a contract must not be deleted while it has active subscriptions.
+        builder.HasOne(tp => tp.Contract)
+            .WithMany(c => c.Subscriptions)
+            .HasForeignKey(tp => tp.ContractId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // Index for FK lookups
+        builder.HasIndex(tp => tp.ContractId)
+            .HasDatabaseName("IX_TenantPlans_ContractId");
+
         builder.Property(tp => tp.TenantId)
             .HasMaxLength(450)
             .IsRequired();

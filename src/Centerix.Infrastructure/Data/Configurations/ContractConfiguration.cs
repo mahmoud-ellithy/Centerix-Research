@@ -56,6 +56,10 @@ public class ContractConfiguration : IEntityTypeConfiguration<Contract>
             .HasPrecision(18, 2)
             .IsRequired();
 
+        builder.Property(c => c.ContractualMonthlyValue)
+            .HasPrecision(18, 2)
+            .IsRequired();
+
         builder.Property(c => c.CurrencyCode)
             .HasMaxLength(3)
             .IsRequired();
@@ -92,17 +96,17 @@ public class ContractConfiguration : IEntityTypeConfiguration<Contract>
 
         // Navigation: Benefits (cascade delete)
         builder.HasMany(c => c.Benefits)
-            .WithOne()
-            .HasForeignKey("ContractId")
+            .WithOne(b => b.Contract)
+            .HasForeignKey(b => b.ContractId)
             .OnDelete(DeleteBehavior.Cascade);
 
         builder.Navigation(c => c.Benefits)
             .UsePropertyAccessMode(PropertyAccessMode.Field);
 
-        // Navigation: Subscriptions (TenantPlans linked via shadow foreign key)
+        // Navigation: Subscriptions (TenantPlans linked via explicit foreign key)
         builder.HasMany(c => c.Subscriptions)
-            .WithOne()
-            .HasForeignKey("ContractId")
+            .WithOne(tp => tp.Contract)
+            .HasForeignKey(tp => tp.ContractId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.Navigation(c => c.Subscriptions)

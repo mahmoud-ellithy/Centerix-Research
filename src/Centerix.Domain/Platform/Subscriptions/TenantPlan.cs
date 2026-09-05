@@ -4,6 +4,7 @@ using Centerix.Domain.Common;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Subscriptions.Enums;
 using Centerix.Domain.Platform.Subscriptions.Events;
+using Centerix.Domain.Platform.Contracts;
 
 /// <summary>
 /// A tenant's commercial subscription: an immutable SNAPSHOT of the plan terms actually granted,
@@ -25,6 +26,8 @@ using Centerix.Domain.Platform.Subscriptions.Events;
 ///    future subscriptions.
 /// Feature entitlement is snapshotted separately in TenantPlanFeature rows (codes copied at
 /// creation).
+///
+/// A Subscription (TenantPlan) may belong to a Contract (commercial agreement) via ContractId.
 /// </remarks>
 public class TenantPlan : AuditableEntity<Guid>
 {
@@ -33,6 +36,17 @@ public class TenantPlan : AuditableEntity<Guid>
     public byte[] RowVersion { get; private set; } = [];
 
     public int PlanId { get; private set; }
+
+    /// <summary>
+    /// The Contract this subscription executes. Optional: a subscription may exist
+    /// without a contract in legacy/pre-contract scenarios. Null when not contract-linked.
+    /// </summary>
+    public Guid? ContractId { get; private set; }
+
+    /// <summary>
+    /// Navigation property to the associated Contract (commercial agreement).
+    /// </summary>
+    public Contracts.Contract? Contract { get; private set; }
 
     // TenantId is INHERITED from AuditableEntity<T> (IHasTenantId): it drives the global
     // tenant query filter and must not be shadowed. Platform-admin flows bypass the filter

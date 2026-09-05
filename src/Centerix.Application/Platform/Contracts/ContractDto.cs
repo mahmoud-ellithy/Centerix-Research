@@ -14,6 +14,7 @@ public class ContractDto
     public DateTime EndsAtUtc { get; set; }
     public int DurationMonths { get; set; }
     public decimal MonthlyListPrice { get; set; }
+    public decimal ContractualMonthlyValue { get; set; }
     public string CurrencyCode { get; set; } = default!;
     public decimal ContractedAmount { get; set; }
     public decimal DiscountAmount { get; set; }
