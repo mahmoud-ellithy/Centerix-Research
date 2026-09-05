@@ -20,6 +20,7 @@ using Centerix.Domain.Platform.Subscriptions.AddOns;
 using Centerix.Domain.Platform.Subscriptions.LimitOverrides;
 using Centerix.Domain.Platform.Subscriptions.UsageCounters;
 using Centerix.Domain.Platform.Tenants;
+using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Students.Attendance;
 using Centerix.Domain.Students.Branches;
 using Centerix.Domain.Students.Lookups;
@@ -99,6 +100,11 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     public DbSet<TenantProvisioningJob> TenantProvisioningJobs { get; set; } = default!;
     public DbSet<TenantSchemaVersion> TenantSchemaVersions { get; set; } = default!;
 
+    // Phase 7: Contracts (commercial agreements)
+    public DbSet<Contract> Contracts { get; set; } = default!;
+    public DbSet<ContractPricingTier> ContractPricingTiers { get; set; } = default!;
+    public DbSet<ContractBenefit> ContractBenefits { get; set; } = default!;
+
     // Education module (M-01)
     public DbSet<Branch> Branches { get; set; } = default!;
     public DbSet<AcademicStage> AcademicStages { get; set; } = default!;
@@ -134,6 +140,11 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     }
 
     public bool IsRelational => Database.IsRelational();
+
+    /// <summary>
+    /// The AUTHORIZED tenant ID for this request. Delegates to ICurrentTenant for the verified tenant.
+    /// </summary>
+    public string? TenantId => _currentTenant.TenantId;
 
     public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
         => Database.BeginTransactionAsync(cancellationToken);

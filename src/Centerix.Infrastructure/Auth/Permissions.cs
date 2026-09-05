@@ -216,6 +216,16 @@ public static class Permissions
     }
 
     /// <summary>
+    /// Phase 7: Contracts (commercial agreements). Tenant-scoped: each tenant's contracts
+    /// are isolated and accessed only through a verified tenant context.
+    /// </summary>
+    public static class Contracts
+    {
+        public const string Create = "Contracts.Create";
+        public const string Read = "Contracts.Read";
+    }
+
+    /// <summary>
     /// All permission codes registered in the canonical catalog (see <see cref="PermissionCatalog"/>).
     /// </summary>
     public static string[] GetAll() => PermissionCatalog.All.Select(e => e.Code).ToArray();

@@ -16,6 +16,7 @@ using Centerix.Domain.Platform.Subscriptions.AddOns;
 using Centerix.Domain.Platform.Subscriptions.LimitOverrides;
 using Centerix.Domain.Platform.Subscriptions.UsageCounters;
 using Centerix.Domain.Platform.Tenants;
+using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Students.Attendance;
 using Centerix.Domain.Students.Branches;
 using Centerix.Domain.Students.Lookups;
@@ -70,6 +71,17 @@ public interface IAppDbContext
     DbSet<TenantSetting> TenantSettings { get; }
     DbSet<TenantProvisioningJob> TenantProvisioningJobs { get; }
     DbSet<TenantSchemaVersion> TenantSchemaVersions { get; }
+
+    // Phase 7: Contracts (commercial agreements)
+    DbSet<Contract> Contracts { get; }
+    DbSet<ContractPricingTier> ContractPricingTiers { get; }
+    DbSet<ContractBenefit> ContractBenefits { get; }
+
+    /// <summary>
+    /// The AUTHORIZED tenant ID for this request, set from ICurrentTenant.
+    /// Handlers that need the tenant for entity creation read this value.
+    /// </summary>
+    string? TenantId { get; }
 
     // Billing: Invoicing & Payments
     DbSet<Invoice> Invoices { get; }

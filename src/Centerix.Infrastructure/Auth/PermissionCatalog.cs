@@ -117,5 +117,9 @@ public static class PermissionCatalog
 
         new("Memberships",    "Read",   "Memberships.Read",      "Read tenant memberships"),
         new("Memberships",    "Manage", "Memberships.Manage",    "Manage tenant memberships"),
+
+        // Phase 7: Contracts (commercial agreements)
+        new("Contracts",      "Create", "Contracts.Create",      "Create a contract"),
+        new("Contracts",      "Read",   "Contracts.Read",        "Read contracts"),
     ];
 }
