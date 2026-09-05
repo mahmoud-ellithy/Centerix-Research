@@ -207,6 +207,16 @@ public class TenantPlan : AuditableEntity<Guid>
         return Result.Updated;
     }
 
+    /// <summary>Links this subscription to a Contract.</summary>
+    public Result<Updated> LinkToContract(Guid contractId)
+    {
+        if (contractId == Guid.Empty)
+            return Error.Validation("Subscription.InvalidContractId", "ContractId must not be empty.");
+
+        ContractId = contractId;
+        return Result.Updated;
+    }
+
     /// <summary>Whether this subscription grants access as of <paramref name="utcNow"/>.</summary>
     public bool IsActiveAsOf(DateTime utcNow) =>
         Status == SubscriptionStatus.Active && utcNow < EffectiveEndsAtUtc;

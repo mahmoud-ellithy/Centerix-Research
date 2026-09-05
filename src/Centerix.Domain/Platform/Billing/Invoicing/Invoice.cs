@@ -18,6 +18,11 @@ public class Invoice : AuditableEntity<Guid>
     public DateTime? IssuedAt { get; private set; }
     public DateTime? DueAt { get; private set; }
 
+    // Commercial traceability (optional for legacy invoices, required for new invoices)
+    public Guid? ContractId { get; private set; }
+    public Guid? SubscriptionId { get; private set; }
+    public Guid? BillingCycleId { get; private set; }
+
     private readonly List<InvoiceLine> _invoiceLines = [];
     public IReadOnlyList<InvoiceLine> InvoiceLines => _invoiceLines.AsReadOnly();
 
@@ -35,7 +40,10 @@ public class Invoice : AuditableEntity<Guid>
         decimal discountAmount,
         decimal taxAmount,
         decimal totalAmount,
-        InvoiceStatus status)
+        InvoiceStatus status,
+        Guid? contractId = null,
+        Guid? subscriptionId = null,
+        Guid? billingCycleId = null)
         : base(id)
     {
         InvoiceNumber = invoiceNumber;
@@ -46,6 +54,9 @@ public class Invoice : AuditableEntity<Guid>
         TaxAmount = taxAmount;
         TotalAmount = totalAmount;
         Status = status;
+        ContractId = contractId;
+        SubscriptionId = subscriptionId;
+        BillingCycleId = billingCycleId;
     }
 
     public static Result<Invoice> Create(
@@ -56,7 +67,10 @@ public class Invoice : AuditableEntity<Guid>
         decimal subtotal,
         decimal discountAmount,
         decimal taxAmount,
-        decimal totalAmount)
+        decimal totalAmount,
+        Guid? contractId = null,
+        Guid? subscriptionId = null,
+        Guid? billingCycleId = null)
     {
         if (string.IsNullOrWhiteSpace(invoiceNumber))
             return InvoiceErrors.InvoiceNumberRequired;
@@ -70,7 +84,9 @@ public class Invoice : AuditableEntity<Guid>
         if (totalAmount < 0)
             return InvoiceErrors.InvalidTotalAmount;
 
-        return new Invoice(id, invoiceNumber, periodStart, periodEnd, subtotal, discountAmount, taxAmount, totalAmount, InvoiceStatus.Draft);
+        return new Invoice(
+            id, invoiceNumber, periodStart, periodEnd, subtotal, discountAmount, taxAmount, totalAmount,
+            InvoiceStatus.Draft, contractId, subscriptionId, billingCycleId);
     }
 
     public Result<Updated> Issue(DateTime utcNow, DateTime? dueAt = null)

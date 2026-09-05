@@ -1,3 +1,5 @@
+namespace Centerix.Infrastructure.Data;
+
 using System.Linq.Expressions;
 
 using Centerix.Application.Common.Interfaces;
@@ -6,6 +8,7 @@ using Centerix.Domain.Authentication;
 using Centerix.Domain.Common;
 using Centerix.Domain.Platform.Auditing;
 using Centerix.Domain.Platform.Authorization;
+using Centerix.Domain.Platform.Billing.BillingCycles;
 using Centerix.Domain.Platform.Billing.Credits;
 using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Features;
@@ -36,8 +39,6 @@ using MediatR;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
-
-namespace Centerix.Infrastructure.Data;
 
 public class AppDbContext : IdentityDbContext, IAppDbContext
 {
@@ -104,6 +105,9 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     public DbSet<Contract> Contracts { get; set; } = default!;
     public DbSet<ContractPricingTier> ContractPricingTiers { get; set; } = default!;
     public DbSet<ContractBenefit> ContractBenefits { get; set; } = default!;
+
+    // Billing foundation
+    public DbSet<BillingCycle> BillingCycles { get; set; } = default!;
 
     // Education module (M-01)
     public DbSet<Branch> Branches { get; set; } = default!;
@@ -219,4 +223,3 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
         }
     }
 }
-

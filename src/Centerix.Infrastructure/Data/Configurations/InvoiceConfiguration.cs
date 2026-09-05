@@ -59,6 +59,15 @@ public class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
             .HasMaxLength(450)
             .IsRequired();
 
+        builder.Property(i => i.ContractId)
+            .HasColumnType("uniqueidentifier");
+
+        builder.Property(i => i.SubscriptionId)
+            .HasColumnType("uniqueidentifier");
+
+        builder.Property(i => i.BillingCycleId)
+            .HasColumnType("uniqueidentifier");
+
         builder.Property(i => i.CreatedAtUtc)
             .HasColumnName("CreatedAt");
 
@@ -76,5 +85,8 @@ public class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         builder.HasIndex(i => i.TenantId);
         builder.HasIndex(i => new { i.TenantId, i.Status });
         builder.HasIndex(i => new { i.TenantId, i.PeriodStart, i.PeriodEnd });
+        builder.HasIndex(i => i.ContractId);
+        builder.HasIndex(i => i.SubscriptionId);
+        builder.HasIndex(i => i.BillingCycleId);
     }
 }

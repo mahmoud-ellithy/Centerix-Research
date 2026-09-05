@@ -3,6 +3,7 @@ using Centerix.Domain.Authentication;
 using Centerix.Domain.Common;
 using Centerix.Domain.Platform.Auditing;
 using Centerix.Domain.Platform.Authorization;
+using Centerix.Domain.Platform.Billing.BillingCycles;
 using Centerix.Domain.Platform.Billing.Credits;
 using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Features;
@@ -83,10 +84,11 @@ public interface IAppDbContext
     /// </summary>
     string? TenantId { get; }
 
-    // Billing: Invoicing & Payments
+    // Billing: Invoicing, Cycles & Payments
     DbSet<Invoice> Invoices { get; }
     DbSet<InvoiceLine> InvoiceLines { get; }
     DbSet<PlatformPayment> PlatformPayments { get; }
+    DbSet<BillingCycle> BillingCycles { get; }
 
     // Billing: Credits
     DbSet<TenantCredit> TenantCredits { get; }
