@@ -6,6 +6,7 @@ using Centerix.Domain.Platform.Authorization;
 using Centerix.Domain.Platform.Billing.BillingCycles;
 using Centerix.Domain.Platform.Billing.Credits;
 using Centerix.Domain.Platform.Billing.Invoicing;
+using Centerix.Domain.Platform.Billing.Payments;
 using Centerix.Domain.Platform.Features;
 using Centerix.Domain.Platform.Leads;
 using Centerix.Domain.Platform.Operations;
@@ -89,6 +90,10 @@ public interface IAppDbContext
     DbSet<InvoiceLine> InvoiceLines { get; }
     DbSet<PlatformPayment> PlatformPayments { get; }
     DbSet<BillingCycle> BillingCycles { get; }
+    DbSet<Payment> Payments { get; }
+    DbSet<PaymentAllocation> PaymentAllocations { get; }
+    DbSet<PaymentReceipt> PaymentReceipts { get; }
+    DbSet<CustomerLedgerEntry> CustomerLedgerEntries { get; }
 
     // Billing: Credits
     DbSet<TenantCredit> TenantCredits { get; }

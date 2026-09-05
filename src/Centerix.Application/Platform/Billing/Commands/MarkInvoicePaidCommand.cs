@@ -25,7 +25,7 @@ public class MarkInvoicePaidHandler(
             Status = invoice.Status.ToString()
         });
 
-        var markPaidResult = invoice.MarkPaid();
+        var markPaidResult = invoice.UpdatePaymentStatus();
         if (!markPaidResult.IsSuccess)
         {
             return markPaidResult.Errors!;

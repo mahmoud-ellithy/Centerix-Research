@@ -11,6 +11,7 @@ using Centerix.Domain.Platform.Authorization;
 using Centerix.Domain.Platform.Billing.BillingCycles;
 using Centerix.Domain.Platform.Billing.Credits;
 using Centerix.Domain.Platform.Billing.Invoicing;
+using Centerix.Domain.Platform.Billing.Payments;
 using Centerix.Domain.Platform.Features;
 using Centerix.Domain.Platform.Leads;
 using Centerix.Domain.Platform.Plans;
@@ -63,6 +64,10 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     public DbSet<Invoice> Invoices { get; set; } = default!;
     public DbSet<InvoiceLine> InvoiceLines { get; set; } = default!;
     public DbSet<PlatformPayment> PlatformPayments { get; set; } = default!;
+    public DbSet<Payment> Payments { get; set; } = default!;
+    public DbSet<PaymentAllocation> PaymentAllocations { get; set; } = default!;
+    public DbSet<PaymentReceipt> PaymentReceipts { get; set; } = default!;
+    public DbSet<CustomerLedgerEntry> CustomerLedgerEntries { get; set; } = default!;
     public DbSet<TenantCredit> TenantCredits { get; set; } = default!;
     public DbSet<PlatformAuditLog> PlatformAuditLogs { get; set; } = default!;
     public DbSet<TenantCRMLead> TenantCRMLeads { get; set; } = default!;

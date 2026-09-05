@@ -196,6 +196,34 @@ public static class Permissions
         public const string Delete = "Invoices.Delete";
     }
 
+    /// <summary>
+    /// Payment module: independent financial transactions that may settle one or multiple invoices.
+    /// Payments.Create/Read/Complete are tenant-scoped; Payments.Allocate links payments to invoices.
+    /// </summary>
+    public static class Payments
+    {
+        public const string Create = "Payments.Create";
+        public const string Read = "Payments.Read";
+        public const string Complete = "Payments.Complete";
+        public const string Allocate = "Payments.Allocate";
+    }
+
+    /// <summary>
+    /// Payment receipts: immutable proof of payment issued upon completion.
+    /// </summary>
+    public static class Receipts
+    {
+        public const string Read = "Receipts.Read";
+    }
+
+    /// <summary>
+    /// Customer Ledger: immutable financial transactions for audit trail.
+    /// </summary>
+    public static class Ledger
+    {
+        public const string Read = "Ledger.Read";
+    }
+
     public static class TenantCredits
     {
         public const string Create = "TenantCredits.Create";

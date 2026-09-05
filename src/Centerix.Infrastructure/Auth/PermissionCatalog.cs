@@ -108,6 +108,15 @@ public static class PermissionCatalog
         new("Invoices",       "Update", "Invoices.Update",       "Update an invoice"),
         new("Invoices",       "Delete", "Invoices.Delete",       "Delete an invoice"),
 
+        new("Payments",       "Create", "Payments.Create",       "Create a payment"),
+        new("Payments",       "Read",   "Payments.Read",         "Read payments"),
+        new("Payments",       "Complete", "Payments.Complete",   "Complete a payment"),
+        new("Payments",       "Allocate", "Payments.Allocate",   "Allocate payment to invoice"),
+
+        new("Receipts",       "Read",   "Receipts.Read",         "Read payment receipts"),
+
+        new("Ledger",         "Read",   "Ledger.Read",           "Read customer ledger entries"),
+
         new("TenantCredits",  "Create", "TenantCredits.Create",  "Create a tenant credit"),
         new("TenantCredits",  "Read",   "TenantCredits.Read",    "Read tenant credits"),
 
