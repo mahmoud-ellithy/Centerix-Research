@@ -41,6 +41,9 @@ public class CustomerLedgerEntryConfiguration : IEntityTypeConfiguration<Custome
         builder.Property(e => e.PaymentId)
             .HasColumnType("uniqueidentifier");
 
+        builder.Property(e => e.PaymentAllocationId)
+            .HasColumnType("uniqueidentifier");
+
         builder.Property(e => e.CreditId)
             .HasColumnType("uniqueidentifier");
 
@@ -69,5 +72,14 @@ public class CustomerLedgerEntryConfiguration : IEntityTypeConfiguration<Custome
         builder.HasIndex(e => new { e.TenantId, e.RecordedAtUtc });
         builder.HasIndex(e => new { e.TenantId, e.InvoiceId });
         builder.HasIndex(e => new { e.TenantId, e.PaymentId });
+        builder.HasIndex(e => new { e.TenantId, e.PaymentAllocationId });
+
+        // Critical: prevent duplicate settlement entries for the same allocation.
+        // A PaymentSettlement ledger entry must correspond to exactly one active PaymentAllocation.
+        // Filtered unique index guarantees no two active settlement rows reference the same allocation.
+        builder.HasIndex(e => new { e.TenantId, e.PaymentAllocationId, e.EntryType })
+            .HasFilter("[EntryType] = 'PaymentSettlement' AND [PaymentAllocationId] IS NOT NULL")
+            .IsUnique()
+            .HasDatabaseName("UX_CustomerLedgerEntries_SettlementByAllocation");
     }
 }

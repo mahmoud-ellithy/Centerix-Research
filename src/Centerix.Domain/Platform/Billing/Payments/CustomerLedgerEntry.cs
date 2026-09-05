@@ -9,15 +9,38 @@ using Centerix.Domain.Platform.Billing.Payments.Enums;
 /// (invoice charge, payment settlement, credit creation/usage/expiry, adjustment)
 /// that contributes to the customer's running balance. Entries are NEVER modified
 /// or deleted — corrections are separate offsetting entries.
+///
+/// <b>Financial invariants:</b>
+/// <list type="bullet">
+///   <item><description><see cref="RunningBalance"/> is a derived/denormalized value whose correctness
+///   is guaranteed by the transactional write process, not an independent source of truth. The ledger
+///   movements (<see cref="Amount"/>/<see cref="EntryType"/>) are sufficient to reconstruct the balance.</description></item>
+///   <item><description>A <see cref="LedgerEntryType.PaymentSettlement"/> entry is tied to exactly one
+///   <see cref="PaymentAllocationId"/>; this allows the system to guarantee that total payment settlement
+///   equals total active allocations and prevents duplicate settlement entries.</description></item>
+/// </list>
 /// </summary>
 public class CustomerLedgerEntry : AuditableEntity<Guid>
 {
     public LedgerEntryType EntryType { get; private set; }
     public decimal Amount { get; private set; }
     public string CurrencyCode { get; private set; } = "EGP";
+
+    /// <summary>
+    /// Derived/denormalized running balance at the moment this entry was recorded.
+    /// Reconstruable from the immutable ledger movements; correctness guaranteed by the
+    /// transactional write process.
+    /// </summary>
     public decimal RunningBalance { get; private set; }
     public Guid? InvoiceId { get; private set; }
     public Guid? PaymentId { get; private set; }
+
+    /// <summary>
+    /// The payment allocation that caused this settlement. Only populated for
+    /// <see cref="LedgerEntryType.PaymentSettlement"/> entries and used to guarantee
+    /// one active allocation = one settlement.
+    /// </summary>
+    public Guid? PaymentAllocationId { get; private set; }
     public Guid? CreditId { get; private set; }
     public string Description { get; private set; } = default!;
     public DateTime RecordedAtUtc { get; private set; }
@@ -35,6 +58,7 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
         decimal runningBalance,
         Guid? invoiceId,
         Guid? paymentId,
+        Guid? paymentAllocationId,
         Guid? creditId,
         string description,
         DateTime recordedAtUtc)
@@ -46,6 +70,7 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
         RunningBalance = runningBalance;
         InvoiceId = invoiceId;
         PaymentId = paymentId;
+        PaymentAllocationId = paymentAllocationId;
         CreditId = creditId;
         Description = description;
         RecordedAtUtc = recordedAtUtc;
@@ -77,37 +102,42 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
             invoiceId,
             null,
             null,
+            null,
             description ?? $"Invoice charge: {invoiceAmount} {currencyCode}",
             recordedAtUtc);
     }
 
     /// <summary>
     /// Creates a ledger entry for a payment settlement (decreases customer balance).
+    /// The settlement is bound to the specific <paramref name="paymentAllocationId"/> to guarantee
+    /// that settlement never exceeds the actual applied allocation and cannot be duplicated.
     /// </summary>
     public static Result<CustomerLedgerEntry> CreatePaymentSettlement(
         Guid id,
         Guid paymentId,
-        decimal paymentAmount,
+        Guid paymentAllocationId,
+        decimal allocatedAmount,
         string currencyCode,
         decimal previousBalance,
         DateTime recordedAtUtc,
         string? description = null)
     {
-        if (paymentAmount <= 0)
+        if (allocatedAmount <= 0)
             return PaymentErrors.AmountMustBePositive;
 
-        var newBalance = previousBalance - paymentAmount;
+        var newBalance = previousBalance - allocatedAmount;
 
         return new CustomerLedgerEntry(
             id,
             LedgerEntryType.PaymentSettlement,
-            paymentAmount,
+            allocatedAmount,
             currencyCode,
             newBalance,
             null,
             paymentId,
+            paymentAllocationId,
             null,
-            description ?? $"Payment settlement: {paymentAmount} {currencyCode}",
+            description ?? $"Payment settlement: {allocatedAmount} {currencyCode}",
             recordedAtUtc);
     }
 
@@ -134,6 +164,7 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
             creditAmount,
             currencyCode,
             newBalance,
+            null,
             null,
             null,
             creditId,

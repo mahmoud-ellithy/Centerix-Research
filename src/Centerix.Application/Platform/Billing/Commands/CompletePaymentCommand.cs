@@ -5,6 +5,7 @@ using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Billing.Payments;
 
 using MediatR;
+using Microsoft.EntityFrameworkCore;
 
 public record CompletePaymentCommand(Guid PaymentId, string? ExternalReference = null) : IRequest<Result<Updated>>;
 
@@ -16,7 +17,15 @@ public class CompletePaymentHandler(
         CompletePaymentCommand request,
         CancellationToken cancellationToken)
     {
-        var payment = await dbContext.Payments.FindAsync([request.PaymentId], cancellationToken: cancellationToken);
+        // Transactions are only used on relational providers (SQL Server). The EF InMemory
+        // provider does not support transactions, so we skip them there — the business-logic
+        // invariants are still validated. On SQL Server, the transaction guarantees atomicity.
+        await using var transaction = dbContext.IsRelational
+            ? await dbContext.BeginTransactionAsync(cancellationToken)
+            : null;
+
+        var payment = await dbContext.Payments
+            .FirstOrDefaultAsync(p => p.Id == request.PaymentId, cancellationToken);
         if (payment is null)
         {
             return PaymentErrors.NotFound;
@@ -35,6 +44,10 @@ public class CompletePaymentHandler(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
 
         await auditWriter.WriteAsync(
             action: "Payment.Complete",

@@ -360,9 +360,11 @@ public class Phase9PaymentFoundationDomainTests
     [Fact]
     public void CustomerLedgerEntry_CreatePaymentSettlement_ValidInput_Succeeds()
     {
+        var allocationId = Guid.NewGuid();
         var entry = CustomerLedgerEntry.CreatePaymentSettlement(
             Guid.NewGuid(),
             Guid.NewGuid(),
+            allocationId,
             5000m,
             "EGP",
             12000m,
@@ -373,6 +375,7 @@ public class Phase9PaymentFoundationDomainTests
         Assert.Equal(LedgerEntryType.PaymentSettlement, entity.EntryType);
         Assert.Equal(5000m, entity.Amount);
         Assert.Equal(7000m, entity.RunningBalance);
+        Assert.Equal(allocationId, entity.PaymentAllocationId);
         Assert.False(entity.IsDebit);
         Assert.True(entity.IsCredit);
     }
@@ -396,6 +399,7 @@ public class Phase9PaymentFoundationDomainTests
     public void CustomerLedgerEntry_CreatePaymentSettlement_ZeroAmount_IsDenied()
     {
         var result = CustomerLedgerEntry.CreatePaymentSettlement(
+            Guid.NewGuid(),
             Guid.NewGuid(),
             Guid.NewGuid(),
             0m,
