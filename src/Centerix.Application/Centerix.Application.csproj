@@ -6,8 +6,10 @@
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
     <PackageReference Include="Mapster" />
     <PackageReference Include="MediatR" />
+    <PackageReference Include="Microsoft.Data.SqlClient" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Abstractions" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
     <PackageReference Include="Microsoft.Extensions.Caching.Hybrid" />
     <PackageReference Include="Microsoft.Extensions.Localization" />
   </ItemGroup>
@@ -15,7 +17,5 @@
   <ItemGroup>
     <ProjectReference Include="..\Centerix.Domain\Centerix.Domain.csproj" />
   </ItemGroup>
-
-
 
 </Project>

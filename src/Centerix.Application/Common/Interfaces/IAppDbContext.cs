@@ -141,4 +141,10 @@ public interface IAppDbContext
     /// membership provisioning) can commit or roll back atomically.
     /// </summary>
     Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Begins a database transaction with a specific isolation level for scenarios requiring
+    /// stronger guarantees (e.g. financial concurrency control).
+    /// </summary>
+    Task<IDbContextTransaction> BeginTransactionAsync(System.Data.IsolationLevel isolationLevel, CancellationToken cancellationToken = default);
 }
