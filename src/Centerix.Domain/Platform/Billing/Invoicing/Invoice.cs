@@ -24,6 +24,9 @@ public class Invoice : AuditableEntity<Guid>
     public Guid? SubscriptionId { get; private set; }
     public Guid? BillingCycleId { get; private set; }
 
+    // Optimistic-concurrency token (SQL Server rowversion, store-generated)
+    public byte[] RowVersion { get; internal set; } = [];
+
     private readonly List<InvoiceLine> _invoiceLines = [];
     public IReadOnlyList<InvoiceLine> InvoiceLines => _invoiceLines.AsReadOnly();
 

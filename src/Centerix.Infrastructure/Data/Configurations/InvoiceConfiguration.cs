@@ -82,6 +82,10 @@ public class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
             .HasColumnName("ModifiedBy")
             .HasMaxLength(450);
 
+        // Optimistic-concurrency token (SQL Server rowversion, store-generated)
+        builder.Property(i => i.RowVersion)
+            .IsRowVersion();
+
         builder.HasIndex(i => i.TenantId);
         builder.HasIndex(i => new { i.TenantId, i.Status });
         builder.HasIndex(i => new { i.TenantId, i.PeriodStart, i.PeriodEnd });

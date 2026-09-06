@@ -63,4 +63,12 @@ public static class PaymentErrors
 
     public static Error CannotReceiptPendingPayment =>
         Error.Conflict("Receipt.CannotReceiptPendingPayment", "Cannot issue receipt for a pending/processing payment.");
+
+    /// <summary>
+    /// Returned when two concurrent allocations race on the same Payment or Invoice
+    /// and this request lost the optimistic-concurrency check.
+    /// </summary>
+    public static Error AllocationConcurrencyConflict =>
+        Error.Conflict("PaymentAllocation.ConcurrencyConflict",
+            "This allocation conflicted with another concurrent request. Please retry.");
 }
