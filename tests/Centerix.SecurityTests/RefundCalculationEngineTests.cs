@@ -131,11 +131,11 @@ public class RefundCalculationEngineTests
 
     // ------------------------------------------------------------------
     // Critical Test Case 1: 12-month contract, paid 10,000, gift 1,000, cancel after 6 months
-    // Expected: refund = 4,280
+    // Expected: refund = 4,275.89 (day-based gift consumption)
     // ------------------------------------------------------------------
 
     [Fact]
-    public void Refund_Calculation_PaidInFull_WithGift_CancelAfter6Months_Returns4280()
+    public void Refund_Calculation_PaidInFull_WithGift_CancelAfter6Months_Returns4275_89()
     {
         // Arrange: 12-month contract (10,000), paid 10,000, gift 1,000
         var effectiveAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -175,14 +175,9 @@ public class RefundCalculationEngineTests
         Assert.Equal(10000m, result.AmountActuallyPaid);
         Assert.Equal(1000m, result.TotalBenefitValue);
 
-        // Gift consumption: 1000 * (181 / 365) ≈ 493.15 → remaining ≈ 506.85
-        // But we need to verify the exact calculation
-        var expectedRemainingBenefit = 1000m - result.ConsumedBenefitValue;
-
-        // Refund = 10000 - (5220 + remainingBenefit)
-        // For refund to be 4280: 10000 - 5220 - remainingBenefit = 4280
-        // remainingBenefit = 10000 - 5220 - 4280 = 500
-        Assert.Equal(4280m, result.RefundAmount);
+        // Gift consumption (day-based): 1000 * (181 / 365) = 495.89 → remaining = 504.11
+        // Refund = 10000 - (5220 + 504.11) = 4275.89
+        Assert.Equal(4275.89m, result.RefundAmount);
         Assert.Equal(0m, result.CustomerOutstandingAmount);
         Assert.True(result.IsRefundDue);
         Assert.False(result.IsAmountOwed);
@@ -190,7 +185,7 @@ public class RefundCalculationEngineTests
 
     // ------------------------------------------------------------------
     // Critical Test Case 2: 12-month contract, paid 4,000, cancel after 6 months
-    // Expected: customer owes 1,720
+    // Expected: customer owes 1,724.11 (day-based gift consumption)
     // ------------------------------------------------------------------
 
     [Fact]
@@ -233,11 +228,10 @@ public class RefundCalculationEngineTests
         Assert.Equal(5220m, result.UsedSubscriptionAmount);
         Assert.Equal(4000m, result.AmountActuallyPaid);
 
-        // Customer owes = (5220 + remainingBenefit) - 4000
-        // For customer to owe 1720: 5220 + remainingBenefit - 4000 = 1720
-        // remainingBenefit = 1720 + 4000 - 5220 = 500
+        // Gift consumption (day-based): 1000 * (181 / 365) = 495.89 → remaining = 504.11
+        // Customer owes = (5220 + 504.11) - 4000 = 1724.11
         Assert.Equal(0m, result.RefundAmount);
-        Assert.Equal(1720m, result.CustomerOutstandingAmount);
+        Assert.Equal(1724.11m, result.CustomerOutstandingAmount);
         Assert.False(result.IsRefundDue);
         Assert.True(result.IsAmountOwed);
     }
@@ -516,14 +510,29 @@ public class RefundCalculationEngineTests
             Guid.NewGuid(), "REF-001", Guid.NewGuid(), null, null,
             100m, "EGP", "Reason", "user-1", DateTime.UtcNow).Value;
 
-        // Cannot execute from Pending
-        Assert.False(refund.Execute("executor-1", DateTime.UtcNow).IsSuccess);
+        // With optional approval workflow (Task #4), MarkProcessing is allowed from Pending.
+        // Verify it succeeds and transitions to Processing.
+        Assert.True(refund.MarkProcessing().IsSuccess);
+        Assert.Equal(RefundStatus.Processing, refund.Status);
 
         // Approve
         refund.Approve("approver-1", DateTime.UtcNow);
 
         // Cannot approve again
         Assert.False(refund.Approve("approver-2", DateTime.UtcNow).IsSuccess);
+    }
+
+    [Fact]
+    public void Refund_Lifecycle_PendingToExecute_Directly_Allowed()
+    {
+        var refund = Refund.Create(
+            Guid.NewGuid(), "REF-001", Guid.NewGuid(), null, null,
+            100m, "EGP", "Reason", "user-1", DateTime.UtcNow).Value;
+
+        // Can execute directly from Pending (optional approval workflow)
+        Assert.True(refund.Execute("executor-1", DateTime.UtcNow).IsSuccess);
+        Assert.Equal(RefundStatus.Completed, refund.Status);
+        Assert.True(refund.IsExecuted);
     }
 
     [Fact]

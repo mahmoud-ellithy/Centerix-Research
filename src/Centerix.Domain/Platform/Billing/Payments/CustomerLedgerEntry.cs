@@ -41,6 +41,7 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
     /// one active allocation = one settlement.
     /// </summary>
     public Guid? PaymentAllocationId { get; private set; }
+    public Guid? RefundId { get; private set; }
     public Guid? CreditId { get; private set; }
     public string Description { get; private set; } = default!;
     public DateTime RecordedAtUtc { get; private set; }
@@ -59,6 +60,7 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
         Guid? invoiceId,
         Guid? paymentId,
         Guid? paymentAllocationId,
+        Guid? refundId,
         Guid? creditId,
         string description,
         DateTime recordedAtUtc)
@@ -71,6 +73,7 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
         InvoiceId = invoiceId;
         PaymentId = paymentId;
         PaymentAllocationId = paymentAllocationId;
+        RefundId = refundId;
         CreditId = creditId;
         Description = description;
         RecordedAtUtc = recordedAtUtc;
@@ -100,6 +103,7 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
             currencyCode,
             newBalance,
             invoiceId,
+            null,
             null,
             null,
             null,
@@ -137,6 +141,7 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
             paymentId,
             paymentAllocationId,
             null,
+            null,
             description ?? $"Payment settlement: {allocatedAmount} {currencyCode}",
             recordedAtUtc);
     }
@@ -164,6 +169,7 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
             creditAmount,
             currencyCode,
             newBalance,
+            null,
             null,
             null,
             null,
@@ -201,6 +207,7 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
             null,
             null,
             null,
+            refundId,
             null,
             description ?? $"Refund settlement: {refundAmount} {currencyCode}",
             recordedAtUtc);

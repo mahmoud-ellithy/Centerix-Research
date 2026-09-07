@@ -114,17 +114,20 @@ public class ExecuteRefundHandler(
             return Result.Updated;
         }
 
-        // Validate the refund can be executed
-        if (refund.Status != RefundStatus.Approved && refund.Status != RefundStatus.Processing)
+        // Validate the refund can be executed (Pending allowed for optional approval workflow)
+        if (refund.Status != RefundStatus.Pending && refund.Status != RefundStatus.Approved && refund.Status != RefundStatus.Processing)
         {
             return RefundErrors.InvalidStateTransition(refund.Status, "execute");
         }
 
-        // Mark as processing
-        var processingResult = refund.MarkProcessing();
-        if (!processingResult.IsSuccess)
+        // Mark as processing (skip if already Processing, e.g., from Pending → Processing → Completed)
+        if (refund.Status != RefundStatus.Processing)
         {
-            return processingResult.Errors!;
+            var processingResult = refund.MarkProcessing();
+            if (!processingResult.IsSuccess)
+            {
+                return processingResult.Errors!;
+            }
         }
 
         // Compute the current ledger balance from immutable movements
@@ -164,6 +167,9 @@ public class ExecuteRefundHandler(
         }
         catch (DbUpdateConcurrencyException)
         {
+            // RowVersion conflict: another concurrent transaction modified this refund.
+            // This is retryable — the caller's retry loop (via IsRetryableError) will
+            // re-read the refund and find it either Completed or still Pending/Approved.
             if (transaction is not null)
             {
                 await transaction.RollbackAsync(cancellationToken);
@@ -171,15 +177,49 @@ public class ExecuteRefundHandler(
 
             return RefundErrors.ExecutionConcurrencyConflict;
         }
-        catch (DbUpdateException ex) when (IsDuplicateKeyException(ex))
+        catch (DbUpdateException ex) when (IsDuplicateRefundNumberException(ex))
         {
+            // Duplicate key on the unique constraint UX_Refunds_TenantId_RefundNumber.
+            // This means a concurrent transaction already created a refund with the same
+            // RefundNumber for this tenant. Re-read to check if it was for this same refund
+            // (idempotent retry) or a genuine conflict.
             if (transaction is not null)
             {
                 await transaction.RollbackAsync(cancellationToken);
             }
 
-            // Idempotent retry — refund was already executed
-            return Result.Updated;
+            var existing = await dbContext.Refunds
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == request.RefundId, cancellationToken);
+
+            if (existing?.Status == RefundStatus.Completed)
+            {
+                // Refund was already executed by the concurrent transaction — idempotent success.
+                return Result.Updated;
+            }
+
+            // Genuine RefundNumber collision — not retryable.
+            return RefundErrors.DuplicateRefundNumber;
+        }
+        catch (DbUpdateException ex) when (IsDuplicateLedgerKeyException(ex))
+        {
+            // Duplicate key on CustomerLedgerEntry unique filter UX_CustomerLedgerEntries_SettlementByAllocation.
+            // This means a concurrent transaction already created the same settlement.
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            var existing = await dbContext.Refunds
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == request.RefundId, cancellationToken);
+
+            if (existing?.Status == RefundStatus.Completed)
+            {
+                return Result.Updated;
+            }
+
+            return RefundErrors.ExecutionConcurrencyConflict;
         }
         catch (Exception ex) when (IsDeadlockException(ex))
         {
@@ -215,15 +255,37 @@ public class ExecuteRefundHandler(
     }
 
     /// <summary>
-    /// Checks whether the given DbUpdateException was caused by a duplicate key violation.
-    /// SQL Server error 2601 = cannot insert duplicate key row in unique index.
-    /// SQL Server error 2627 = violation of UNIQUE KEY constraint.
+    /// Checks whether the given DbUpdateException was caused by a duplicate key violation
+    /// on the UX_Refunds_TenantId_RefundNumber unique index.
+    /// SQL Server error 2601/2627 includes the index name in the error message.
     /// </summary>
-    private static bool IsDuplicateKeyException(DbUpdateException ex)
+    private static bool IsDuplicateRefundNumberException(DbUpdateException ex)
     {
         if (ex.InnerException is SqlException sqlEx)
         {
-            return sqlEx.Number == 2601 || sqlEx.Number == 2627;
+            if (sqlEx.Number == 2601 || sqlEx.Number == 2627)
+            {
+                var msg = ex.InnerException?.Message ?? ex.Message;
+                return msg.Contains("UX_Refunds_TenantId_RefundNumber", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Checks whether the given DbUpdateException was caused by a duplicate key violation
+    /// on the CustomerLedgerEntry filtered unique index UX_CustomerLedgerEntries_SettlementByAllocation.
+    /// </summary>
+    private static bool IsDuplicateLedgerKeyException(DbUpdateException ex)
+    {
+        if (ex.InnerException is SqlException sqlEx)
+        {
+            if (sqlEx.Number == 2601 || sqlEx.Number == 2627)
+            {
+                var msg = ex.InnerException?.Message ?? ex.Message;
+                return msg.Contains("UX_CustomerLedgerEntries_SettlementByAllocation", StringComparison.OrdinalIgnoreCase)
+                    || msg.Contains("UX_CustomerLedgerEntries_SettlementByRefund", StringComparison.OrdinalIgnoreCase);
+            }
         }
         return false;
     }

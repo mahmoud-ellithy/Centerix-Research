@@ -57,4 +57,11 @@ public static class RefundErrors
 
     public static Error InvalidRefundAmount =>
         Error.Conflict("Refund.InvalidAmount", "Refund amount exceeds the calculated refundable amount.");
+
+    public static Error DuplicateRefundNumber =>
+        Error.Conflict("Refund.DuplicateNumber", "A refund with this number already exists for the current tenant.");
+
+    public static Error NoRefundDue(decimal outstandingAmount) =>
+        Error.Conflict("Refund.NoRefundDue",
+            $"No refund is due. CustomerOutstandingAmount = {outstandingAmount}. A refund record can only be created when RefundAmount > 0.");
 }

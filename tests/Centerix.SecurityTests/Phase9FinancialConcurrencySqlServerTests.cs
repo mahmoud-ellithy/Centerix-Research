@@ -7,6 +7,10 @@ using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Billing.Invoicing.Enums;
 using Centerix.Domain.Platform.Billing.Payments;
 using Centerix.Domain.Platform.Billing.Payments.Enums;
+using Centerix.Domain.Platform.Billing.Refunds;
+using Centerix.Domain.Platform.Billing.Refunds.Enums;
+using Centerix.Domain.Platform.Contracts;
+using Centerix.Domain.Platform.Contracts.Enums;
 using Centerix.Infrastructure.Data;
 using Centerix.Infrastructure.Tenancy;
 using Finbuckle.MultiTenant.Abstractions;
@@ -1276,6 +1280,211 @@ public class Phase9FinancialConcurrencySqlServerTests
             Assert.Equal(totalAllocations, totalSettlements);
             Assert.Equal(10000m, totalAllocations); // 6000 + 4000
             Assert.Equal(10000m, totalSettlements);
+        }
+    }
+
+    // ==================================================================
+    // Refund Execution Idempotency Tests
+    // ==================================================================
+
+    /// <summary>
+    /// CODER TASK 4.1 — Test G: Concurrent refund execution idempotency.
+    /// Verifies that two concurrent ExecuteRefundCommand handlers produce
+    /// exactly one financial settlement (ledger entry), protected by:
+    /// 1. RowVersion optimistic concurrency on the Refund entity
+    /// 2. Unique constraint UX_Refunds_TenantId_RefundNumber
+    /// 3. Unique constraint UX_CustomerLedgerEntries_SettlementByAllocation (RefundSettlement)
+    /// 4. Idempotency check: already-completed refunds are skipped
+    /// </summary>
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    [Trait("Category", "Phase9Concurrency")]
+    public async Task Concurrent_RefundExecution_ProducesExactlyOneSettlement()
+    {
+        // Arrange: Set up a contract, pricing tiers, benefits, payments, and a refund
+        var tenantId = $"tenant-{Guid.NewGuid():N}"[..20];
+        Guid contractId;
+        Guid refundId;
+
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await EnsureTenantExists(scope.ServiceProvider, tenantId);
+
+            // Create contract with pricing tiers and benefits
+            var effectiveAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var contract = Contract.Create(
+                Guid.NewGuid(),
+                tenantId,
+                "CNT-CONCURRENT-REFUND",
+                1,
+                effectiveAt,
+                effectiveAt.AddMonths(12),
+                12,
+                1000m,
+                1000m,
+                "EGP",
+                10000m,
+                0,
+                null).Value;
+            // Add pricing tiers: 1=1000, 3=2700, 6=5220, 12=10000
+            contract.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contract.Id, 1, 1000m, "EGP", 1000m, 1).Value);
+            contract.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contract.Id, 3, 2700m, "EGP", 1000m, 2).Value);
+            contract.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contract.Id, 6, 5220m, "EGP", 1000m, 3).Value);
+            contract.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contract.Id, 12, 10000m, "EGP", 1000m, 4).Value);
+
+            // Add gift benefit: 1000
+            var benefit = ContractBenefit.Create(
+                Guid.NewGuid(),
+                contract.Id,
+                ContractBenefitType.PhysicalGift,
+                "Gift",
+                null,
+                1000m,
+                "EGP").Value;
+            benefit.MarkGranted(DateTime.UtcNow);
+            contract.AddBenefit(benefit);
+
+            db.Contracts.Add(contract);
+            db.StampAddedTenantIds(tenantId);
+            await db.SaveChangesAsync();
+            contractId = contract.Id;
+
+            // Create an invoice for this contract
+            var invoice = Invoice.Create(
+                Guid.NewGuid(),
+                "INV-CONCURRENT-REFUND",
+                new DateOnly(2026, 1, 1),
+                new DateOnly(2026, 1, 31),
+                10000m,
+                0,
+                0,
+                10000m,
+                contractId: contractId).Value;
+            invoice.Issue(DateTime.UtcNow);
+            db.Invoices.Add(invoice);
+
+            // Create payment and allocate it to the invoice
+            var payment = Payment.Create(Guid.NewGuid(), "PAY-CONCURRENT-REFUND", 10000m, "EGP", PaymentMethod.Cash).Value;
+            payment.Complete(DateTime.UtcNow);
+            db.Payments.Add(payment);
+
+            var allocation = PaymentAllocation.Create(
+                Guid.NewGuid(),
+                payment.Id,
+                invoice.Id,
+                10000m,
+                DateTime.UtcNow).Value;
+            db.PaymentAllocations.Add(allocation);
+
+            db.StampAddedTenantIds(tenantId);
+            await db.SaveChangesAsync();
+
+            // Create an invoice charge ledger entry to establish a balance
+            var chargeEntry = CustomerLedgerEntry.CreateInvoiceCharge(
+                Guid.NewGuid(),
+                invoice.Id,
+                10000m,
+                "EGP",
+                0m,
+                DateTime.UtcNow).Value;
+            db.CustomerLedgerEntries.Add(chargeEntry);
+
+            // Create a payment settlement ledger entry
+            var settlementEntry = CustomerLedgerEntry.CreatePaymentSettlement(
+                Guid.NewGuid(),
+                payment.Id,
+                allocation.Id,
+                10000m,
+                "EGP",
+                10000m, // previous balance was 10000, after settlement = 0
+                DateTime.UtcNow).Value;
+            db.CustomerLedgerEntries.Add(settlementEntry);
+
+            db.StampAddedTenantIds(tenantId);
+            await db.SaveChangesAsync();
+
+            // Create a refund in Pending status with a calculated amount
+            // Using the known calculation: 10000 - (5220 + 504.11) = 4275.89
+            var refund = Refund.Create(
+                Guid.NewGuid(),
+                "REF-CONCURRENT",
+                contractId,
+                null,
+                null,
+                4275.89m,
+                "EGP",
+                "Early cancellation",
+                "user-1",
+                DateTime.UtcNow).Value;
+            db.Refunds.Add(refund);
+            db.StampAddedTenantIds(tenantId);
+            await db.SaveChangesAsync();
+
+            refundId = refund.Id;
+        }
+
+        // Act: Two concurrent ExecuteRefundCommand handlers
+        using var cts = new CancellationTokenSource(TestTimeout);
+
+        var (result1, result2) = await ExecuteConcurrentWithBarrier(
+            async ct =>
+            {
+                using var scope = _env.Factory.Services.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                AuthorizeTenant(scope.ServiceProvider, tenantId);
+
+                var auditWriter = Substitute.For<IAuditWriter>();
+                var currentUser = Substitute.For<ICurrentUser>();
+                currentUser.UserId.Returns("test-user-1");
+                currentUser.IsAuthenticated.Returns(true);
+                var handler = new ExecuteRefundHandler(db, currentUser, auditWriter);
+                return await handler.Handle(new ExecuteRefundCommand(refundId), ct);
+            },
+            async ct =>
+            {
+                using var scope = _env.Factory.Services.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                AuthorizeTenant(scope.ServiceProvider, tenantId);
+
+                var auditWriter = Substitute.For<IAuditWriter>();
+                var currentUser = Substitute.For<ICurrentUser>();
+                currentUser.UserId.Returns("test-user-1");
+                currentUser.IsAuthenticated.Returns(true);
+                var handler = new ExecuteRefundHandler(db, currentUser, auditWriter);
+                return await handler.Handle(new ExecuteRefundCommand(refundId), ct);
+            },
+            cts.Token);
+
+        // Assert: Both succeed (idempotent retry) or one succeeds and one is a conflict that returns Updated
+        // The key assertion is that exactly ONE ledger settlement entry is created
+        var successCount = (result1.IsSuccess ? 1 : 0) + (result2.IsSuccess ? 1 : 0);
+        Assert.True(successCount >= 1,
+            $"Expected at least 1 success, got {successCount}. " +
+            $"Result1: {string.Join(", ", result1.Errors?.Select(e => e.Code) ?? [])}, " +
+            $"Result2: {string.Join(", ", result2.Errors?.Select(e => e.Code) ?? [])}");
+
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            AuthorizeTenant(scope.ServiceProvider, tenantId);
+
+            // Verify the refund is Completed
+            var refund = await db.Refunds
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == refundId);
+            Assert.NotNull(refund);
+            Assert.Equal(RefundStatus.Completed, refund!.Status);
+
+            // Verify exactly ONE RefundSettlement ledger entry exists for this refund
+            var refundSettlements = await db.CustomerLedgerEntries
+                .Where(e => e.EntryType == LedgerEntryType.RefundSettlement)
+                .ToListAsync();
+            Assert.True(refundSettlements.Count == 1,
+                $"Expected exactly 1 refund settlement ledger entry, got {refundSettlements.Count}");
+
+            // Verify the settlement amount equals the refund amount
+            Assert.Equal(4275.89m, refundSettlements[0].Amount);
         }
     }
 }

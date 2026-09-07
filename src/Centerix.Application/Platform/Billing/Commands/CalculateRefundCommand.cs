@@ -3,6 +3,7 @@ namespace Centerix.Application.Platform.Billing.Commands;
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Billing.Payments;
+using Centerix.Domain.Platform.Billing.Payments.Enums;
 using Centerix.Domain.Platform.Billing.Refunds;
 using Centerix.Domain.Platform.Contracts;
 
@@ -36,10 +37,14 @@ public class CalculateRefundHandler(
             return RefundErrors.ContractNotFound;
         }
 
-        // Load completed payments with their allocations
+        // Load invoices belonging to this contract, then trace payments through
+        // the Invoice → PaymentAllocation → Payment chain (tenant-scoped).
         var payments = await dbContext.Payments
             .Include(p => p.Allocations)
-            .Where(p => p.TenantId == contract.TenantId && p.IsCompleted)
+            .Where(p => p.TenantId == contract.TenantId
+                && p.Status == PaymentStatus.Completed
+                && p.Allocations.Any(a => a.Status == PaymentAllocationStatus.Active
+                    && a.Invoice.ContractId == contract.Id))
             .ToListAsync(cancellationToken);
 
         // Perform the deterministic calculation

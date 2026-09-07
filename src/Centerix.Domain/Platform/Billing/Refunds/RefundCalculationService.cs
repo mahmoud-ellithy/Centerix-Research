@@ -92,9 +92,8 @@ public sealed class RefundCalculationService : IRefundCalculationService
             }
             else
             {
-                // Use month-based calculation for gift consumption to align with pricing tiers
-                // This ensures consistent results when cancellation occurs at month boundaries
-                var consumptionRatio = (decimal)elapsedMonths / (decimal)contract.DurationMonths;
+                // Day-based consumption calculation: ConsumedValue = ContractualValue * (ElapsedDays / ContractDurationDays)
+                var consumptionRatio = (decimal)elapsedDays / (decimal)contractDurationDays;
                 consumed = Math.Round(benefit.ContractualValue * consumptionRatio, 2, MidpointRounding.AwayFromZero);
             }
 

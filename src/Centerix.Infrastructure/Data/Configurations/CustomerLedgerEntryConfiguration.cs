@@ -44,6 +44,9 @@ public class CustomerLedgerEntryConfiguration : IEntityTypeConfiguration<Custome
         builder.Property(e => e.PaymentAllocationId)
             .HasColumnType("uniqueidentifier");
 
+        builder.Property(e => e.RefundId)
+            .HasColumnType("uniqueidentifier");
+
         builder.Property(e => e.CreditId)
             .HasColumnType("uniqueidentifier");
 
@@ -81,5 +84,13 @@ public class CustomerLedgerEntryConfiguration : IEntityTypeConfiguration<Custome
             .HasFilter("[EntryType] = 'PaymentSettlement' AND [PaymentAllocationId] IS NOT NULL")
             .IsUnique()
             .HasDatabaseName("UX_CustomerLedgerEntries_SettlementByAllocation");
+
+        // Prevent duplicate refund settlements: each RefundSettlement ledger entry must
+        // correspond to exactly one refund. Filtered unique index on RefundId guarantees
+        // no two settlement rows reference the same refund.
+        builder.HasIndex(e => new { e.TenantId, e.RefundId, e.EntryType })
+            .HasFilter("[EntryType] = 'RefundSettlement' AND [RefundId] IS NOT NULL")
+            .IsUnique()
+            .HasDatabaseName("UX_CustomerLedgerEntries_SettlementByRefund");
     }
 }

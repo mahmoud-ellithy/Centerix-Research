@@ -181,10 +181,11 @@ public class Refund : AuditableEntity<Guid>
 
     /// <summary>
     /// Marks the refund as processing (execution started).
+    /// Allows Pending → Processing for optional approval workflow.
     /// </summary>
     public Result<Updated> MarkProcessing()
     {
-        if (Status != RefundStatus.Approved)
+        if (Status != RefundStatus.Pending && Status != RefundStatus.Approved)
             return RefundErrors.InvalidStateTransition(Status, "start processing");
 
         Status = RefundStatus.Processing;
@@ -193,10 +194,11 @@ public class Refund : AuditableEntity<Guid>
 
     /// <summary>
     /// Executes the refund and marks it as completed.
+    /// Allows Pending → Completed directly (optional approval workflow) per Task #4.
     /// </summary>
     public Result<Updated> Execute(string executedBy, DateTime executedAtUtc)
     {
-        if (Status != RefundStatus.Approved && Status != RefundStatus.Processing)
+        if (Status != RefundStatus.Pending && Status != RefundStatus.Approved && Status != RefundStatus.Processing)
             return RefundErrors.InvalidStateTransition(Status, "execute");
 
         if (string.IsNullOrWhiteSpace(executedBy))

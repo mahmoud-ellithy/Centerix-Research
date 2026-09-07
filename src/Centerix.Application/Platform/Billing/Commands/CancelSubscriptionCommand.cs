@@ -144,10 +144,13 @@ public class CancelSubscriptionHandler(
         // If there's a contract, calculate the refund
         if (contract is not null)
         {
-            // Load completed payments with their allocations
+            // Load payments traced from this contract via Invoice → PaymentAllocation → Payment (tenant-scoped)
             var payments = await dbContext.Payments
                 .Include(p => p.Allocations)
-                .Where(p => p.TenantId == contract.TenantId && p.IsCompleted)
+                .Where(p => p.TenantId == contract.TenantId
+                    && p.Status == PaymentStatus.Completed
+                    && p.Allocations.Any(a => a.Status == PaymentAllocationStatus.Active
+                        && a.Invoice.ContractId == contract.Id))
                 .ToListAsync(cancellationToken);
 
             // Perform the deterministic calculation
