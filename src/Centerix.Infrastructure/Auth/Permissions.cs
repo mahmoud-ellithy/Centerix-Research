@@ -209,6 +209,18 @@ public static class Permissions
     }
 
     /// <summary>
+    /// Refund module: separate financial transactions that return money to customers.
+    /// Refunds are independent from Payments — original payments remain immutable.
+    /// </summary>
+    public static class Refunds
+    {
+        public const string Create = "Refunds.Create";
+        public const string Read = "Refunds.Read";
+        public const string Approve = "Refunds.Approve";
+        public const string Execute = "Refunds.Execute";
+    }
+
+    /// <summary>
     /// Payment receipts: immutable proof of payment issued upon completion.
     /// </summary>
     public static class Receipts

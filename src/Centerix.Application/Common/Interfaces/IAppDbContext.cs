@@ -7,6 +7,7 @@ using Centerix.Domain.Platform.Billing.BillingCycles;
 using Centerix.Domain.Platform.Billing.Credits;
 using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Billing.Payments;
+using Centerix.Domain.Platform.Billing.Refunds;
 using Centerix.Domain.Platform.Features;
 using Centerix.Domain.Platform.Leads;
 using Centerix.Domain.Platform.Operations;
@@ -94,6 +95,7 @@ public interface IAppDbContext
     DbSet<PaymentAllocation> PaymentAllocations { get; }
     DbSet<PaymentReceipt> PaymentReceipts { get; }
     DbSet<CustomerLedgerEntry> CustomerLedgerEntries { get; }
+    DbSet<Refund> Refunds { get; }
 
     // Billing: Credits
     DbSet<TenantCredit> TenantCredits { get; }

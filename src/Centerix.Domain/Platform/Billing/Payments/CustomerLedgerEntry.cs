@@ -173,6 +173,40 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
     }
 
     /// <summary>
+    /// Creates a ledger entry for a refund settlement (money returned to customer).
+    /// Refund settlement decreases customer balance (credit movement).
+    /// </summary>
+    public static Result<CustomerLedgerEntry> CreateRefundSettlement(
+        Guid id,
+        Guid refundId,
+        decimal refundAmount,
+        string currencyCode,
+        decimal previousBalance,
+        DateTime recordedAtUtc,
+        string? description = null)
+    {
+        if (refundAmount <= 0)
+            return PaymentErrors.AmountMustBePositive;
+
+        // Refund settlement decreases customer balance (money returned to customer)
+        // This is a credit movement
+        var newBalance = previousBalance - refundAmount;
+
+        return new CustomerLedgerEntry(
+            id,
+            LedgerEntryType.RefundSettlement,
+            refundAmount,
+            currencyCode,
+            newBalance,
+            null,
+            null,
+            null,
+            null,
+            description ?? $"Refund settlement: {refundAmount} {currencyCode}",
+            recordedAtUtc);
+    }
+
+    /// <summary>
     /// Returns true if this entry increases the customer balance (debit).
     /// </summary>
     public bool IsDebit => EntryType switch
@@ -188,6 +222,7 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
     {
         LedgerEntryType.PaymentSettlement => true,
         LedgerEntryType.CreditCreation => true,
+        LedgerEntryType.RefundSettlement => true,
         _ => false
     };
 }

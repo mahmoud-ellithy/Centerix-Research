@@ -1,4 +1,5 @@
 using Centerix.Application.Common.Behaviours;
+using Centerix.Domain.Platform.Billing.Refunds;
 using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,6 +23,9 @@ public static class DependencyInjection
         });
 
         services.AddValidatorsFromAssembly(assembly);
+
+        // Register refund calculation service
+        services.AddScoped<IRefundCalculationService, RefundCalculationService>();
 
         return services;
     }

@@ -21,5 +21,8 @@ public enum LedgerEntryType : byte
     CreditExpiry = 4,
 
     /// <summary>Manual adjustment (future).</summary>
-    Adjustment = 5
+    Adjustment = 5,
+
+    /// <summary>Refund settlement (money returned to customer).</summary>
+    RefundSettlement = 6
 }
