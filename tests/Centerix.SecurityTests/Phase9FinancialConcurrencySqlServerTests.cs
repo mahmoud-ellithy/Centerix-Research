@@ -1284,6 +1284,250 @@ public class Phase9FinancialConcurrencySqlServerTests
     }
 
     // ==================================================================
+    // CODER TASK 4.1 — Cross-Contract Payment Isolation Tests
+    // ==================================================================
+
+    /// <summary>
+    /// CODER TASK 4.1 — Test C: Cross-contract payment isolation.
+    /// Verifies that cancelling Contract A only counts payments allocated to
+    /// Contract A's invoices. Payments allocated to Contract B's invoices
+    /// must contribute zero to Contract A's refund calculation.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    [Trait("Category", "Phase9Concurrency")]
+    public async Task CrossContract_PaymentIsolation_ContractBDoesNotAffectA()
+    {
+        var tenantId = $"tenant-{Guid.NewGuid():N}"[..20];
+        Guid contractAId;
+        Guid contractBId;
+
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await EnsureTenantExists(scope.ServiceProvider, tenantId);
+
+            var effectiveAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+            // Contract A: 12 months, 10,000
+            var contractA = Contract.Create(
+                Guid.NewGuid(), tenantId, "CNT-A-ISOLATION", 1,
+                effectiveAt, effectiveAt.AddMonths(12), 12,
+                1000m, 1000m, "EGP", 10000m, 0, null).Value;
+            contractA.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contractA.Id, 6, 5220m, "EGP", 1000m, 1).Value);
+            contractA.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contractA.Id, 12, 10000m, "EGP", 1000m, 2).Value);
+            db.Contracts.Add(contractA);
+            contractAId = contractA.Id;
+
+            // Contract B: 12 months, 5,000
+            var contractB = Contract.Create(
+                Guid.NewGuid(), tenantId, "CNT-B-ISOLATION", 1,
+                effectiveAt, effectiveAt.AddMonths(12), 12,
+                500m, 500m, "EGP", 5000m, 0, null).Value;
+            contractB.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contractB.Id, 6, 2610m, "EGP", 500m, 1).Value);
+            contractB.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contractB.Id, 12, 5000m, "EGP", 500m, 2).Value);
+            db.Contracts.Add(contractB);
+            contractBId = contractB.Id;
+
+            // Invoice A for Contract A
+            var invoiceA = Invoice.Create(
+                Guid.NewGuid(), "INV-A-ISOLATION",
+                new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31),
+                10000m, 0, 0, 10000m, contractId: contractA.Id).Value;
+            invoiceA.Issue(DateTime.UtcNow);
+            db.Invoices.Add(invoiceA);
+
+            // Invoice B for Contract B
+            var invoiceB = Invoice.Create(
+                Guid.NewGuid(), "INV-B-ISOLATION",
+                new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31),
+                5000m, 0, 0, 5000m, contractId: contractB.Id).Value;
+            invoiceB.Issue(DateTime.UtcNow);
+            db.Invoices.Add(invoiceB);
+
+            // Payment A = 10,000 allocated to Invoice A (Contract A)
+            var paymentA = Payment.Create(Guid.NewGuid(), "PAY-A-ISOLATION", 10000m, "EGP", PaymentMethod.Cash).Value;
+            paymentA.Complete(DateTime.UtcNow);
+            db.Payments.Add(paymentA);
+
+            var allocA = PaymentAllocation.Create(Guid.NewGuid(), paymentA.Id, invoiceA.Id, 10000m, DateTime.UtcNow).Value;
+            db.PaymentAllocations.Add(allocA);
+
+            // Payment B = 5,000 allocated to Invoice B (Contract B)
+            var paymentB = Payment.Create(Guid.NewGuid(), "PAY-B-ISOLATION", 5000m, "EGP", PaymentMethod.Cash).Value;
+            paymentB.Complete(DateTime.UtcNow);
+            db.Payments.Add(paymentB);
+
+            var allocB = PaymentAllocation.Create(Guid.NewGuid(), paymentB.Id, invoiceB.Id, 5000m, DateTime.UtcNow).Value;
+            db.PaymentAllocations.Add(allocB);
+
+            db.StampAddedTenantIds(tenantId);
+            await db.SaveChangesAsync();
+        }
+
+        // Act: Use CalculateRefundQuery for Contract A
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            AuthorizeTenant(scope.ServiceProvider, tenantId);
+            var currentUser = Substitute.For<ICurrentUser>();
+            currentUser.UserId.Returns("test-user-1");
+            currentUser.IsAuthenticated.Returns(true);
+            var handler = new CalculateRefundHandler(db, new RefundCalculationService());
+
+            var cancellationDate = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc);
+            var result = await handler.Handle(new CalculateRefundQuery(contractAId, cancellationDate), CancellationToken.None);
+
+            Assert.True(result.IsSuccess);
+
+            // AmountActuallyPaid must be 10,000 (only Contract A's payment), NOT 15,000
+            Assert.Equal(10000m, result.Value!.AmountActuallyPaid);
+            Assert.Equal(5220m, result.Value.UsedSubscriptionAmount);
+            Assert.Equal(4780m, result.Value.RefundAmount); // 10000 - 5220
+        }
+
+        // Also verify Contract B is unaffected
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            AuthorizeTenant(scope.ServiceProvider, tenantId);
+            var handler = new CalculateRefundHandler(db, new RefundCalculationService());
+
+            var cancellationDate = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc);
+            var result = await handler.Handle(new CalculateRefundQuery(contractBId, cancellationDate), CancellationToken.None);
+
+            Assert.True(result.IsSuccess);
+
+            // Contract B's AmountActuallyPaid must be 5,000 (only its own payment)
+            Assert.Equal(5000m, result.Value!.AmountActuallyPaid);
+            Assert.Equal(2610m, result.Value.UsedSubscriptionAmount);
+            Assert.Equal(2390m, result.Value.RefundAmount); // 5000 - 2610
+        }
+    }
+
+    // ==================================================================
+    // CODER TASK 4.1.1 — P0 Shared Payment Cross-Contract SQL Server Test
+    // ==================================================================
+
+    /// <summary>
+    /// CODER TASK 4.1.1 — P0 REGRESSION: Single Payment shared across two Contracts.
+    /// Proves that a single payment allocated to invoices from different contracts
+    /// does not cause cross-contract financial contamination in real SQL Server.
+    ///
+    /// Setup:
+    ///   Payment P = 10,000
+    ///   ├── Allocation → Invoice A → Contract A = 6,000
+    ///   └── Allocation → Invoice B → Contract B = 4,000
+    ///
+    /// Expected:
+    ///   Contract A: AmountActuallyPaid = 6,000 (NOT 10,000)
+    ///   Contract B: AmountActuallyPaid = 4,000 (NOT 10,000)
+    /// </summary>
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    [Trait("Category", "Phase9Concurrency")]
+    public async Task P0_SharedPayment_CrossContract_NoContamination_SqlServer()
+    {
+        var tenantId = $"tenant-{Guid.NewGuid():N}"[..20];
+        Guid contractAId;
+        Guid contractBId;
+
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await EnsureTenantExists(scope.ServiceProvider, tenantId);
+
+            var effectiveAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+            // Contract A: 12 months, 10,000
+            var contractA = Contract.Create(
+                Guid.NewGuid(), tenantId, "CNT-A-SHARED-P0", 1,
+                effectiveAt, effectiveAt.AddMonths(12), 12,
+                1000m, 1000m, "EGP", 10000m, 0, null).Value;
+            contractA.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contractA.Id, 6, 5220m, "EGP", 1000m, 1).Value);
+            contractA.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contractA.Id, 12, 10000m, "EGP", 1000m, 2).Value);
+            db.Contracts.Add(contractA);
+            contractAId = contractA.Id;
+
+            // Contract B: 12 months, 5,000
+            var contractB = Contract.Create(
+                Guid.NewGuid(), tenantId, "CNT-B-SHARED-P0", 1,
+                effectiveAt, effectiveAt.AddMonths(12), 12,
+                500m, 500m, "EGP", 5000m, 0, null).Value;
+            contractB.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contractB.Id, 6, 2610m, "EGP", 500m, 1).Value);
+            contractB.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contractB.Id, 12, 5000m, "EGP", 500m, 2).Value);
+            db.Contracts.Add(contractB);
+            contractBId = contractB.Id;
+
+            // Invoice A for Contract A
+            var invoiceA = Invoice.Create(
+                Guid.NewGuid(), "INV-A-SHARED-P0",
+                new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31),
+                10000m, 0, 0, 10000m, contractId: contractA.Id).Value;
+            invoiceA.Issue(DateTime.UtcNow);
+            db.Invoices.Add(invoiceA);
+
+            // Invoice B for Contract B
+            var invoiceB = Invoice.Create(
+                Guid.NewGuid(), "INV-B-SHARED-P0",
+                new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31),
+                5000m, 0, 0, 5000m, contractId: contractB.Id).Value;
+            invoiceB.Issue(DateTime.UtcNow);
+            db.Invoices.Add(invoiceB);
+
+            // SINGLE payment of 10,000 — allocated to BOTH invoices
+            var payment = Payment.Create(Guid.NewGuid(), "PAY-SHARED-P0", 10000m, "EGP", PaymentMethod.Cash).Value;
+            payment.Complete(DateTime.UtcNow);
+            db.Payments.Add(payment);
+
+            // Allocation 1: 6,000 to Invoice A (Contract A)
+            var allocA = PaymentAllocation.Create(Guid.NewGuid(), payment.Id, invoiceA.Id, 6000m, DateTime.UtcNow).Value;
+            db.PaymentAllocations.Add(allocA);
+
+            // Allocation 2: 4,000 to Invoice B (Contract B)
+            var allocB = PaymentAllocation.Create(Guid.NewGuid(), payment.Id, invoiceB.Id, 4000m, DateTime.UtcNow).Value;
+            db.PaymentAllocations.Add(allocB);
+
+            db.StampAddedTenantIds(tenantId);
+            await db.SaveChangesAsync();
+        }
+
+        var cancellationDate = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        // Act: Calculate refund for Contract A
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            AuthorizeTenant(scope.ServiceProvider, tenantId);
+            var handler = new CalculateRefundHandler(db, new RefundCalculationService());
+
+            var resultA = await handler.Handle(new CalculateRefundQuery(contractAId, cancellationDate), CancellationToken.None);
+            Assert.True(resultA.IsSuccess);
+
+            // Contract A: must be 6,000 — NOT 10,000
+            Assert.Equal(6000m, resultA.Value!.AmountActuallyPaid);
+            Assert.Equal(5220m, resultA.Value.UsedSubscriptionAmount);
+            Assert.Equal(780m, resultA.Value.RefundAmount); // 6000 - 5220
+        }
+
+        // Act: Calculate refund for Contract B
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            AuthorizeTenant(scope.ServiceProvider, tenantId);
+            var handler = new CalculateRefundHandler(db, new RefundCalculationService());
+
+            var resultB = await handler.Handle(new CalculateRefundQuery(contractBId, cancellationDate), CancellationToken.None);
+            Assert.True(resultB.IsSuccess);
+
+            // Contract B: must be 4,000 — NOT 10,000
+            Assert.Equal(4000m, resultB.Value!.AmountActuallyPaid);
+            Assert.Equal(2610m, resultB.Value.UsedSubscriptionAmount);
+            Assert.Equal(1390m, resultB.Value.RefundAmount); // 4000 - 2610
+        }
+    }
+
+    // ==================================================================
     // Refund Execution Idempotency Tests
     // ==================================================================
 

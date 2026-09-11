@@ -38,9 +38,12 @@ public class CalculateRefundHandler(
         }
 
         // Load invoices belonging to this contract, then trace payments through
-        // the Invoice → PaymentAllocation → Payment chain (tenant-scoped).
+        // the Invoice → PaymentAllocation → Payment chain (contract-scoped).
+        // .ThenInclude(a => a.Invoice) ensures the Invoice navigation is loaded so the calculation
+        // service can filter allocations by Invoice.ContractId — preventing cross-contract contamination.
         var payments = await dbContext.Payments
             .Include(p => p.Allocations)
+                .ThenInclude(a => a.Invoice)
             .Where(p => p.TenantId == contract.TenantId
                 && p.Status == PaymentStatus.Completed
                 && p.Allocations.Any(a => a.Status == PaymentAllocationStatus.Active

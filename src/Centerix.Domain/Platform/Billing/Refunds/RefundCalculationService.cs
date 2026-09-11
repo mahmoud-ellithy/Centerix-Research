@@ -113,7 +113,7 @@ public sealed class RefundCalculationService : IRefundCalculationService
             });
         }
 
-        // Calculate amount actually paid (only completed payments with active allocations)
+        // Calculate amount actually paid (contract-scoped: only allocations belonging to this contract's invoices)
         var paymentContributions = new List<PaymentContribution>();
         decimal amountActuallyPaid = 0;
 
@@ -123,15 +123,22 @@ public sealed class RefundCalculationService : IRefundCalculationService
             if (payment.Status != PaymentStatus.Completed)
                 continue;
 
-            var allocatedAmount = payment.GetAllocatedAmount();
-            amountActuallyPaid += allocatedAmount;
+            // Only count active allocations where the invoice belongs to this specific contract.
+            // This prevents cross-contract payment contamination: a payment allocated to invoices
+            // from multiple contracts must only contribute the portion allocated to THIS contract.
+            var contractAllocatedAmount = payment.Allocations
+                .Where(a => a.Status == PaymentAllocationStatus.Active
+                    && a.Invoice?.ContractId == contract.Id)
+                .Sum(a => a.AllocatedAmount);
+
+            amountActuallyPaid += contractAllocatedAmount;
 
             paymentContributions.Add(new PaymentContribution
             {
                 PaymentId = payment.Id,
                 PaymentNumber = payment.PaymentNumber,
                 Amount = payment.Amount,
-                AllocatedAmount = allocatedAmount,
+                AllocatedAmount = contractAllocatedAmount,
                 Method = payment.Method
             });
         }
