@@ -64,4 +64,20 @@ public static class RefundErrors
     public static Error NoRefundDue(decimal outstandingAmount) =>
         Error.Conflict("Refund.NoRefundDue",
             $"No refund is due. CustomerOutstandingAmount = {outstandingAmount}. A refund record can only be created when RefundAmount > 0.");
+
+    public static Error SubscriptionContractMismatch =>
+        Error.Validation("Refund.SubscriptionContractMismatch",
+            "The supplied Subscription does not belong to the Refund's Contract.");
+
+    public static Error InvoiceContractMismatch =>
+        Error.Validation("Refund.InvoiceContractMismatch",
+            "The supplied Invoice does not belong to the Refund's Contract.");
+
+    public static Error CrossTenantSubscription =>
+        Error.Forbidden("Refund.CrossTenantSubscription",
+            "Cannot attach a Subscription belonging to a different tenant.");
+
+    public static Error CrossTenantInvoice =>
+        Error.Forbidden("Refund.CrossTenantInvoice",
+            "Cannot attach an Invoice belonging to a different tenant.");
 }

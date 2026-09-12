@@ -2,10 +2,12 @@ namespace Centerix.Application.Platform.Billing.Commands;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Billing.Payments;
 using Centerix.Domain.Platform.Billing.Payments.Enums;
 using Centerix.Domain.Platform.Billing.Refunds;
 using Centerix.Domain.Platform.Contracts;
+using Centerix.Domain.Platform.Subscriptions;
 
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -13,13 +15,13 @@ using Microsoft.EntityFrameworkCore;
 /// <summary>
 /// Command to create a refund request.
 /// The refund amount is derived from the calculation service, not caller-supplied.
+/// The refund currency is derived from the Contract snapshot, not caller-supplied.
 /// </summary>
 public record CreateRefundCommand(
     string RefundNumber,
     Guid ContractId,
     Guid? SubscriptionId,
     Guid? InvoiceId,
-    string CurrencyCode,
     string Reason) : IRequest<Result<Guid>>;
 
 public class CreateRefundHandler(
@@ -41,6 +43,50 @@ public class CreateRefundHandler(
         if (contract is null)
         {
             return RefundErrors.ContractNotFound;
+        }
+
+        // Validate Subscription belongs to this Contract (if supplied)
+        if (request.SubscriptionId.HasValue)
+        {
+            var subscription = await dbContext.TenantPlans
+                .FirstOrDefaultAsync(s => s.Id == request.SubscriptionId.Value, cancellationToken);
+
+            if (subscription is null)
+            {
+                return RefundErrors.NotFound;
+            }
+
+            if (subscription.TenantId != contract.TenantId)
+            {
+                return RefundErrors.CrossTenantSubscription;
+            }
+
+            if (subscription.ContractId != request.ContractId)
+            {
+                return RefundErrors.SubscriptionContractMismatch;
+            }
+        }
+
+        // Validate Invoice belongs to this Contract (if supplied)
+        if (request.InvoiceId.HasValue)
+        {
+            var invoice = await dbContext.Invoices
+                .FirstOrDefaultAsync(i => i.Id == request.InvoiceId.Value, cancellationToken);
+
+            if (invoice is null)
+            {
+                return RefundErrors.NotFound;
+            }
+
+            if (invoice.TenantId != contract.TenantId)
+            {
+                return RefundErrors.CrossTenantInvoice;
+            }
+
+            if (invoice.ContractId != request.ContractId)
+            {
+                return RefundErrors.InvoiceContractMismatch;
+            }
         }
 
         // Load payments traced from this contract via Invoice → PaymentAllocation → Payment (contract-scoped)
@@ -70,6 +116,7 @@ public class CreateRefundHandler(
             return RefundErrors.NoRefundDue(calculation.CustomerOutstandingAmount);
         }
 
+        // Currency is derived from the authoritative Contract snapshot, NOT from the caller.
         var refundResult = Refund.Create(
             Guid.NewGuid(),
             request.RefundNumber,
@@ -77,7 +124,7 @@ public class CreateRefundHandler(
             request.SubscriptionId,
             request.InvoiceId,
             calculation.RefundAmount,
-            request.CurrencyCode,
+            contract.CurrencyCode,
             request.Reason,
             currentUserService.UserId!,
             DateTime.UtcNow);
@@ -90,6 +137,7 @@ public class CreateRefundHandler(
         var refund = refundResult.Value;
 
         dbContext.Refunds.Add(refund);
+        dbContext.StampAddedTenantIds(contract.TenantId!);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         await auditWriter.WriteAsync(
