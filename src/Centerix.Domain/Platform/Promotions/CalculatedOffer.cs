@@ -21,4 +21,6 @@ public sealed record CalculatedOffer
     public int? ChargedMonths { get; init; }
     public decimal MonthlyListPrice { get; init; }
     public string CurrencyCode { get; init; } = default!;
+    public DateTime CalculatedAtUtc { get; init; }
+    public DateTime? ExpiresAtUtc { get; init; }
 }

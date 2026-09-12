@@ -50,6 +50,7 @@ public interface IAppDbContext
     DbSet<Domain.Platform.Subscriptions.TenantPlanFeature> TenantPlanFeatures { get; }
 
     DbSet<Plan> Plans { get; }
+    DbSet<Centerix.Domain.Platform.Plans.PlanPricingTier> PlanPricingTiers { get; }
     DbSet<Feature> Features { get; }
     DbSet<PlanFeature> PlanFeatures { get; }
     DbSet<TenantPlan> TenantPlans { get; }
@@ -83,6 +84,7 @@ public interface IAppDbContext
 
     // Promotion / Offer Engine
     DbSet<Promotion> Promotions { get; }
+    DbSet<Centerix.Domain.Platform.Promotions.Offer> Offers { get; }
 
     /// <summary>
     /// The AUTHORIZED tenant ID for this request, set from ICurrentTenant.

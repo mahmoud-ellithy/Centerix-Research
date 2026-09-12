@@ -147,5 +147,10 @@ public static class PermissionCatalog
         new("Promotions",     "Update",   "Promotions.Update",   "Update a promotion"),
         new("Promotions",     "Activate", "Promotions.Activate", "Activate a promotion"),
         new("Promotions",     "Calculate","Promotions.Calculate", "Calculate an offer"),
+
+        // Offer lifecycle (tenant-scoped commercial offers)
+        new("Offers",         "Read",     "Offers.Read",         "Read offers"),
+        new("Offers",         "Calculate","Offers.Calculate",    "Calculate and persist an offer"),
+        new("Offers",         "Accept",   "Offers.Accept",       "Accept an offer"),
     ];
 }

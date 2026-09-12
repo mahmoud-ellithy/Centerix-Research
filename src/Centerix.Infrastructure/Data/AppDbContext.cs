@@ -59,6 +59,7 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
 
     public DbSet<Tenant> Tenants { get; set; } = default!;
     public DbSet<Plan> Plans { get; set; } = default!;
+    public DbSet<PlanPricingTier> PlanPricingTiers { get; set; } = default!;
     public DbSet<Feature> Features { get; set; } = default!;
     public DbSet<PlanFeature> PlanFeatures { get; set; } = default!;
     public DbSet<TenantPlan> TenantPlans { get; set; } = default!;
@@ -116,6 +117,7 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
 
     // Promotion / Offer Engine
     public DbSet<Promotion> Promotions { get; set; } = default!;
+    public DbSet<Offer> Offers { get; set; } = default!;
 
     // Billing foundation
     public DbSet<BillingCycle> BillingCycles { get; set; } = default!;

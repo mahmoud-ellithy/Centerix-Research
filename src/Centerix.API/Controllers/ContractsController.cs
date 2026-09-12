@@ -1,6 +1,7 @@
 using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform.Contracts.Commands;
 using Centerix.Application.Platform.Contracts.Queries;
+using Centerix.Application.Platform.Promotions.Commands;
 using Centerix.Infrastructure.Auth;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
@@ -32,14 +33,35 @@ public class ContractsController(ILocalizer localizer, IMediator mediator) : Api
             Problem);
     }
 
-    [HttpPost]
+    /// <summary>
+    /// Creates a Contract from an accepted Offer. ALL commercial values are derived
+    /// from the server-side Offer snapshot. The client CANNOT override any authoritative
+    /// commercial values (ContractedAmount, DiscountAmount, PromotionId, ChargedMonths, etc.).
+    /// </summary>
+    [HttpPost("from-offer")]
     [HasPermission(Permissions.Contracts.Create)]
-    public async Task<IActionResult> CreateContract(CreateContractCommand command, CancellationToken cancellationToken)
+    public async Task<IActionResult> CreateContractFromOffer(
+        [FromBody] CreateContractFromOfferRequest request,
+        CancellationToken cancellationToken)
     {
+        var command = new CreateContractFromOfferCommand(
+            request.OfferId,
+            request.ContractNumber,
+            request.EffectiveAtUtc,
+            request.Benefits);
+
         var result = await mediator.Send(command, cancellationToken);
 
         return result.Match(
             contractId => CreatedAtAction(nameof(GetContract), new { id = contractId }, contractId),
             Problem);
     }
+}
+
+public class CreateContractFromOfferRequest
+{
+    public Guid OfferId { get; set; }
+    public string ContractNumber { get; set; } = default!;
+    public DateTime? EffectiveAtUtc { get; set; }
+    public List<CreateContractFromOfferBenefitRequest>? Benefits { get; set; }
 }

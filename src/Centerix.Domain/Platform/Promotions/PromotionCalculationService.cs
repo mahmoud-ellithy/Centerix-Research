@@ -7,6 +7,10 @@ using Centerix.Domain.Platform.Plans;
 /// <summary>
 /// Deterministic service for calculating commercial offers by applying Promotions to Plans.
 /// No stacking: selects one highest-priority eligible promotion.
+///
+/// Authoritative pricing rule: when a Plan has an applicable PricingTier for the requested
+/// duration, the tier price IS the base amount. The promotion is then applied to the tier price.
+/// When no tier exists, falls back to MonthlyPrice × DurationMonths.
 /// </summary>
 public sealed class PromotionCalculationService : IPromotionCalculationService
 {
@@ -25,11 +29,21 @@ public sealed class PromotionCalculationService : IPromotionCalculationService
         if (durationMonths <= 0)
             return Error.Validation("Offer.Duration_Invalid", "Duration must be at least one month");
 
-        // Calculate base amount: monthly price × duration
-        var baseAmount = plan.MonthlyPrice * durationMonths;
+        // Authoritative pricing: use PlanPricingTier if available, otherwise MonthlyPrice × Duration
+        var applicableTier = plan.GetPricingTierForDuration(durationMonths);
+        decimal baseAmount;
+        if (applicableTier is not null)
+        {
+            baseAmount = applicableTier.TierPrice;
+        }
+        else
+        {
+            baseAmount = plan.MonthlyPrice * durationMonths;
+        }
+
+        var now = DateTime.UtcNow;
 
         // Find the best eligible promotion (highest priority, then earliest created)
-        // Filter: must be applicable at evaluation time, matching plan (0 = any) and duration (0 = any)
         var bestPromotion = eligiblePromotions
             .Where(p => p.IsApplicableAt(evaluationTime))
             .Where(p => p.PlanId == 0 || p.PlanId == plan.Id)
@@ -41,7 +55,6 @@ public sealed class PromotionCalculationService : IPromotionCalculationService
 
         if (bestPromotion is null)
         {
-            // No applicable promotion: return full-price offer
             return new CalculatedOffer
             {
                 PlanId = plan.Id,
@@ -51,18 +64,20 @@ public sealed class PromotionCalculationService : IPromotionCalculationService
                 FinalAmount = baseAmount,
                 MonthlyListPrice = plan.MonthlyPrice,
                 CurrencyCode = plan.CurrencyCode,
-                PromotionType = "None"
+                PromotionType = "None",
+                CalculatedAtUtc = now
             };
         }
 
-        return ApplyPromotion(plan, durationMonths, baseAmount, bestPromotion);
+        return ApplyPromotion(plan, durationMonths, baseAmount, bestPromotion, now);
     }
 
     private static Result<CalculatedOffer> ApplyPromotion(
         Plan plan,
         int durationMonths,
         decimal baseAmount,
-        Promotion promotion)
+        Promotion promotion,
+        DateTime now)
     {
         decimal discountAmount;
         decimal finalAmount;
@@ -90,7 +105,6 @@ public sealed class PromotionCalculationService : IPromotionCalculationService
                 if (chargedMonths > durationMonths)
                     return Error.Validation("Promotion.ChargedMonths_ExceedsDuration",
                         $"Charged months ({chargedMonths}) cannot exceed duration ({durationMonths})");
-                // Base commercial value = monthly × duration, amount charged = monthly × chargedMonths
                 finalAmount = plan.MonthlyPrice * chargedMonths.Value;
                 discountAmount = baseAmount - finalAmount;
                 break;
@@ -109,7 +123,6 @@ public sealed class PromotionCalculationService : IPromotionCalculationService
                 return Error.Failure("Promotion.UnknownType", $"Unknown promotion type: {promotion.Type}");
         }
 
-        // Final safety: ensure no negative amounts
         if (discountAmount < 0) discountAmount = 0;
         if (finalAmount < 0) finalAmount = 0;
 
@@ -127,7 +140,8 @@ public sealed class PromotionCalculationService : IPromotionCalculationService
             DiscountPercentage = discountPercentage,
             ChargedMonths = chargedMonths,
             MonthlyListPrice = plan.MonthlyPrice,
-            CurrencyCode = plan.CurrencyCode
+            CurrencyCode = plan.CurrencyCode,
+            CalculatedAtUtc = now
         };
     }
 }

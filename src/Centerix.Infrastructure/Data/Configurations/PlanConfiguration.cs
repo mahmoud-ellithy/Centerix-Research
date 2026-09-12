@@ -52,5 +52,11 @@ public class PlanConfiguration : IEntityTypeConfiguration<Plan>
         builder.Property(p => p.LastModifiedBy)
             .HasColumnName("ModifiedBy")
             .HasMaxLength(450);
+
+        // Navigation: Pricing Tiers (cascade delete)
+        builder.HasMany<PlanPricingTier>()
+            .WithOne(pt => pt.Plan)
+            .HasForeignKey(pt => pt.PlanId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

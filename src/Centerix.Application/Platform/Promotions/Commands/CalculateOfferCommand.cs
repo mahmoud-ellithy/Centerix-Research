@@ -21,6 +21,7 @@ public class CalculateOfferHandler(
     public async Task<Result<CalculatedOfferDto>> Handle(CalculateOfferQuery request, CancellationToken cancellationToken)
     {
         var plan = await dbContext.Plans
+            .Include(p => p.PricingTiers)
             .FirstOrDefaultAsync(p => p.Id == request.PlanId, cancellationToken);
 
         if (plan is null)
@@ -60,7 +61,9 @@ public class CalculateOfferHandler(
             DiscountPercentage = offer.DiscountPercentage,
             ChargedMonths = offer.ChargedMonths,
             MonthlyListPrice = offer.MonthlyListPrice,
-            CurrencyCode = offer.CurrencyCode
+            CurrencyCode = offer.CurrencyCode,
+            CalculatedAtUtc = offer.CalculatedAtUtc,
+            ExpiresAtUtc = offer.ExpiresAtUtc
         };
     }
 }

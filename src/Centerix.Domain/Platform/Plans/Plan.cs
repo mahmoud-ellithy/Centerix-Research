@@ -31,6 +31,9 @@ public class Plan : GlobalAuditableEntity<int>
     private readonly List<PlanFeature> _planFeatures = [];
     public IReadOnlyList<PlanFeature> PlanFeatures => _planFeatures.AsReadOnly();
 
+    private readonly List<PlanPricingTier> _pricingTiers = [];
+    public IReadOnlyList<PlanPricingTier> PricingTiers => _pricingTiers.AsReadOnly();
+
     private readonly List<TenantPlan> _tenantPlans = [];
     public IReadOnlyList<TenantPlan> TenantPlans => _tenantPlans.AsReadOnly();
 
@@ -210,4 +213,29 @@ public class Plan : GlobalAuditableEntity<int>
     {
         _planFeatures.RemoveAll(f => f.FeatureId == featureId);
     }
+
+    public Result<Updated> AddPricingTier(PlanPricingTier tier)
+    {
+        if (tier == null) throw new ArgumentNullException(nameof(tier));
+
+        if (_pricingTiers.Any(t => t.DurationMonths == tier.DurationMonths))
+            return Error.Validation("Plan.DuplicatePricingTier",
+                $"A pricing tier with duration {tier.DurationMonths} months already exists for this plan");
+
+        _pricingTiers.Add(tier);
+        return Result.Updated;
+    }
+
+    /// <summary>Gets the applicable pricing tier for the given duration.
+    /// Returns the tier whose duration matches exactly, or null if no tier exists.</summary>
+    public PlanPricingTier? GetPricingTierForDuration(int durationMonths)
+    {
+        return _pricingTiers
+            .Where(t => t.DurationMonths == durationMonths)
+            .FirstOrDefault();
+    }
+
+    /// <summary>EF navigation mutator for rehydration of pricing tiers.</summary>
+    internal void LoadPricingTiers(IEnumerable<PlanPricingTier> tiers)
+        => _pricingTiers.AddRange(tiers);
 }

@@ -289,6 +289,16 @@ public static class Permissions
     }
 
     /// <summary>
+    /// Offer lifecycle: tenant-scoped commercial offers that can be accepted and converted to contracts.
+    /// </summary>
+    public static class Offers
+    {
+        public const string Read = "Offers.Read";
+        public const string Calculate = "Offers.Calculate";
+        public const string Accept = "Offers.Accept";
+    }
+
+    /// <summary>
     /// All permission codes registered in the canonical catalog (see <see cref="PermissionCatalog"/>).
     /// </summary>
     public static string[] GetAll() => PermissionCatalog.All.Select(e => e.Code).ToArray();
@@ -310,6 +320,8 @@ public static class Permissions
         SalaryPayments.Create, SalaryPayments.Read, SalaryPayments.Update,
         TeacherRatings.Create, TeacherRatings.Read,
         Benefits.View,
+        Offers.Read, Offers.Calculate, Offers.Accept,
+        Contracts.Read,
     ];
 
     public static string[] GetTenantUserPermissions() =>
