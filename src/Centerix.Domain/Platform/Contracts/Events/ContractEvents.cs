@@ -102,3 +102,37 @@ public class ContractExpiredEvent : DomainEvent
         ExpiredAtUtc = expiredAtUtc;
     }
 }
+
+/// <summary>Raised when a Contract Benefit becomes eligible for delivery.</summary>
+public class BenefitEligibleEvent : DomainEvent
+{
+    public Guid ContractId { get; }
+    public Guid BenefitId { get; }
+    public string TenantId { get; }
+
+    public BenefitEligibleEvent(Guid contractId, Guid benefitId, string tenantId)
+    {
+        ContractId = contractId;
+        BenefitId = benefitId;
+        TenantId = tenantId;
+    }
+}
+
+/// <summary>Raised when a Contract Benefit is delivered to the customer.</summary>
+public class BenefitDeliveredEvent : DomainEvent
+{
+    public Guid ContractId { get; }
+    public Guid BenefitId { get; }
+    public string TenantId { get; }
+    public DateTime DeliveredAtUtc { get; }
+    public string? DeliveredBy { get; }
+
+    public BenefitDeliveredEvent(Guid contractId, Guid benefitId, string tenantId, DateTime deliveredAtUtc, string? deliveredBy)
+    {
+        ContractId = contractId;
+        BenefitId = benefitId;
+        TenantId = tenantId;
+        DeliveredAtUtc = deliveredAtUtc;
+        DeliveredBy = deliveredBy;
+    }
+}

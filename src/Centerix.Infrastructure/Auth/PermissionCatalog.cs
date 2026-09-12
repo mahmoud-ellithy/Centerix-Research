@@ -136,6 +136,11 @@ public static class PermissionCatalog
         new("Contracts",      "Create", "Contracts.Create",      "Create a contract"),
         new("Contracts",      "Read",   "Contracts.Read",        "Read contracts"),
 
+        // Contract Benefits: eligibility, delivery, and management
+        new("Benefits",       "View",   "Benefits.View",         "View contract benefits"),
+        new("Benefits",       "Manage", "Benefits.Manage",       "Manage contract benefits eligibility"),
+        new("Benefits",       "Deliver","Benefits.Deliver",      "Deliver a physical gift benefit"),
+
         // Promotion / Offer Engine
         new("Promotions",     "View",     "Promotions.View",     "View promotions"),
         new("Promotions",     "Create",   "Promotions.Create",   "Create a promotion"),

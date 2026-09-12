@@ -114,5 +114,29 @@ public static class ContractErrors
         public static Error CurrencyMismatch(string expectedCurrency) =>
             Error.Validation("Contract.Benefit.CurrencyMismatch",
                 $"Benefit currency must match contract currency '{expectedCurrency}'");
+
+        public static Error NotFound(Guid id) =>
+            Error.NotFound("Contract.Benefit.NotFound", $"Benefit with ID '{id}' was not found");
+
+        public static Error CrossTenantBenefit =>
+            Error.Forbidden("Contract.Benefit.CrossTenant", "Cannot access a benefit belonging to a different tenant");
+
+        public static Error ContractNotActive =>
+            Error.Validation("Contract.Benefit.ContractNotActive",
+                "Benefit can only be managed when the contract is Active");
+
+        public static Error AlreadyEligible =>
+            Error.Conflict("Contract.Benefit.AlreadyEligible", "Benefit is already eligible");
+
+        public static Error AlreadyDelivered =>
+            Error.Conflict("Contract.Benefit.AlreadyDelivered", "Benefit has already been delivered");
+
+        public static Error NotEligible =>
+            Error.Validation("Contract.Benefit.NotEligible",
+                "Benefit must be eligible before it can be delivered");
+
+        public static Error NonFinancialBenefitNotRecoverable =>
+            Error.Validation("Contract.Benefit.NonFinancialBenefitNotRecoverable",
+                "Non-financial benefits (ContractualValue = 0) do not generate recovery deductions");
     }
 }

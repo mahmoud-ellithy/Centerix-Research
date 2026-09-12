@@ -9,7 +9,9 @@ using Centerix.Infrastructure.Data;
 using Centerix.Infrastructure.Data.Interceptors;
 using Centerix.Infrastructure.Email;
 using Centerix.Infrastructure.Platform;
+using Centerix.Infrastructure.Platform.Services;
 using Centerix.Infrastructure.Tenancy;
+using Centerix.Application.Platform.Contracts.Services;
 using Finbuckle.MultiTenant;
 using Microsoft.AspNetCore.Authorization;
 
@@ -132,6 +134,9 @@ public static class DependencyInjection
         services.AddScoped<ILimitService, LimitService>();
         services.AddScoped<IPlatformAdminGuard, PlatformAdminGuard>();
         services.AddScoped<ISubscriptionFactory, SubscriptionFactory>();
+
+        // Phase 7: Contract Benefits eligibility service
+        services.AddScoped<IBenefitEligibilityService, BenefitEligibilityService>();
 
         // JWT settings (strongly-typed) with startup validation
         services.Configure<JwtSettings>(configuration.GetSection("JwtSettings"));

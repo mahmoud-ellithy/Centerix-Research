@@ -38,15 +38,27 @@ public class ContractBenefitConfiguration : IEntityTypeConfiguration<ContractBen
             .HasMaxLength(3)
             .IsRequired();
 
+        builder.Property(b => b.EligibilityStatus)
+            .HasConversion<byte>()
+            .IsRequired();
+
+        builder.Property(b => b.EligibleAtUtc);
+
         builder.Property(b => b.IsGranted)
             .IsRequired();
 
         builder.Property(b => b.GrantedAtUtc);
+
+        builder.Property(b => b.DeliveredBy)
+            .HasMaxLength(450);
 
         builder.HasIndex(b => b.ContractId)
             .HasDatabaseName("IX_ContractBenefits_ContractId");
 
         builder.HasIndex(b => new { b.ContractId, b.IsGranted })
             .HasDatabaseName("IX_ContractBenefits_ContractId_IsGranted");
+
+        builder.HasIndex(b => new { b.ContractId, b.EligibilityStatus })
+            .HasDatabaseName("IX_ContractBenefits_ContractId_EligibilityStatus");
     }
 }

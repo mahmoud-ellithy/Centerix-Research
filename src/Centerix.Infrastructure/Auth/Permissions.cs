@@ -266,6 +266,17 @@ public static class Permissions
     }
 
     /// <summary>
+    /// Contract Benefits: eligibility, delivery, and management of commercial benefits/gifts.
+    /// Tenant-scoped: each tenant's benefits are isolated.
+    /// </summary>
+    public static class Benefits
+    {
+        public const string View = "Benefits.View";
+        public const string Manage = "Benefits.Manage";
+        public const string Deliver = "Benefits.Deliver";
+    }
+
+    /// <summary>
     /// Promotion / Offer Engine: platform-scoped commercial rules for calculating promotional offers.
     /// </summary>
     public static class Promotions
@@ -298,6 +309,7 @@ public static class Permissions
         TeacherSalaryConfigs.Create, TeacherSalaryConfigs.Read, TeacherSalaryConfigs.Update, TeacherSalaryConfigs.Delete,
         SalaryPayments.Create, SalaryPayments.Read, SalaryPayments.Update,
         TeacherRatings.Create, TeacherRatings.Read,
+        Benefits.View,
     ];
 
     public static string[] GetTenantUserPermissions() =>
