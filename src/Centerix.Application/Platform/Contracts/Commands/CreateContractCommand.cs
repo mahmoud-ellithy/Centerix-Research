@@ -24,7 +24,10 @@ public record CreateContractCommand(
     decimal DiscountAmount,
     string? PromotionReference,
     List<CreatePricingTierRequest> PricingTiers,
-    List<CreateBenefitRequest> Benefits) : IRequest<Result<Guid>>;
+    List<CreateBenefitRequest> Benefits,
+    int? PromotionId = null,
+    string? PromotionType = null,
+    int? ChargedMonths = null) : IRequest<Result<Guid>>;
 
 /// <summary>
 /// Request to create a pricing tier snapshot.
@@ -85,7 +88,10 @@ public class CreateContractHandler : IRequestHandler<CreateContractCommand, Resu
             request.CurrencyCode,
             request.ContractedAmount,
             request.DiscountAmount,
-            request.PromotionReference);
+            request.PromotionReference,
+            request.PromotionId,
+            request.PromotionType,
+            request.ChargedMonths);
 
         if (!contractResult.IsSuccess)
             return contractResult.Errors!;

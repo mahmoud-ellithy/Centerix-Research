@@ -68,6 +68,18 @@ public class Contract : AuditableEntity<Guid>
     /// <summary>Optional reference to a promotion/discount that was applied.</summary>
     public string? PromotionReference { get; private set; }
 
+    /// <summary>Reference to the Promotion entity that was applied (snapshot).</summary>
+    public int? PromotionId { get; private set; }
+
+    /// <summary>The type of promotion applied (e.g., "PercentageDiscount", "PayForXMonths").</summary>
+    public string? PromotionType { get; private set; }
+
+    /// <summary>
+    /// For PayForXMonths promotions: the number of months the customer is charged for.
+    /// null when not a PayForXMonths promotion.
+    /// </summary>
+    public int? ChargedMonths { get; private set; }
+
     /// <summary>Snapshot of pricing tiers for this contract.</summary>
     private readonly List<ContractPricingTier> _pricingTiers = [];
     public IReadOnlyList<ContractPricingTier> PricingTiers => _pricingTiers.AsReadOnly();
@@ -96,7 +108,10 @@ public class Contract : AuditableEntity<Guid>
         string currencyCode,
         decimal contractedAmount,
         decimal discountAmount,
-        string? promotionReference)
+        string? promotionReference,
+        int? promotionId,
+        string? promotionType,
+        int? chargedMonths)
         : base(id)
     {
         TenantId = tenantId;
@@ -112,6 +127,9 @@ public class Contract : AuditableEntity<Guid>
         ContractedAmount = contractedAmount;
         DiscountAmount = discountAmount;
         PromotionReference = promotionReference;
+        PromotionId = promotionId;
+        PromotionType = promotionType;
+        ChargedMonths = chargedMonths;
     }
 
     /// <summary>
@@ -130,7 +148,10 @@ public class Contract : AuditableEntity<Guid>
         string currencyCode,
         decimal contractedAmount,
         decimal discountAmount = 0,
-        string? promotionReference = null)
+        string? promotionReference = null,
+        int? promotionId = null,
+        string? promotionType = null,
+        int? chargedMonths = null)
     {
         if (id == Guid.Empty)
             return ContractErrors.PricingTier.IdRequired;
@@ -191,7 +212,10 @@ public class Contract : AuditableEntity<Guid>
             currencyCode.Trim().ToUpperInvariant(),
             contractedAmount,
             discountAmount,
-            promotionReference?.Trim());
+            promotionReference?.Trim(),
+            promotionId,
+            promotionType,
+            chargedMonths);
 
         contract.AddDomainEvent(new ContractCreatedEvent(id, tenantId, planId, contractNumber));
 

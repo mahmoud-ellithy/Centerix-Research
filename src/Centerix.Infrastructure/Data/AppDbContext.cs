@@ -26,6 +26,7 @@ using Centerix.Domain.Platform.Subscriptions.LimitOverrides;
 using Centerix.Domain.Platform.Subscriptions.UsageCounters;
 using Centerix.Domain.Platform.Tenants;
 using Centerix.Domain.Platform.Contracts;
+using Centerix.Domain.Platform.Promotions;
 using Centerix.Domain.Students.Attendance;
 using Centerix.Domain.Students.Branches;
 using Centerix.Domain.Students.Lookups;
@@ -112,6 +113,9 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     public DbSet<Contract> Contracts { get; set; } = default!;
     public DbSet<ContractPricingTier> ContractPricingTiers { get; set; } = default!;
     public DbSet<ContractBenefit> ContractBenefits { get; set; } = default!;
+
+    // Promotion / Offer Engine
+    public DbSet<Promotion> Promotions { get; set; } = default!;
 
     // Billing foundation
     public DbSet<BillingCycle> BillingCycles { get; set; } = default!;

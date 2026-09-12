@@ -19,6 +19,9 @@ public class ContractDto
     public decimal ContractedAmount { get; set; }
     public decimal DiscountAmount { get; set; }
     public string? PromotionReference { get; set; }
+    public int? PromotionId { get; set; }
+    public string? PromotionType { get; set; }
+    public int? ChargedMonths { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
 }
 

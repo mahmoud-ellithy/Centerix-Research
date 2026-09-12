@@ -75,6 +75,14 @@ public class ContractConfiguration : IEntityTypeConfiguration<Contract>
         builder.Property(c => c.PromotionReference)
             .HasMaxLength(200);
 
+        // Promotion snapshot fields
+        builder.Property(c => c.PromotionId);
+
+        builder.Property(c => c.PromotionType)
+            .HasMaxLength(50);
+
+        builder.Property(c => c.ChargedMonths);
+
         // Indexes
         builder.HasIndex(c => new { c.TenantId, c.Status })
             .HasDatabaseName("IX_Contracts_TenantId_Status");

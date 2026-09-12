@@ -266,6 +266,18 @@ public static class Permissions
     }
 
     /// <summary>
+    /// Promotion / Offer Engine: platform-scoped commercial rules for calculating promotional offers.
+    /// </summary>
+    public static class Promotions
+    {
+        public const string View = "Promotions.View";
+        public const string Create = "Promotions.Create";
+        public const string Update = "Promotions.Update";
+        public const string Activate = "Promotions.Activate";
+        public const string Calculate = "Promotions.Calculate";
+    }
+
+    /// <summary>
     /// All permission codes registered in the canonical catalog (see <see cref="PermissionCatalog"/>).
     /// </summary>
     public static string[] GetAll() => PermissionCatalog.All.Select(e => e.Code).ToArray();
@@ -334,6 +346,10 @@ public static class Permissions
             Plans.Create, Plans.Read, Plans.Update, Plans.Delete,
             Features.Create, Features.Read, Features.Update, Features.Delete,
             AddOnCatalogs.Create, AddOnCatalogs.Read, AddOnCatalogs.Update,
+
+            // Promotion / Offer Engine (platform-scoped commercial rules)
+            Promotions.View, Promotions.Create, Promotions.Update,
+            Promotions.Activate, Promotions.Calculate,
         };
 
         /// <summary>

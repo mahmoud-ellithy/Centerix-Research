@@ -135,5 +135,12 @@ public static class PermissionCatalog
         // Phase 7: Contracts (commercial agreements)
         new("Contracts",      "Create", "Contracts.Create",      "Create a contract"),
         new("Contracts",      "Read",   "Contracts.Read",        "Read contracts"),
+
+        // Promotion / Offer Engine
+        new("Promotions",     "View",     "Promotions.View",     "View promotions"),
+        new("Promotions",     "Create",   "Promotions.Create",   "Create a promotion"),
+        new("Promotions",     "Update",   "Promotions.Update",   "Update a promotion"),
+        new("Promotions",     "Activate", "Promotions.Activate", "Activate a promotion"),
+        new("Promotions",     "Calculate","Promotions.Calculate", "Calculate an offer"),
     ];
 }
