@@ -37,6 +37,7 @@ public class ContractsController(ILocalizer localizer, IMediator mediator) : Api
     /// Creates a Contract from an accepted Offer. ALL commercial values are derived
     /// from the server-side Offer snapshot. The client CANNOT override any authoritative
     /// commercial values (ContractedAmount, DiscountAmount, PromotionId, ChargedMonths, etc.).
+    /// Benefits are copied from the Offer snapshot — the client cannot inject or override them.
     /// </summary>
     [HttpPost("from-offer")]
     [HasPermission(Permissions.Contracts.Create)]
@@ -47,8 +48,7 @@ public class ContractsController(ILocalizer localizer, IMediator mediator) : Api
         var command = new CreateContractFromOfferCommand(
             request.OfferId,
             request.ContractNumber,
-            request.EffectiveAtUtc,
-            request.Benefits);
+            request.EffectiveAtUtc);
 
         var result = await mediator.Send(command, cancellationToken);
 
@@ -63,5 +63,4 @@ public class CreateContractFromOfferRequest
     public Guid OfferId { get; set; }
     public string ContractNumber { get; set; } = default!;
     public DateTime? EffectiveAtUtc { get; set; }
-    public List<CreateContractFromOfferBenefitRequest>? Benefits { get; set; }
 }

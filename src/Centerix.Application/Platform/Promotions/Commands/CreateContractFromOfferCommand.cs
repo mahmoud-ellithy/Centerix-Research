@@ -17,30 +17,20 @@ using Microsoft.EntityFrameworkCore;
 /// - OfferId (required)
 /// - ContractNumber (required, but must be unique within tenant)
 /// - EffectiveAtUtc (optional, defaults to now)
-/// - Benefits (optional, validated against contract's contractual monthly value cap)
+///
+/// Benefits are read exclusively from the persisted Offer snapshot.
 /// </summary>
 public record CreateContractFromOfferCommand(
     Guid OfferId,
     string ContractNumber,
-    DateTime? EffectiveAtUtc = null,
-    List<CreateContractFromOfferBenefitRequest>? Benefits = null) : IRequest<Result<Guid>>;
-
-/// <summary>
-/// Request to create a benefit/gift when converting an Offer to a Contract.
-/// Only the benefit type, name, and value are provided by the client.
-/// </summary>
-public record CreateContractFromOfferBenefitRequest(
-    Guid Id,
-    ContractBenefitType BenefitType,
-    string Name,
-    string? Description,
-    decimal ContractualValue);
+    DateTime? EffectiveAtUtc = null) : IRequest<Result<Guid>>;
 
 /// <summary>
 /// Handler for CreateContractFromOfferCommand.
 /// Creates the Contract aggregate from the accepted Offer snapshot.
 /// Tenant is resolved from ICurrentTenant — never from client input.
 /// Commercial values are NEVER accepted from the HTTP request.
+/// Benefits are read exclusively from the Offer snapshot.
 /// </summary>
 public class CreateContractFromOfferHandler(
     IAppDbContext dbContext,
@@ -52,8 +42,9 @@ public class CreateContractFromOfferHandler(
         if (string.IsNullOrWhiteSpace(tenantId))
             return ContractErrors.TenantNotResolved;
 
-        // Load the offer
+        // Load the offer with its benefits snapshot
         var offer = await dbContext.Offers
+            .Include(o => o.Benefits)
             .FirstOrDefaultAsync(o => o.Id == request.OfferId, cancellationToken);
 
         if (offer is null)
@@ -125,19 +116,20 @@ public class CreateContractFromOfferHandler(
             }
         }
 
-        // Add benefits if provided (validated against 3-month cap)
-        if (request.Benefits is { Count: > 0 })
+        // Copy benefits from the Offer snapshot (authoritative source)
+        // Benefits are NOT accepted from the client request
+        if (offer.Benefits is { Count: > 0 })
         {
-            foreach (var benefitRequest in request.Benefits)
+            foreach (var offerBenefit in offer.Benefits)
             {
                 var benefitResult = ContractBenefit.Create(
-                    id: benefitRequest.Id == Guid.Empty ? Guid.NewGuid() : benefitRequest.Id,
+                    id: Guid.NewGuid(),
                     contractId: contract.Id,
-                    benefitType: benefitRequest.BenefitType,
-                    name: benefitRequest.Name,
-                    description: benefitRequest.Description,
-                    contractualValue: benefitRequest.ContractualValue,
-                    currencyCode: offer.CurrencyCode);
+                    benefitType: offerBenefit.BenefitType,
+                    name: offerBenefit.Name,
+                    description: offerBenefit.Description,
+                    contractualValue: offerBenefit.ContractualValue,
+                    currencyCode: offerBenefit.CurrencyCode);
 
                 if (!benefitResult.IsSuccess)
                     return benefitResult.Errors!;

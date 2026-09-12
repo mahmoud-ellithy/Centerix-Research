@@ -1,6 +1,7 @@
 using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform.Promotions;
 using Centerix.Application.Platform.Promotions.Commands;
+using Centerix.Domain.Platform.Contracts.Enums;
 using Centerix.Infrastructure.Auth;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
@@ -18,9 +19,17 @@ public class OffersController(ILocalizer localizer, IMediator mediator) : ApiCon
     [HasPermission(Permissions.Offers.Calculate)]
     public async Task<IActionResult> CalculateOffer([FromBody] CalculateAndPersistOfferRequest request, CancellationToken cancellationToken)
     {
-        var result = await mediator.Send(
-            new CalculateAndPersistOfferCommand(request.PlanId, request.DurationMonths, request.EvaluationTimeUtc),
-            cancellationToken);
+        var command = new CalculateAndPersistOfferCommand(
+            request.PlanId,
+            request.DurationMonths,
+            request.EvaluationTimeUtc,
+            request.Benefits?.Select(b => new CreateOfferBenefitRequest(
+                b.BenefitType,
+                b.Name,
+                b.Description,
+                b.ContractualValue)).ToList());
+
+        var result = await mediator.Send(command, cancellationToken);
 
         return result.Match(
             offer => StatusCode(StatusCodes.Status201Created, offer),
@@ -76,4 +85,13 @@ public class CalculateAndPersistOfferRequest
     public int PlanId { get; set; }
     public int DurationMonths { get; set; }
     public DateTime? EvaluationTimeUtc { get; set; }
+    public List<CreateOfferBenefitRequestDto>? Benefits { get; set; }
+}
+
+public class CreateOfferBenefitRequestDto
+{
+    public ContractBenefitType BenefitType { get; set; }
+    public string Name { get; set; } = default!;
+    public string? Description { get; set; }
+    public decimal ContractualValue { get; set; }
 }

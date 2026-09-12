@@ -82,6 +82,12 @@ public class Offer : AuditableEntity<Guid>
     /// <summary>Reference to the Contract created from this offer.</summary>
     public Guid? ContractId { get; private set; }
 
+    // ---- Benefits snapshot ----
+
+    /// <summary>Benefits/gifts snapshot attached to this offer. Authoritative source for Contract creation.</summary>
+    private readonly List<OfferBenefit> _benefits = [];
+    public IReadOnlyList<OfferBenefit> Benefits => _benefits.AsReadOnly();
+
     private Offer() { }
 
     private Offer(
@@ -255,4 +261,20 @@ public class Offer : AuditableEntity<Guid>
         Status = OfferStatus.Expired;
         return Result.Updated;
     }
+
+    /// <summary>
+    /// Adds a benefit snapshot to this offer. Benefits stored here are the
+    /// authoritative source when creating a Contract from this Offer.
+    /// </summary>
+    public Result<Updated> AddBenefit(OfferBenefit benefit)
+    {
+        if (benefit == null) throw new ArgumentNullException(nameof(benefit));
+
+        _benefits.Add(benefit);
+        return Result.Updated;
+    }
+
+    /// <summary>EF navigation mutator for rehydration of benefits.</summary>
+    internal void LoadBenefits(IEnumerable<OfferBenefit> benefits)
+        => _benefits.AddRange(benefits);
 }

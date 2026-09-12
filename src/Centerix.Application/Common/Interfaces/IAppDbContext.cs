@@ -85,6 +85,7 @@ public interface IAppDbContext
     // Promotion / Offer Engine
     DbSet<Promotion> Promotions { get; }
     DbSet<Centerix.Domain.Platform.Promotions.Offer> Offers { get; }
+    DbSet<Centerix.Domain.Platform.Promotions.OfferBenefit> OfferBenefits { get; }
 
     /// <summary>
     /// The AUTHORIZED tenant ID for this request, set from ICurrentTenant.

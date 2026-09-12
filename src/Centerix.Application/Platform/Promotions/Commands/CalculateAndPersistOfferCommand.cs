@@ -2,19 +2,31 @@ namespace Centerix.Application.Platform.Promotions.Commands;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Contracts.Enums;
 using Centerix.Domain.Platform.Promotions;
 using Centerix.Domain.Platform.Promotions.Enums;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
 /// <summary>
+/// Request to attach a benefit snapshot to an Offer.
+/// </summary>
+public record CreateOfferBenefitRequest(
+    ContractBenefitType BenefitType,
+    string Name,
+    string? Description,
+    decimal ContractualValue);
+
+/// <summary>
 /// Command to calculate and persist an Offer for a plan and duration.
 /// The Offer is tenant-scoped and persisted as an immutable snapshot.
+/// Optionally accepts benefits to store on the Offer as an authoritative snapshot.
 /// </summary>
 public record CalculateAndPersistOfferCommand(
     int PlanId,
     int DurationMonths,
-    DateTime? EvaluationTimeUtc = null) : IRequest<Result<OfferDto>>;
+    DateTime? EvaluationTimeUtc = null,
+    List<CreateOfferBenefitRequest>? Benefits = null) : IRequest<Result<OfferDto>>;
 
 public class CalculateAndPersistOfferHandler(
     IAppDbContext dbContext,
@@ -76,6 +88,29 @@ public class CalculateAndPersistOfferHandler(
         if (!offer.IsSuccess)
             return offer.Errors!;
 
+        // Store benefits on the Offer as an authoritative snapshot
+        if (request.Benefits is { Count: > 0 })
+        {
+            foreach (var benefitRequest in request.Benefits)
+            {
+                var benefit = Domain.Platform.Promotions.OfferBenefit.Create(
+                    id: Guid.NewGuid(),
+                    offerId: offer.Value.Id,
+                    benefitType: benefitRequest.BenefitType,
+                    name: benefitRequest.Name,
+                    description: benefitRequest.Description,
+                    contractualValue: benefitRequest.ContractualValue,
+                    currencyCode: calculated.CurrencyCode);
+
+                if (!benefit.IsSuccess)
+                    return benefit.Errors!;
+
+                var addResult = offer.Value.AddBenefit(benefit.Value);
+                if (!addResult.IsSuccess)
+                    return addResult.Errors!;
+            }
+        }
+
         dbContext.StampAddedTenantIds(tenantId);
         dbContext.Offers.Add(offer.Value);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -104,6 +139,15 @@ public class CalculateAndPersistOfferHandler(
         ExpiresAtUtc = offer.ExpiresAtUtc,
         AcceptedAtUtc = offer.AcceptedAtUtc,
         ConvertedAtUtc = offer.ConvertedAtUtc,
-        ContractId = offer.ContractId
+        ContractId = offer.ContractId,
+        Benefits = offer.Benefits.Select(b => new OfferBenefitDto
+        {
+            Id = b.Id,
+            BenefitType = b.BenefitType,
+            Name = b.Name,
+            Description = b.Description,
+            ContractualValue = b.ContractualValue,
+            CurrencyCode = b.CurrencyCode
+        }).ToList()
     };
 }

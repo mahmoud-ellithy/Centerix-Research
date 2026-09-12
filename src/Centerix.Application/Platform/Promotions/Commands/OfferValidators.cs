@@ -13,6 +13,22 @@ public class CalculateAndPersistOfferValidator : AbstractValidator<CalculateAndP
         RuleFor(x => x.DurationMonths)
             .GreaterThan(0)
             .WithMessage("Duration must be at least 1 month");
+
+        When(x => x.Benefits is not null, () =>
+        {
+            RuleForEach(x => x.Benefits)
+                .ChildRules(benefit =>
+                {
+                    benefit.RuleFor(b => b.Name)
+                        .NotEmpty()
+                        .MaximumLength(200)
+                        .WithMessage("Benefit name is required");
+
+                    benefit.RuleFor(b => b.ContractualValue)
+                        .GreaterThanOrEqualTo(0)
+                        .WithMessage("Benefit value cannot be negative");
+                });
+        });
     }
 }
 
@@ -38,21 +54,5 @@ public class CreateContractFromOfferValidator : AbstractValidator<CreateContract
             .NotEmpty()
             .MaximumLength(50)
             .WithMessage("Contract number is required and must not exceed 50 characters");
-
-        When(x => x.Benefits is not null, () =>
-        {
-            RuleForEach(x => x.Benefits)
-                .ChildRules(benefit =>
-                {
-                    benefit.RuleFor(b => b.Name)
-                        .NotEmpty()
-                        .MaximumLength(200)
-                        .WithMessage("Benefit name is required");
-
-                    benefit.RuleFor(b => b.ContractualValue)
-                        .GreaterThanOrEqualTo(0)
-                        .WithMessage("Benefit value cannot be negative");
-                });
-        });
     }
 }

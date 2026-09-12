@@ -118,6 +118,7 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     // Promotion / Offer Engine
     public DbSet<Promotion> Promotions { get; set; } = default!;
     public DbSet<Offer> Offers { get; set; } = default!;
+    public DbSet<OfferBenefit> OfferBenefits { get; set; } = default!;
 
     // Billing foundation
     public DbSet<BillingCycle> BillingCycles { get; set; } = default!;
