@@ -60,7 +60,7 @@ public class CheckBenefitEligibilityHandler(
         if (determinedStatus == BenefitEligibilityStatus.Eligible
             && benefit.EligibilityStatus == BenefitEligibilityStatus.NotEligible)
         {
-            benefit.MarkEligible(DateTime.UtcNow);
+            benefit.MarkEligible(DateTime.UtcNow, contract.TenantId);
             await dbContext.SaveChangesAsync(cancellationToken);
         }
 

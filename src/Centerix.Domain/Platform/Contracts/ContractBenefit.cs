@@ -127,7 +127,7 @@ public class ContractBenefit : Entity
     /// Must be called before MarkGranted/Deliver for physical gifts.
     /// Idempotent: returns success if already eligible or delivered.
     /// </summary>
-    public Result<Updated> MarkEligible(DateTime utcNow)
+    public Result<Updated> MarkEligible(DateTime utcNow, string? tenantId = null)
     {
         if (EligibilityStatus == BenefitEligibilityStatus.Delivered)
             return Result.Updated;
@@ -138,7 +138,7 @@ public class ContractBenefit : Entity
         EligibilityStatus = BenefitEligibilityStatus.Eligible;
         EligibleAtUtc = utcNow;
 
-        AddDomainEvent(new BenefitEligibleEvent(ContractId, Id, string.Empty));
+        AddDomainEvent(new BenefitEligibleEvent(ContractId, Id, tenantId ?? string.Empty));
 
         return Result.Updated;
     }
@@ -146,23 +146,32 @@ public class ContractBenefit : Entity
     /// <summary>
     /// Marks this benefit as granted/delivered to the tenant.
     /// For physical gifts, this records the physical handover.
+    /// Only PhysicalGift benefits can be delivered; other types are rejected.
     /// Idempotent: returns success if already granted.
     /// </summary>
     /// <remarks>
     /// Delivery creates an immutable audit record. Once delivered, the benefit's
     /// snapshot fields (Name, Value, Type, Currency) cannot be silently changed.
     /// </remarks>
-    public Result<Updated> MarkGranted(DateTime utcNow, string? deliveredBy = null)
+    public Result<Updated> MarkGranted(DateTime utcNow, string? deliveredBy = null, string? tenantId = null)
     {
         if (IsGranted)
             return Result.Updated;
+
+        // Only PhysicalGift benefits can be delivered.
+        if (BenefitType != ContractBenefitType.PhysicalGift)
+            return ContractErrors.Benefit.OnlyPhysicalGiftCanBeDelivered;
+
+        // Must be eligible before delivery.
+        if (EligibilityStatus != BenefitEligibilityStatus.Eligible)
+            return ContractErrors.Benefit.NotEligible;
 
         IsGranted = true;
         GrantedAtUtc = utcNow;
         DeliveredBy = deliveredBy;
         EligibilityStatus = BenefitEligibilityStatus.Delivered;
 
-        AddDomainEvent(new BenefitDeliveredEvent(ContractId, Id, string.Empty, utcNow, deliveredBy));
+        AddDomainEvent(new BenefitDeliveredEvent(ContractId, Id, tenantId ?? string.Empty, utcNow, deliveredBy));
 
         return Result.Updated;
     }

@@ -189,8 +189,11 @@ public class RefundCalculationEngineTests
             value,
             "EGP").Value;
 
-        var grantResult = benefit.MarkGranted(grantedAtUtc ?? DateTime.UtcNow);
+        var grantResult = benefit.MarkEligible(grantedAtUtc ?? DateTime.UtcNow);
         Assert.True(grantResult.IsSuccess);
+
+        var grantResult2 = benefit.MarkGranted(grantedAtUtc ?? DateTime.UtcNow);
+        Assert.True(grantResult2.IsSuccess);
 
         return benefit;
     }

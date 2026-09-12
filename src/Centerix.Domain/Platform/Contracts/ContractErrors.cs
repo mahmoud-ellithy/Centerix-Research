@@ -135,6 +135,10 @@ public static class ContractErrors
             Error.Validation("Contract.Benefit.NotEligible",
                 "Benefit must be eligible before it can be delivered");
 
+        public static Error OnlyPhysicalGiftCanBeDelivered =>
+            Error.Validation("Contract.Benefit.OnlyPhysicalGiftCanBeDelivered",
+                "Only PhysicalGift benefits can be delivered through MarkBenefitDelivered");
+
         public static Error NonFinancialBenefitNotRecoverable =>
             Error.Validation("Contract.Benefit.NonFinancialBenefitNotRecoverable",
                 "Non-financial benefits (ContractualValue = 0) do not generate recovery deductions");

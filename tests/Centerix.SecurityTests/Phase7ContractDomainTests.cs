@@ -428,6 +428,7 @@ public class Phase7ContractDomainTests
         Assert.Null(benefit.GrantedAtUtc);
 
         var grantTime = new DateTime(2026, 6, 15, 0, 0, 0, DateTimeKind.Utc);
+        benefit.MarkEligible(grantTime);
         Assert.True(benefit.MarkGranted(grantTime).IsSuccess);
 
         Assert.True(benefit.IsGranted);

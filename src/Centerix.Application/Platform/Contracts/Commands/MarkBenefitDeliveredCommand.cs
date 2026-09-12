@@ -115,9 +115,12 @@ public class MarkBenefitDeliveredHandler(
             };
         }
 
+        // Only PhysicalGift benefits can be delivered
+        if (benefit.BenefitType != ContractBenefitType.PhysicalGift)
+            return ContractErrors.Benefit.OnlyPhysicalGiftCanBeDelivered;
+
         // Must be eligible before delivery
-        if (benefit.EligibilityStatus != BenefitEligibilityStatus.Eligible
-            && benefit.EligibilityStatus != BenefitEligibilityStatus.Delivered)
+        if (benefit.EligibilityStatus != BenefitEligibilityStatus.Eligible)
         {
             return ContractErrors.Benefit.NotEligible;
         }
@@ -125,7 +128,7 @@ public class MarkBenefitDeliveredHandler(
         var now = DateTime.UtcNow;
         var deliveredBy = currentUserService.UserId;
 
-        var grantResult = benefit.MarkGranted(now, deliveredBy);
+        var grantResult = benefit.MarkGranted(now, deliveredBy, contract.TenantId);
         if (!grantResult.IsSuccess)
             return grantResult.Errors!;
 

@@ -80,10 +80,11 @@ public class ContractBenefitsGiftsHardeningTests
         Guid contractId,
         string name,
         decimal value,
-        ContractBenefitType type = ContractBenefitType.PhysicalGift)
+        ContractBenefitType type = ContractBenefitType.PhysicalGift,
+        string? tenantId = null)
     {
         var benefit = CreateBenefit(contractId, name, value, type);
-        benefit.MarkEligible(DateTime.UtcNow);
+        benefit.MarkEligible(DateTime.UtcNow, tenantId);
         return benefit;
     }
 
@@ -92,11 +93,28 @@ public class ContractBenefitsGiftsHardeningTests
         string name,
         decimal value,
         ContractBenefitType type = ContractBenefitType.PhysicalGift,
-        DateTime? grantedAtUtc = null)
+        DateTime? grantedAtUtc = null,
+        string? tenantId = null)
     {
         var benefit = CreateBenefit(contractId, name, value, type);
-        benefit.MarkEligible(DateTime.UtcNow);
-        benefit.MarkGranted(grantedAtUtc ?? DateTime.UtcNow);
+        benefit.MarkEligible(DateTime.UtcNow, tenantId);
+
+        if (type == ContractBenefitType.PhysicalGift)
+        {
+            benefit.MarkGranted(grantedAtUtc ?? DateTime.UtcNow, tenantId: tenantId);
+        }
+        else
+        {
+            // For non-PhysicalGift types, set granted via reflection for refund tests.
+            // In production, only PhysicalGift can be delivered through MarkBenefitDelivered.
+            typeof(ContractBenefit).GetProperty(nameof(ContractBenefit.IsGranted))!
+                .SetValue(benefit, true);
+            typeof(ContractBenefit).GetProperty(nameof(ContractBenefit.GrantedAtUtc))!
+                .SetValue(benefit, grantedAtUtc ?? DateTime.UtcNow);
+            typeof(ContractBenefit).GetProperty(nameof(ContractBenefit.EligibilityStatus))!
+                .SetValue(benefit, BenefitEligibilityStatus.Delivered);
+        }
+
         return benefit;
     }
 
@@ -806,15 +824,25 @@ public class ContractBenefitsGiftsHardeningTests
     }
 
     [Fact]
-    public void Benefit_EligibilityService_NonFinancialAlwaysEligible()
+    public void Benefit_EligibilityService_NonFinancialRequiresSameConditions()
     {
         var contract = CreateValidContract(contractedAmount: 10000m);
         var zeroBenefit = CreateBenefit(contract.Id, "Free Service", 0m, ContractBenefitType.Service);
 
+        // Contract is Draft (not Active) -- zero-value must NOT bypass eligibility
         var canBecomeEligible = s_eligibilityService.CanBecomeEligible(
             zeroBenefit, contract, 0m, contract.ContractedAmount);
 
-        Assert.True(canBecomeEligible);
+        Assert.False(canBecomeEligible);
+
+        // Activate contract and verify eligibility with satisfied payment
+        contract.SubmitForApproval();
+        contract.Activate(DateTime.UtcNow);
+
+        var canBecomeEligibleActive = s_eligibilityService.CanBecomeEligible(
+            zeroBenefit, contract, 10000m, contract.ContractedAmount);
+
+        Assert.True(canBecomeEligibleActive);
     }
 
     [Fact]
@@ -918,7 +946,7 @@ public class ContractBenefitsGiftsHardeningTests
     }
 
     [Fact]
-    public void BenefitType_Service_CanBeMarkedGranted()
+    public void BenefitType_Service_CannotBeMarkedGranted()
     {
         var contract = CreateValidContract();
         var benefit = CreateBenefit(contract.Id, "Support", 500m, ContractBenefitType.Service);
@@ -926,9 +954,13 @@ public class ContractBenefitsGiftsHardeningTests
         Assert.Equal(ContractBenefitType.Service, benefit.BenefitType);
 
         benefit.MarkEligible(DateTime.UtcNow);
-        benefit.MarkGranted(DateTime.UtcNow);
+        var result = benefit.MarkGranted(DateTime.UtcNow);
 
-        Assert.True(benefit.IsGranted);
+        // Service benefits cannot be delivered through MarkBenefitDelivered
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Contract.Benefit.OnlyPhysicalGiftCanBeDelivered", result.Errors[0].Code);
+        Assert.False(benefit.IsGranted);
+        Assert.Equal(BenefitEligibilityStatus.Eligible, benefit.EligibilityStatus);
     }
 
     // ==================================================================
@@ -991,10 +1023,15 @@ public class ContractBenefitsGiftsHardeningTests
         var contract = CreateValidContract();
         var benefit = CreateBenefit(contract.Id, "Printer", 1000m);
 
-        benefit.MarkEligible(DateTime.UtcNow);
+        benefit.MarkEligible(DateTime.UtcNow, contract.TenantId);
 
         var domainEvents = benefit.DomainEvents;
         Assert.Contains(domainEvents, e => e is BenefitEligibleEvent);
+
+        var eligibleEvent = domainEvents.OfType<BenefitEligibleEvent>().First();
+        Assert.Equal(contract.TenantId, eligibleEvent.TenantId);
+        Assert.Equal(contract.Id, eligibleEvent.ContractId);
+        Assert.Equal(benefit.Id, eligibleEvent.BenefitId);
     }
 
     [Fact]
@@ -1003,11 +1040,16 @@ public class ContractBenefitsGiftsHardeningTests
         var contract = CreateValidContract();
         var benefit = CreateBenefit(contract.Id, "Printer", 1000m);
 
-        benefit.MarkEligible(DateTime.UtcNow);
-        benefit.MarkGranted(DateTime.UtcNow, "user-1");
+        benefit.MarkEligible(DateTime.UtcNow, contract.TenantId);
+        benefit.MarkGranted(DateTime.UtcNow, "user-1", contract.TenantId);
 
         var domainEvents = benefit.DomainEvents;
         Assert.Contains(domainEvents, e => e is BenefitDeliveredEvent);
+
+        var deliveredEvent = domainEvents.OfType<BenefitDeliveredEvent>().First();
+        Assert.Equal(contract.TenantId, deliveredEvent.TenantId);
+        Assert.Equal(contract.Id, deliveredEvent.ContractId);
+        Assert.Equal(benefit.Id, deliveredEvent.BenefitId);
     }
 
     // ==================================================================
@@ -1036,5 +1078,425 @@ public class ContractBenefitsGiftsHardeningTests
         var currencyProp = typeof(ContractBenefit).GetProperty(nameof(ContractBenefit.CurrencyCode));
         Assert.NotNull(currencyProp);
         Assert.Null(currencyProp.GetSetMethod(false));
+    }
+
+    // ==================================================================
+    // TASK 6.1: Zero-value benefit must not bypass eligibility
+    // ==================================================================
+
+    [Fact]
+    public void Task6_1_ZeroValue_InactiveContract_NotEligible()
+    {
+        var contract = CreateValidContract(contractedAmount: 10000m);
+        var zeroBenefit = CreateBenefit(contract.Id, "Free Gift", 0m);
+
+        // Contract is Draft (not Active), zero-value must NOT bypass
+        var canBecomeEligible = s_eligibilityService.CanBecomeEligible(
+            zeroBenefit, contract, 0m, contract.ContractedAmount);
+
+        Assert.False(canBecomeEligible);
+        Assert.Equal(BenefitEligibilityStatus.NotEligible, zeroBenefit.EligibilityStatus);
+    }
+
+    [Fact]
+    public void Task6_1_ZeroValue_InsufficientPayment_NotEligible()
+    {
+        var contract = CreateValidContract(contractedAmount: 10000m);
+        contract.SubmitForApproval();
+        contract.Activate(DateTime.UtcNow);
+
+        var zeroBenefit = CreateBenefit(contract.Id, "Free Gift", 0m);
+
+        // Active contract but no payment — zero-value must NOT bypass payment check
+        var canBecomeEligible = s_eligibilityService.CanBecomeEligible(
+            zeroBenefit, contract, 0m, contract.ContractedAmount);
+
+        Assert.False(canBecomeEligible);
+        Assert.Equal(BenefitEligibilityStatus.NotEligible, zeroBenefit.EligibilityStatus);
+    }
+
+    [Fact]
+    public void Task6_1_ZeroValue_MustNotBypassEligibility()
+    {
+        var contract = CreateValidContract(contractedAmount: 10000m);
+
+        // Draft contract + zero payment — zero-value must not bypass
+        var zeroBenefit = CreateBenefit(contract.Id, "Sticker", 0m);
+        Assert.False(s_eligibilityService.CanBecomeEligible(zeroBenefit, contract, 0m, contract.ContractedAmount));
+
+        // Active contract + insufficient payment — zero-value must not bypass
+        contract.SubmitForApproval();
+        contract.Activate(DateTime.UtcNow);
+        Assert.False(s_eligibilityService.CanBecomeEligible(zeroBenefit, contract, 5000m, contract.ContractedAmount));
+
+        // Active contract + full payment — zero-value becomes eligible
+        Assert.True(s_eligibilityService.CanBecomeEligible(zeroBenefit, contract, 10000m, contract.ContractedAmount));
+    }
+
+    // ==================================================================
+    // TASK 6.1: Delivery restricted to PhysicalGift only
+    // ==================================================================
+
+    [Fact]
+    public void Task6_1_PhysicalGift_CanBeDelivered()
+    {
+        var contract = CreateValidContract();
+        var benefit = CreateBenefit(contract.Id, "Printer", 1000m, ContractBenefitType.PhysicalGift);
+
+        benefit.MarkEligible(DateTime.UtcNow);
+        var result = benefit.MarkGranted(DateTime.UtcNow, "user-1");
+
+        Assert.True(result.IsSuccess);
+        Assert.True(benefit.IsGranted);
+        Assert.Equal(BenefitEligibilityStatus.Delivered, benefit.EligibilityStatus);
+    }
+
+    [Fact]
+    public void Task6_1_Service_CannotBeDelivered()
+    {
+        var contract = CreateValidContract();
+        var benefit = CreateBenefit(contract.Id, "Support", 500m, ContractBenefitType.Service);
+
+        benefit.MarkEligible(DateTime.UtcNow);
+        var result = benefit.MarkGranted(DateTime.UtcNow);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Contract.Benefit.OnlyPhysicalGiftCanBeDelivered", result.Errors[0].Code);
+        Assert.False(benefit.IsGranted);
+    }
+
+    [Fact]
+    public void Task6_1_FinancialCredit_CannotBeDelivered()
+    {
+        var contract = CreateValidContract();
+        var benefit = CreateBenefit(contract.Id, "Credit", 500m, ContractBenefitType.FinancialCredit);
+
+        benefit.MarkEligible(DateTime.UtcNow);
+        var result = benefit.MarkGranted(DateTime.UtcNow);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Contract.Benefit.OnlyPhysicalGiftCanBeDelivered", result.Errors[0].Code);
+        Assert.False(benefit.IsGranted);
+    }
+
+    [Fact]
+    public void Task6_1_ExtendedTerm_CannotBeDelivered()
+    {
+        var contract = CreateValidContract();
+        var benefit = CreateBenefit(contract.Id, "Extension", 500m, ContractBenefitType.ExtendedTerm);
+
+        benefit.MarkEligible(DateTime.UtcNow);
+        var result = benefit.MarkGranted(DateTime.UtcNow);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Contract.Benefit.OnlyPhysicalGiftCanBeDelivered", result.Errors[0].Code);
+        Assert.False(benefit.IsGranted);
+    }
+
+    [Fact]
+    public void Task6_1_Other_CannotBeDelivered()
+    {
+        var contract = CreateValidContract();
+        var benefit = CreateBenefit(contract.Id, "OtherBenefit", 500m, ContractBenefitType.Other);
+
+        benefit.MarkEligible(DateTime.UtcNow);
+        var result = benefit.MarkGranted(DateTime.UtcNow);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Contract.Benefit.OnlyPhysicalGiftCanBeDelivered", result.Errors[0].Code);
+        Assert.False(benefit.IsGranted);
+    }
+
+    [Fact]
+    public void Task6_1_AlreadyDelivered_PhysicalGift_IsIdempotent()
+    {
+        var contract = CreateValidContract();
+        var benefit = CreateBenefit(contract.Id, "Printer", 1000m, ContractBenefitType.PhysicalGift);
+
+        benefit.MarkEligible(DateTime.UtcNow, contract.TenantId);
+        benefit.MarkGranted(DateTime.UtcNow, "user-1", contract.TenantId);
+        Assert.True(benefit.IsGranted);
+
+        // Second delivery is idempotent
+        var result2 = benefit.MarkGranted(DateTime.UtcNow, "user-2", contract.TenantId);
+        Assert.True(result2.IsSuccess);
+        Assert.True(benefit.IsGranted);
+    }
+
+    // ==================================================================
+    // TASK 6.1: Domain events contain real TenantId
+    // ==================================================================
+
+    [Fact]
+    public void Task6_1_BenefitEligibleEvent_TenantId_EqualsContractTenantId()
+    {
+        var contract = CreateValidContract(tenantId: "tenant-abc-123");
+        var benefit = CreateBenefit(contract.Id, "Printer", 1000m);
+
+        benefit.MarkEligible(DateTime.UtcNow, contract.TenantId);
+
+        var eligibleEvent = benefit.DomainEvents.OfType<BenefitEligibleEvent>().Single();
+        Assert.Equal(contract.TenantId, eligibleEvent.TenantId);
+        Assert.Equal("tenant-abc-123", eligibleEvent.TenantId);
+        Assert.NotEmpty(eligibleEvent.TenantId);
+    }
+
+    [Fact]
+    public void Task6_1_BenefitDeliveredEvent_TenantId_EqualsContractTenantId()
+    {
+        var contract = CreateValidContract(tenantId: "tenant-xyz-789");
+        var benefit = CreateBenefit(contract.Id, "Printer", 1000m);
+
+        benefit.MarkEligible(DateTime.UtcNow, contract.TenantId);
+        benefit.MarkGranted(DateTime.UtcNow, "user-1", contract.TenantId);
+
+        var deliveredEvent = benefit.DomainEvents.OfType<BenefitDeliveredEvent>().Single();
+        Assert.Equal(contract.TenantId, deliveredEvent.TenantId);
+        Assert.Equal("tenant-xyz-789", deliveredEvent.TenantId);
+        Assert.NotEmpty(deliveredEvent.TenantId);
+    }
+
+    // ==================================================================
+    // TASK 6.1: Installment dependency documentation
+    // ==================================================================
+
+    [Fact]
+    public void Task6_1_InstallmentDependency_IsDocumented()
+    {
+        // This test documents that overdue-installment validation depends on the
+        // future Installment Schedule/Obligation engine.
+        // Current eligibility checks:
+        //   1. Contract.Status == Active
+        //   2. completedPaymentTotal >= contractedAmount
+        //   3. overdue installment check: NOT YET IMPLEMENTED
+        //
+        // The BenefitEligibilityService documentation explicitly states:
+        // "No overdue installment check is performed (current model does not have
+        //  installment schedules; this limitation is documented as a dependency on
+        //  the future Installment Schedule/Obligation engine)"
+        //
+        // This test verifies the current behavior is consistent with that limitation:
+        // a benefit with Active contract + full payment becomes eligible even without
+        // installment schedule validation.
+
+        var contract = CreateValidContract(contractedAmount: 10000m);
+        contract.SubmitForApproval();
+        contract.Activate(DateTime.UtcNow);
+
+        var benefit = CreateBenefit(contract.Id, "Printer", 1000m);
+
+        var canBecomeEligible = s_eligibilityService.CanBecomeEligible(
+            benefit, contract, 10000m, contract.ContractedAmount);
+
+        Assert.True(canBecomeEligible);
+    }
+
+    // ==================================================================
+    // TASK 6.1: Refund regression — zero-value benefit no negative values
+    // ==================================================================
+
+    [Fact]
+    public void Task6_1_ZeroValueBenefit_NoNegativeRefundValues()
+    {
+        var effectiveAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var endsAt = effectiveAt.AddMonths(12);
+        var contract = CreateValidContract(
+            contractedAmount: 10000m,
+            effectiveAtUtc: effectiveAt,
+            endsAtUtc: endsAt);
+        contract.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contract.Id, 6, 5220m, "EGP", 1000m, 1).Value);
+
+        var zeroBenefit = CreateGrantedBenefit(contract.Id, "Free Sticker", 0m);
+        contract.AddBenefit(zeroBenefit);
+
+        var payment = CreateCompletedPayment(10000m, 10000m, contract);
+        var cancellationDate = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        var result = s_refundService.Calculate(
+            contract, cancellationDate,
+            new[] { payment },
+            contract.Benefits);
+
+        // Zero-value benefit must not introduce negative or incorrect refund values
+        Assert.True(result.ConsumedBenefitValue >= 0);
+        Assert.True(result.RemainingBenefitValue >= 0);
+        Assert.True(result.RefundAmount >= 0);
+        Assert.True(result.CustomerOutstandingAmount >= 0);
+        Assert.Equal(0m, result.ConsumedBenefitValue);
+        Assert.Equal(0m, result.RemainingBenefitValue);
+    }
+
+    // ==================================================================
+    // TASK 6.1: Lifecycle preservation — no Delivered→Eligible transition
+    // ==================================================================
+
+    [Fact]
+    public void Task6_1_Delivered_BenefitCannotRevertToEligible()
+    {
+        var contract = CreateValidContract();
+        var benefit = CreateBenefit(contract.Id, "Printer", 1000m);
+
+        benefit.MarkEligible(DateTime.UtcNow, contract.TenantId);
+        benefit.MarkGranted(DateTime.UtcNow, "user-1", contract.TenantId);
+        Assert.Equal(BenefitEligibilityStatus.Delivered, benefit.EligibilityStatus);
+
+        // Attempt to mark eligible again — should be idempotent, not revert
+        benefit.MarkEligible(DateTime.UtcNow, contract.TenantId);
+        Assert.Equal(BenefitEligibilityStatus.Delivered, benefit.EligibilityStatus);
+        Assert.True(benefit.IsGranted);
+    }
+
+    [Fact]
+    public void Task6_1_NotEligible_BenefitCannotSkipToDelivered()
+    {
+        var contract = CreateValidContract();
+        var benefit = CreateBenefit(contract.Id, "Printer", 1000m);
+
+        Assert.Equal(BenefitEligibilityStatus.NotEligible, benefit.EligibilityStatus);
+
+        // Cannot deliver a benefit that is not eligible
+        var result = benefit.MarkGranted(DateTime.UtcNow);
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Contract.Benefit.NotEligible", result.Errors[0].Code);
+        Assert.False(benefit.IsGranted);
+    }
+
+    // ==================================================================
+    // TASK 6.1: Complete 20-test matrix verification
+    // ==================================================================
+
+    [Fact]
+    public void Task6_1_Eligibility_ActiveContract_SatisfiedPayment_Eligible()
+    {
+        var contract = CreateValidContract(contractedAmount: 10000m);
+        contract.SubmitForApproval();
+        contract.Activate(DateTime.UtcNow);
+
+        var benefit = CreateBenefit(contract.Id, "Printer", 1000m);
+
+        var canBecomeEligible = s_eligibilityService.CanBecomeEligible(
+            benefit, contract, 10000m, contract.ContractedAmount);
+
+        Assert.True(canBecomeEligible);
+    }
+
+    [Fact]
+    public void Task6_1_Eligibility_InactiveContract_NotEligible()
+    {
+        var contract = CreateValidContract(contractedAmount: 10000m);
+        var benefit = CreateBenefit(contract.Id, "Printer", 1000m);
+
+        Assert.Equal(ContractStatus.Draft, contract.Status);
+
+        var canBecomeEligible = s_eligibilityService.CanBecomeEligible(
+            benefit, contract, 10000m, contract.ContractedAmount);
+
+        Assert.False(canBecomeEligible);
+    }
+
+    [Fact]
+    public void Task6_1_Eligibility_InsufficientPayment_NotEligible()
+    {
+        var contract = CreateValidContract(contractedAmount: 10000m);
+        contract.SubmitForApproval();
+        contract.Activate(DateTime.UtcNow);
+
+        var benefit = CreateBenefit(contract.Id, "Printer", 1000m);
+
+        var canBecomeEligible = s_eligibilityService.CanBecomeEligible(
+            benefit, contract, 5000m, contract.ContractedAmount);
+
+        Assert.False(canBecomeEligible);
+    }
+
+    [Fact]
+    public void Task6_1_Refund_DeliveredPhysicalGift_ProducesRemainingValueRecovery()
+    {
+        var effectiveAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var endsAt = effectiveAt.AddMonths(12);
+        var contract = CreateValidContract(
+            contractedAmount: 10000m,
+            effectiveAtUtc: effectiveAt,
+            endsAtUtc: endsAt);
+        contract.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contract.Id, 12, 10000m, "EGP", 1000m, 1).Value);
+
+        var benefit = CreateGrantedBenefit(contract.Id, "Printer", 1000m);
+        contract.AddBenefit(benefit);
+
+        var payment = CreateCompletedPayment(10000m, 10000m, contract);
+
+        var cancellationDate = effectiveAt.AddDays(182);
+        var result = s_refundService.Calculate(
+            contract, cancellationDate,
+            new[] { payment },
+            contract.Benefits);
+
+        // Delivered physical gift produces remaining-value recovery
+        Assert.True(result.RemainingBenefitValue > 0);
+        Assert.True(result.ConsumedBenefitValue > 0);
+        Assert.Equal(result.ConsumedBenefitValue + result.RemainingBenefitValue, result.TotalBenefitValue);
+    }
+
+    [Fact]
+    public void Task6_1_Refund_NonDeliveredGift_ProducesZeroRecovery()
+    {
+        var effectiveAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var endsAt = effectiveAt.AddMonths(12);
+        var contract = CreateValidContract(
+            contractedAmount: 10000m,
+            effectiveAtUtc: effectiveAt,
+            endsAtUtc: endsAt);
+        contract.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contract.Id, 6, 5220m, "EGP", 1000m, 1).Value);
+
+        var benefit = CreateBenefit(contract.Id, "Printer", 1000m);
+        contract.AddBenefit(benefit);
+
+        var payment = CreateCompletedPayment(10000m, 10000m, contract);
+        var cancellationDate = new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        var result = s_refundService.Calculate(
+            contract, cancellationDate,
+            new[] { payment },
+            contract.Benefits);
+
+        var contribution = result.BenefitContributions.First();
+        Assert.False(contribution.IsRecoverable);
+        Assert.Equal(0m, contribution.RemainingValue);
+        Assert.Equal(0m, result.RemainingBenefitValue);
+    }
+
+    [Fact]
+    public void Task6_1_Refund_MultipleBenefits_IndependentlyCalculated()
+    {
+        var effectiveAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var endsAt = effectiveAt.AddMonths(12);
+        var contractDurationDays = (endsAt - effectiveAt).Days;
+        var contract = CreateValidContract(
+            monthlyListPrice: 1500m,
+            contractualMonthlyValue: 1500m,
+            contractedAmount: 18000m,
+            effectiveAtUtc: effectiveAt,
+            endsAtUtc: endsAt);
+        contract.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contract.Id, 12, 18000m, "EGP", 1500m, 1).Value);
+
+        var benefit1 = CreateGrantedBenefit(contract.Id, "Printer", 1000m);
+        var benefit2 = CreateGrantedBenefit(contract.Id, "PC", 2000m);
+        contract.AddBenefit(benefit1);
+        contract.AddBenefit(benefit2);
+
+        var payment = CreateCompletedPayment(18000m, 18000m, contract);
+        var cancellationDate = effectiveAt.AddDays(182);
+
+        var result = s_refundService.Calculate(
+            contract, cancellationDate,
+            new[] { payment },
+            contract.Benefits);
+
+        var consumed1 = Math.Round(1000m * 182m / contractDurationDays, 2, MidpointRounding.AwayFromZero);
+        var consumed2 = Math.Round(2000m * 182m / contractDurationDays, 2, MidpointRounding.AwayFromZero);
+
+        Assert.Equal(2, result.BenefitContributions.Count);
+        Assert.Equal(consumed1 + consumed2, result.ConsumedBenefitValue);
+        Assert.Equal((1000m - consumed1) + (2000m - consumed2), result.RemainingBenefitValue);
     }
 }

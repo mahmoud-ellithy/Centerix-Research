@@ -14,6 +14,11 @@ using Centerix.Domain.Platform.Contracts.Enums;
 /// - No overdue required installment
 /// - Only Completed payments count (Pending/Processing/Failed/Cancelled do not)
 ///
+/// Zero-value benefits (ContractualValue = 0) are NOT exempt from eligibility checks.
+/// All benefits, regardless of value, must satisfy the same conditions.
+///
+/// Overdue-installment validation depends on the future Installment Schedule/Obligation engine.
+///
 /// For non-physical benefits (Service, FinancialCredit, etc.), eligibility
 /// may follow different rules as determined by the business policy.
 /// </remarks>

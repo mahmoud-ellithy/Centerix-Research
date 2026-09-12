@@ -14,10 +14,13 @@ using Centerix.Domain.Platform.Contracts.Enums;
 /// 2. Required contractual payment obligation must be satisfied
 ///    (completed payments >= contracted amount)
 /// 3. No overdue installment check is performed (current model does not have
-///    installment schedules; this limitation is documented)
+///    installment schedules; this limitation is documented as a dependency on
+///    the future Installment Schedule/Obligation engine)
+///
+/// Zero-value benefits (ContractualValue = 0) are NOT exempt from eligibility checks.
+/// All benefits, regardless of value, must satisfy the same contract and payment conditions.
 ///
 /// For physical gifts, eligibility must be established before delivery.
-/// Non-financial benefits (ContractualValue = 0) are always eligible.
 /// </remarks>
 public class BenefitEligibilityService : IBenefitEligibilityService
 {
@@ -40,9 +43,8 @@ public class BenefitEligibilityService : IBenefitEligibilityService
         if (benefit.EligibilityStatus == BenefitEligibilityStatus.Eligible)
             return true;
 
-        // Non-financial benefits are always eligible
-        if (benefit.ContractualValue <= 0)
-            return true;
+        // Zero-value benefits are NOT exempt from eligibility checks.
+        // All benefits must satisfy the same contract and payment conditions.
 
         // Contract must be Active
         if (contract.Status != ContractStatus.Active)
