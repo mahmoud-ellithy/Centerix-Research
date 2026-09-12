@@ -1,7 +1,6 @@
 using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform.Promotions;
 using Centerix.Application.Platform.Promotions.Commands;
-using Centerix.Domain.Platform.Contracts.Enums;
 using Centerix.Infrastructure.Auth;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
@@ -14,6 +13,7 @@ public class OffersController(ILocalizer localizer, IMediator mediator) : ApiCon
     /// <summary>
     /// Calculates and persists a commercial offer for a plan and duration.
     /// Returns the persisted Offer snapshot with all commercial terms.
+    /// Benefits are sourced from trusted commercial configuration, not from the client.
     /// </summary>
     [HttpPost("calculate")]
     [HasPermission(Permissions.Offers.Calculate)]
@@ -22,12 +22,7 @@ public class OffersController(ILocalizer localizer, IMediator mediator) : ApiCon
         var command = new CalculateAndPersistOfferCommand(
             request.PlanId,
             request.DurationMonths,
-            request.EvaluationTimeUtc,
-            request.Benefits?.Select(b => new CreateOfferBenefitRequest(
-                b.BenefitType,
-                b.Name,
-                b.Description,
-                b.ContractualValue)).ToList());
+            request.EvaluationTimeUtc);
 
         var result = await mediator.Send(command, cancellationToken);
 
@@ -85,13 +80,4 @@ public class CalculateAndPersistOfferRequest
     public int PlanId { get; set; }
     public int DurationMonths { get; set; }
     public DateTime? EvaluationTimeUtc { get; set; }
-    public List<CreateOfferBenefitRequestDto>? Benefits { get; set; }
-}
-
-public class CreateOfferBenefitRequestDto
-{
-    public ContractBenefitType BenefitType { get; set; }
-    public string Name { get; set; } = default!;
-    public string? Description { get; set; }
-    public decimal ContractualValue { get; set; }
 }

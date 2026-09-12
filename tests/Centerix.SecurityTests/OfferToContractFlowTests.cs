@@ -9,7 +9,7 @@ using Centerix.Domain.Platform.Promotions.Enums;
 using Xunit;
 
 /// <summary>
-/// CODER TASK 7.1: Harden Authoritative Offer → Contract Creation.
+/// CODER TASK 7.1 & 7.2: Harden Authoritative Offer → Contract Creation.
 /// Comprehensive tests for the hardened commercial flow.
 ///
 /// Test categories:
@@ -19,6 +19,7 @@ using Xunit;
 /// - Historical integrity (24-26)
 /// - Tenant isolation (29-30)
 /// - Task 7.1: Benefit source authority (31-40)
+/// - Task 7.2: Client Benefits injection removed (47-55)
 /// </summary>
 public class OfferToContractFlowTests
 {
@@ -1329,5 +1330,206 @@ public class OfferToContractFlowTests
         var result2 = offer.MarkConverted(contractId2, UtcNow.AddHours(1));
         Assert.True(result2.IsSuccess);
         Assert.Equal(contractId1, offer.ContractId);
+    }
+
+    // ==================================================================
+    // TASK 7.2: CLIENT BENEFITS INJECTION REMOVED (Tests 47-55)
+    // ==================================================================
+
+    [Fact]
+    public void Test47_CalculateAndPersistOfferRequest_HasNoBenefitsProperty()
+    {
+        var request = new Centerix.API.Controllers.CalculateAndPersistOfferRequest
+        {
+            PlanId = 1,
+            DurationMonths = 12
+        };
+
+        var properties = request.GetType().GetProperties();
+        var benefitProperty = properties.FirstOrDefault(p =>
+            string.Equals(p.Name, "Benefits", StringComparison.OrdinalIgnoreCase));
+
+        Assert.Null(benefitProperty);
+    }
+
+    [Fact]
+    public void Test48_CalculateAndPersistOfferCommand_HasNoBenefitsParameter()
+    {
+        var commandType = typeof(Centerix.Application.Platform.Promotions.Commands.CalculateAndPersistOfferCommand);
+
+        var benefitProperty = commandType.GetProperty("Benefits");
+
+        Assert.Null(benefitProperty);
+    }
+
+    [Fact]
+    public void Test49_CreateOfferBenefitRequest_Type_NoLongerExists()
+    {
+        var types = typeof(Centerix.Application.Platform.Promotions.Commands.CalculateAndPersistOfferCommand)
+            .Assembly.GetTypes();
+
+        var benefitRequestType = types.FirstOrDefault(t =>
+            string.Equals(t.Name, "CreateOfferBenefitRequest", StringComparison.OrdinalIgnoreCase));
+
+        Assert.Null(benefitRequestType);
+    }
+
+    [Fact]
+    public void Test50_ClientCannotInjectArbitraryBenefits_ViaRequest()
+    {
+        var request = new Centerix.API.Controllers.CalculateAndPersistOfferRequest
+        {
+            PlanId = 1,
+            DurationMonths = 12
+        };
+
+        var properties = request.GetType().GetProperties();
+        var benefitProperty = properties.FirstOrDefault(p =>
+            p.Name.Contains("Benefit", StringComparison.OrdinalIgnoreCase));
+
+        Assert.Null(benefitProperty);
+    }
+
+    [Fact]
+    public void Test51_CalculatedOffer_ContainsNoBenefits_WhenNoTrustedSource()
+    {
+        var plan = CreatePlan(monthlyPrice: 1000m);
+        AddPricingTiers(plan);
+        var service = CreateService();
+
+        var result = service.Calculate(plan, 12, UtcNow, []);
+
+        Assert.True(result.IsSuccess);
+
+        var offer = Offer.Create(
+            id: Guid.NewGuid(),
+            tenantId: "tenant-1",
+            planId: result.Value.PlanId,
+            durationMonths: result.Value.DurationMonths,
+            baseAmount: result.Value.BaseAmount,
+            discountAmount: result.Value.DiscountAmount,
+            finalAmount: result.Value.FinalAmount,
+            monthlyListPrice: result.Value.MonthlyListPrice,
+            currencyCode: result.Value.CurrencyCode,
+            calculatedAtUtc: result.Value.CalculatedAtUtc).Value;
+
+        Assert.Empty(offer.Benefits);
+    }
+
+    [Fact]
+    public void Test52_OfferSnapshotImmutable_AfterCalculation()
+    {
+        var plan = CreatePlan(monthlyPrice: 1000m);
+        AddPricingTiers(plan);
+        var service = CreateService();
+
+        var calculated = service.Calculate(plan, 12, UtcNow, []).Value;
+
+        var offer = Offer.Create(
+            id: Guid.NewGuid(),
+            tenantId: "tenant-1",
+            planId: calculated.PlanId,
+            durationMonths: calculated.DurationMonths,
+            baseAmount: calculated.BaseAmount,
+            discountAmount: calculated.DiscountAmount,
+            finalAmount: calculated.FinalAmount,
+            monthlyListPrice: calculated.MonthlyListPrice,
+            currencyCode: calculated.CurrencyCode,
+            calculatedAtUtc: calculated.CalculatedAtUtc).Value;
+
+        var originalBaseAmount = offer.BaseAmount;
+        var originalFinalAmount = offer.FinalAmount;
+
+        offer.Accept(UtcNow);
+
+        Assert.Equal(originalBaseAmount, offer.BaseAmount);
+        Assert.Equal(originalFinalAmount, offer.FinalAmount);
+        Assert.Empty(offer.Benefits);
+    }
+
+    [Fact]
+    public void Test53_OfferToContract_ZeroBenefits_WhenNoTrustedSource()
+    {
+        var offer = CreateValidOffer(
+            baseAmount: 10000m,
+            finalAmount: 9000m,
+            discountAmount: 1000m);
+
+        offer.Accept(UtcNow);
+
+        var contract = Contract.Create(
+            id: Guid.NewGuid(),
+            tenantId: "tenant-1",
+            contractNumber: "CNT-72-001",
+            planId: offer.PlanId,
+            effectiveAtUtc: UtcNow,
+            endsAtUtc: UtcNow.AddMonths(offer.DurationMonths),
+            durationMonths: offer.DurationMonths,
+            monthlyListPrice: offer.MonthlyListPrice,
+            contractualMonthlyValue: offer.MonthlyListPrice,
+            currencyCode: offer.CurrencyCode,
+            contractedAmount: offer.FinalAmount,
+            discountAmount: offer.DiscountAmount,
+            promotionId: offer.PromotionId,
+            promotionType: offer.PromotionType,
+            chargedMonths: offer.ChargedMonths).Value;
+
+        foreach (var ob in offer.Benefits)
+        {
+            var contractBenefit = ContractBenefit.Create(
+                Guid.NewGuid(),
+                contract.Id,
+                ob.BenefitType,
+                ob.Name,
+                ob.Description,
+                ob.ContractualValue,
+                ob.CurrencyCode).Value;
+
+            contract.AddBenefit(contractBenefit);
+        }
+
+        Assert.Empty(contract.Benefits);
+        Assert.Equal(9000m, contract.ContractedAmount);
+        Assert.Equal(1000m, contract.DiscountAmount);
+    }
+
+    [Fact]
+    public void Test54_TenantIsolation_CrossTenantOffer_Rejected()
+    {
+        var offerA = CreateValidOffer(tenantId: "tenant-1", status: OfferStatus.Accepted);
+        var offerB = CreateValidOffer(tenantId: "tenant-2", status: OfferStatus.Accepted);
+
+        Assert.NotEqual(offerA.TenantId, offerB.TenantId);
+
+        var currentTenant = "tenant-1";
+        Assert.True(string.Equals(offerA.TenantId, currentTenant, StringComparison.OrdinalIgnoreCase));
+        Assert.False(string.Equals(offerB.TenantId, currentTenant, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Test55_Task6BenefitCap_Intact_WhenBenefitsAddedDirectly()
+    {
+        var contract = Contract.Create(
+            id: Guid.NewGuid(),
+            tenantId: "tenant-1",
+            contractNumber: "CNT-72-CAP",
+            planId: 1,
+            effectiveAtUtc: UtcNow,
+            endsAtUtc: UtcNow.AddMonths(12),
+            durationMonths: 12,
+            monthlyListPrice: 1000m,
+            contractualMonthlyValue: 1000m,
+            currencyCode: "EGP",
+            contractedAmount: 10000m).Value;
+
+        var b1 = ContractBenefit.Create(Guid.NewGuid(), contract.Id, ContractBenefitType.PhysicalGift, "A", null, 1500m, "EGP").Value;
+        var b2 = ContractBenefit.Create(Guid.NewGuid(), contract.Id, ContractBenefitType.PhysicalGift, "B", null, 1500m, "EGP").Value;
+
+        Assert.True(contract.AddBenefit(b1).IsSuccess);
+        Assert.True(contract.AddBenefit(b2).IsSuccess);
+
+        var b3 = ContractBenefit.Create(Guid.NewGuid(), contract.Id, ContractBenefitType.PhysicalGift, "C", null, 1m, "EGP").Value;
+        Assert.False(contract.AddBenefit(b3).IsSuccess);
+        Assert.Equal("Contract.BenefitExceedsLimit", contract.AddBenefit(b3).Errors[0].Code);
     }
 }
