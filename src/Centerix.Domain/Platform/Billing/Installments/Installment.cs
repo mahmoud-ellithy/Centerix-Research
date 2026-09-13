@@ -232,7 +232,7 @@ public class Installment : AuditableEntity<Guid>
         // dbContext.PaymentAllocations.Add(allocation) before this method,
         // EF Core eagerly adds the allocation to _paymentAllocations via
         // the configured navigation backing field. We must detect that
-        // and skip the duplicate add while still validating capacity.
+        // and avoid double-adding while still validating capacity.
         var alreadyTracked = _paymentAllocations.Contains(allocation);
 
         if (!alreadyTracked)
@@ -243,6 +243,14 @@ public class Installment : AuditableEntity<Guid>
                 return InstallmentErrors.AllocationExceedsInstallment;
 
             _paymentAllocations.Add(allocation);
+        }
+        else
+        {
+            // EF relationship fixup already placed this allocation in the collection.
+            // Validate that the total (which now includes this allocation) is within capacity.
+            var totalSettled = GetSettledAmount();
+            if (totalSettled > Amount)
+                return InstallmentErrors.AllocationExceedsInstallment;
         }
 
         // Derive SettledAmount from the authoritative allocation sum — single source of truth

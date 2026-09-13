@@ -208,6 +208,7 @@ public class AllocatePaymentHandler(
         if (request.InstallmentId.HasValue)
         {
             installment = await dbContext.Installments
+                .Include(i => i.PaymentAllocations)
                 .FirstOrDefaultAsync(i => i.Id == request.InstallmentId.Value && i.TenantId == payment.TenantId, cancellationToken);
 
             if (installment is null)
