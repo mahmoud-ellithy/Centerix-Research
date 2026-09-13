@@ -577,15 +577,14 @@ public class Phase9FinancialLedgerHardeningTests
             new AllocatePaymentCommand(payment.Id, invoice.Id, 6000m),
             CancellationToken.None);
 
-        // Second allocation of same amount would exceed payment
+        // Identical retry — must be recognized as idempotent (NOT rejected by capacity).
         var result2 = await handler.Handle(
             new AllocatePaymentCommand(payment.Id, invoice.Id, 6000m),
             CancellationToken.None);
 
-        // Assert
+        // Assert: both succeed, only one allocation exists
         Assert.True(result1.IsSuccess);
-        Assert.False(result2.IsSuccess);
-        Assert.Equal("PaymentAllocation.ExceedsPayment", result2.Errors![0].Code);
+        Assert.True(result2.IsSuccess); // Idempotent retry
 
         var dbPayment = await db.Payments.FirstAsync(p => p.Id == payment.Id);
         Assert.Equal(6000m, dbPayment.GetAllocatedAmount());
@@ -800,7 +799,7 @@ public class Phase9FinancialLedgerHardeningTests
             new AllocatePaymentCommand(payment.Id, invoice.Id, 6000m),
             CancellationToken.None));
 
-        // Second allocation: 6,000 (would exceed payment)
+        // Identical retry — must be recognized as idempotent (not rejected by capacity)
         results.Add(await handler.Handle(
             new AllocatePaymentCommand(payment.Id, invoice.Id, 6000m),
             CancellationToken.None));
@@ -812,7 +811,7 @@ public class Phase9FinancialLedgerHardeningTests
 
         // Assert
         Assert.True(results[0].IsSuccess);
-        Assert.False(results[1].IsSuccess); // Exceeds payment
+        Assert.True(results[1].IsSuccess); // Idempotent retry succeeds
         Assert.True(results[2].IsSuccess);
 
         var dbPayment = await db.Payments.FirstAsync(p => p.Id == payment.Id);

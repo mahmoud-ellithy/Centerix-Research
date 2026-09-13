@@ -156,6 +156,35 @@ public class AllocatePaymentHandler(
             return PaymentErrors.AllocationAmountMustBePositive;
         }
 
+        // ── IDEMPOTENCY CHECK (before financial validations) ──────────────────
+        // An identical retry of an already-successful request MUST be recognized
+        // as idempotent and return success without attempting to allocate again.
+        // This check MUST happen BEFORE capacity validations so that a retry
+        // after the payment/invoice/installment is fully allocated still succeeds.
+        var existingAllocation = await dbContext.PaymentAllocations
+            .Where(a => a.PaymentId == request.PaymentId
+                && a.InvoiceId == request.InvoiceId
+                && a.InstallmentId == request.InstallmentId
+                && a.AllocatedAmount == request.AllocatedAmount
+                && a.Status == PaymentAllocationStatus.Active
+                && a.TenantId == payment.TenantId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (existingAllocation is not null)
+        {
+            // Idempotent retry — identical allocation already exists.
+            // Do NOT create a duplicate. Do NOT attempt financial validations
+            // that would reject the already-completed identical operation.
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return Result.Updated;
+        }
+
+        // ── FINANCIAL VALIDATIONS (only when exact allocation does NOT exist) ──
+
         // Check allocation doesn't exceed payment's remaining unallocated amount.
         // Under Serializable isolation, concurrent transactions cannot read this Payment's
         // allocations until we commit, so this check is safe from race conditions.
@@ -172,34 +201,6 @@ public class AllocatePaymentHandler(
         if (request.AllocatedAmount > invoiceRemaining)
         {
             return PaymentErrors.AllocationExceedsInvoiceRemaining;
-        }
-
-        // Idempotency check: if an identical allocation already exists (same payment, invoice, installment, amount),
-        // return success without creating a duplicate. This prevents retry from creating duplicate
-        // financial effects while still allowing legitimate different allocations.
-        // IMPORTANT: This check happens AFTER the financial invariant checks to ensure that
-        // concurrent allocations with the same amount are properly validated against the invariants
-        // before being treated as idempotent retries. This prevents the race condition where two
-        // concurrent allocations of the same amount both succeed when only one should.
-        var existingAllocation = await dbContext.PaymentAllocations
-            .Where(a => a.PaymentId == request.PaymentId
-                && a.InvoiceId == request.InvoiceId
-                && a.InstallmentId == request.InstallmentId
-                && a.AllocatedAmount == request.AllocatedAmount
-                && a.Status == PaymentAllocationStatus.Active
-                && a.TenantId == payment.TenantId)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (existingAllocation is not null)
-        {
-            // Idempotent retry — allocation already exists, no financial effect needed.
-            // We've already verified the invariants above, so this is a safe retry.
-            if (transaction is not null)
-            {
-                await transaction.CommitAsync(cancellationToken);
-            }
-
-            return Result.Updated;
         }
 
         // If an installment is specified, validate it exists and is valid for this tenant

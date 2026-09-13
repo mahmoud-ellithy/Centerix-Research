@@ -215,8 +215,8 @@ public class Installment : AuditableEntity<Guid>
 
     /// <summary>
     /// Records a payment allocation against this installment.
-    /// Returns the allocation amount; does NOT mutate the installment directly.
-    /// The caller (handler) is responsible for persisting the allocation.
+    /// SettledAmount is always derived from the sum of active allocations —
+    /// never independently incremented. This guarantees a single source of truth.
     /// </summary>
     public Result<Updated> ApplyAllocation(PaymentAllocation allocation, DateTime utcNow)
     {
@@ -228,12 +228,61 @@ public class Installment : AuditableEntity<Guid>
         if (allocation.AllocatedAmount <= 0)
             return InstallmentErrors.AmountMustBePositive;
 
-        if (SettledAmount + allocation.AllocatedAmount > Amount)
-            return InstallmentErrors.AllocationExceedsInstallment;
+        // Guard against EF Core relationship fixup: when the handler calls
+        // dbContext.PaymentAllocations.Add(allocation) before this method,
+        // EF Core eagerly adds the allocation to _paymentAllocations via
+        // the configured navigation backing field. We must detect that
+        // and skip the duplicate add while still validating capacity.
+        var alreadyTracked = _paymentAllocations.Contains(allocation);
 
-        _paymentAllocations.Add(allocation);
-        SettledAmount += allocation.AllocatedAmount;
+        if (!alreadyTracked)
+        {
+            // Validate BEFORE adding: projected settled = current sum + new amount
+            var projectedSettled = GetSettledAmount() + allocation.AllocatedAmount;
+            if (projectedSettled > Amount)
+                return InstallmentErrors.AllocationExceedsInstallment;
 
+            _paymentAllocations.Add(allocation);
+        }
+
+        // Derive SettledAmount from the authoritative allocation sum — single source of truth
+        SynchronizeSettledAmount();
+        RecalculateStatus(utcNow);
+
+        return Result.Updated;
+    }
+
+    /// <summary>
+    /// Synchronizes the persisted SettledAmount to match the sum of active allocations.
+    /// Must be called after any change to the allocation collection.
+    /// </summary>
+    private void SynchronizeSettledAmount()
+    {
+        SettledAmount = GetSettledAmount();
+    }
+
+    /// <summary>
+    /// Reverses an existing allocation on this installment and synchronizes settlement.
+    /// After reversal, the allocation is excluded from the active sum, and
+    /// SettledAmount/RemainingAmount/Status are recalculated from active allocations only.
+    /// </summary>
+    public Result<Updated> ReverseAllocation(PaymentAllocation allocation, DateTime utcNow)
+    {
+        if (allocation is null) throw new ArgumentNullException(nameof(allocation));
+
+        if (!_paymentAllocations.Contains(allocation))
+            return Error.Conflict("Installment.AllocationNotAssociated",
+                "Allocation is not associated with this installment.");
+
+        if (!allocation.IsActive)
+            return Error.Conflict("Installment.AllocationAlreadyReversed",
+                "Allocation is already reversed.");
+
+        var reverseResult = allocation.Reverse();
+        if (!reverseResult.IsSuccess)
+            return reverseResult.Errors!;
+
+        SynchronizeSettledAmount();
         RecalculateStatus(utcNow);
 
         return Result.Updated;
