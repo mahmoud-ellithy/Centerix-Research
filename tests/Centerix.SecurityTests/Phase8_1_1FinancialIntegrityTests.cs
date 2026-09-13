@@ -199,7 +199,52 @@ public class Phase8_1_1FinancialIntegrityTests
     }
 
     /// <summary>
-    /// Test 3 — Same payment/invoice/amount but DIFFERENT installment.
+    /// Test 3 — Exact retry after invoice is fully paid.
+    /// Payment = 8000, Invoice = 5000, Installment = 5000.
+    /// Allocate 5000 → invoice fully paid, installment fully settled.
+    /// Retry exact same request.
+    /// Expected: SUCCESS / idempotent (NOT AllocationExceedsInvoiceRemaining).
+    /// This test is mandatory — it proves that idempotency is checked BEFORE invoice capacity.
+    /// </summary>
+    [Fact]
+    public async Task Test3_IdempotentRetry_AfterInvoiceFullyPaid_Succeeds()
+    {
+        var tenantId = $"tenant-{Guid.NewGuid():N}"[..20];
+        var db = CreateDbContext(tenantId);
+        var contractId = Guid.NewGuid();
+
+        var payment = CreatePayment(db, tenantId, 8000m);
+        payment.Complete(DateTime.UtcNow);
+        var invoice = CreateInvoice(db, tenantId, 5000m, contractId: contractId);
+        var installment = CreateInstallment(db, tenantId, contractId, 5000m);
+        await db.SaveChangesAsync();
+
+        var handler = await CreateHandler(db);
+
+        var command = new AllocatePaymentCommand(payment.Id, invoice.Id, 5000m, installment.Id);
+        var result1 = await handler.Handle(command, CancellationToken.None);
+        Assert.True(result1.IsSuccess);
+
+        db.ChangeTracker.Clear();
+        var handler2 = await CreateHandler(db);
+        var result2 = await handler2.Handle(command, CancellationToken.None);
+
+        Assert.True(result2.IsSuccess);
+
+        var allocations = await db.PaymentAllocations
+            .Where(a => a.PaymentId == payment.Id && a.InvoiceId == invoice.Id)
+            .ToListAsync();
+        Assert.Single(allocations);
+        Assert.Equal(5000m, allocations[0].AllocatedAmount);
+
+        var dbInstallment = await db.Installments.FirstAsync(i => i.Id == installment.Id);
+        Assert.Equal(5000m, dbInstallment.SettledAmount);
+        Assert.Equal(0m, dbInstallment.RemainingAmount);
+        Assert.Equal(InstallmentStatus.Paid, dbInstallment.Status);
+    }
+
+    /// <summary>
+    /// Test 4 — Same payment/invoice/amount but DIFFERENT installment.
     /// Payment A + Invoice X + Installment I1 + 4000
     /// versus
     /// Payment A + Invoice X + Installment I2 + 4000
@@ -249,7 +294,7 @@ public class Phase8_1_1FinancialIntegrityTests
     }
 
     /// <summary>
-    /// Test 4 — Same payment/installment but different amount.
+    /// Test 5 — Same payment/installment but different amount.
     /// 4000 vs 3000.
     /// Must NOT be treated as identical.
     /// </summary>
@@ -422,10 +467,47 @@ public class Phase8_1_1FinancialIntegrityTests
     }
 
     /// <summary>
+    /// Test 6b — Inactive allocation causes settlement decrease.
+    /// Installment = 5,000
+    /// A = 3,000 active, B = 2,000 active → Settled = 5,000
+    /// Then A becomes inactive (reversed).
+    /// Expected: Settled = 2,000, Remaining = 3,000.
+    /// This verifies that the system does NOT remain at Settled = 5,000.
+    /// </summary>
+    [Fact]
+    public void Test6b_InactiveAllocation_DecreasesSettledAmount()
+    {
+        var installment = Installment.Create(
+            Guid.NewGuid(), Guid.NewGuid(), 1,
+            DateTime.UtcNow.AddDays(30),
+            new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
+            5000m, "EGP").Value;
+
+        var allocationA = PaymentAllocation.Create(
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            3000m, DateTime.UtcNow).Value;
+        var allocationB = PaymentAllocation.Create(
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            2000m, DateTime.UtcNow).Value;
+
+        installment.ApplyAllocation(allocationA, DateTime.UtcNow);
+        installment.ApplyAllocation(allocationB, DateTime.UtcNow);
+        Assert.Equal(5000m, installment.SettledAmount);
+        Assert.Equal(0m, installment.RemainingAmount);
+        Assert.Equal(InstallmentStatus.Paid, installment.Status);
+
+        installment.ReverseAllocation(allocationA, DateTime.UtcNow);
+
+        Assert.Equal(2000m, installment.SettledAmount);
+        Assert.Equal(3000m, installment.RemainingAmount);
+        Assert.NotEqual(InstallmentStatus.Paid, installment.Status);
+    }
+
+    /// <summary>
     /// Test 7 — Paid status when fully settled.
-    /// Installment = 10,000
-    /// A = 6,000, B = 4,000
-    /// Expected: Settled = 10,000, Remaining = 0, Status = Paid.
+    /// Installment = 5,000
+    /// A = 3,000, B = 2,000
+    /// Expected: Settled = 5,000, Remaining = 0, Status = Paid.
     /// </summary>
     [Fact]
     public void Test7_PaidStatus_WhenFullySettled()
@@ -434,27 +516,27 @@ public class Phase8_1_1FinancialIntegrityTests
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-            10000m, "EGP").Value;
+            5000m, "EGP").Value;
 
         var allocationA = PaymentAllocation.Create(
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
-            6000m, DateTime.UtcNow).Value;
+            3000m, DateTime.UtcNow).Value;
         var allocationB = PaymentAllocation.Create(
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
-            4000m, DateTime.UtcNow).Value;
+            2000m, DateTime.UtcNow).Value;
 
         installment.ApplyAllocation(allocationA, DateTime.UtcNow);
         installment.ApplyAllocation(allocationB, DateTime.UtcNow);
 
-        Assert.Equal(10000m, installment.SettledAmount);
+        Assert.Equal(5000m, installment.SettledAmount);
         Assert.Equal(0m, installment.RemainingAmount);
         Assert.Equal(InstallmentStatus.Paid, installment.Status);
     }
 
     /// <summary>
-    /// Test 8 — Overdue partially paid.
-    /// Amount = 10,000, Settled = 4,000, DueDate < now.
-    /// Expected: Status = Overdue, Remaining = 6,000.
+    /// Test 8/10 — Overdue partially paid.
+    /// Amount = 5,000, Settled = 2,000, DueDate < now.
+    /// Expected: Status = Overdue, Remaining = 3,000.
     /// </summary>
     [Fact]
     public void Test8_Overdue_WhenPartiallyPaidPastDue()
@@ -463,16 +545,16 @@ public class Phase8_1_1FinancialIntegrityTests
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow.AddDays(-5),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-            10000m, "EGP").Value;
+            5000m, "EGP").Value;
 
         var allocation = PaymentAllocation.Create(
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
-            4000m, DateTime.UtcNow).Value;
+            2000m, DateTime.UtcNow).Value;
 
         installment.ApplyAllocation(allocation, DateTime.UtcNow);
 
-        Assert.Equal(4000m, installment.SettledAmount);
-        Assert.Equal(6000m, installment.RemainingAmount);
+        Assert.Equal(2000m, installment.SettledAmount);
+        Assert.Equal(3000m, installment.RemainingAmount);
         Assert.Equal(InstallmentStatus.Overdue, installment.Status);
         Assert.True(installment.IsOverdue(DateTime.UtcNow));
     }
@@ -552,22 +634,26 @@ public class Phase8_1_1FinancialIntegrityTests
     }
 
     /// <summary>
-    /// PartiallyPaid before due date.
+    /// Test 11 — PartiallyPaid before due date.
+    /// Amount = 5,000, Settled = 2,000, DueDate > now.
+    /// Expected: Status = PartiallyPaid.
     /// </summary>
     [Fact]
-    public void PartiallyPaid_BeforeDueDate()
+    public void Test11_PartiallyPaid_BeforeDueDate()
     {
         var installment = Installment.Create(
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-            4000m, "EGP").Value;
+            5000m, "EGP").Value;
 
         installment.ApplyAllocation(
             PaymentAllocation.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 2000m, DateTime.UtcNow).Value,
             DateTime.UtcNow);
 
         Assert.Equal(InstallmentStatus.PartiallyPaid, installment.Status);
+        Assert.Equal(2000m, installment.SettledAmount);
+        Assert.Equal(3000m, installment.RemainingAmount);
     }
 
     /// <summary>
