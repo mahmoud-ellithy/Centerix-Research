@@ -3,17 +3,20 @@ namespace Centerix.Domain.Platform.Billing.Payments;
 using Centerix.Domain.Common;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Billing.Invoicing;
+using Centerix.Domain.Platform.Billing.Installments;
 using Centerix.Domain.Platform.Billing.Payments.Enums;
 
 /// <summary>
-/// Represents the allocation of a payment to a specific invoice.
-/// A single payment can be allocated to multiple invoices.
+/// Represents the allocation of a payment to a specific invoice, and optionally
+/// to a specific installment (payment obligation). A single payment can be
+/// allocated to multiple invoices and/or installments.
 /// Allocation amounts are immutable once created.
 /// </summary>
 public class PaymentAllocation : AuditableEntity<Guid>
 {
     public Guid PaymentId { get; private set; }
     public Guid InvoiceId { get; private set; }
+    public Guid? InstallmentId { get; private set; }
     public decimal AllocatedAmount { get; private set; }
     public PaymentAllocationStatus Status { get; private set; }
     public DateTime AllocatedAtUtc { get; private set; }
@@ -23,6 +26,7 @@ public class PaymentAllocation : AuditableEntity<Guid>
 
     public Payment Payment { get; private set; } = default!;
     public Invoice Invoice { get; private set; } = default!;
+    public Installment? Installment { get; private set; }
 
     private PaymentAllocation() { }
 
@@ -31,11 +35,13 @@ public class PaymentAllocation : AuditableEntity<Guid>
         Guid paymentId,
         Guid invoiceId,
         decimal allocatedAmount,
-        DateTime allocatedAtUtc)
+        DateTime allocatedAtUtc,
+        Guid? installmentId = null)
         : base(id)
     {
         PaymentId = paymentId;
         InvoiceId = invoiceId;
+        InstallmentId = installmentId;
         AllocatedAmount = allocatedAmount;
         Status = PaymentAllocationStatus.Active;
         AllocatedAtUtc = allocatedAtUtc;
@@ -49,12 +55,13 @@ public class PaymentAllocation : AuditableEntity<Guid>
         Guid paymentId,
         Guid invoiceId,
         decimal allocatedAmount,
-        DateTime allocatedAtUtc)
+        DateTime allocatedAtUtc,
+        Guid? installmentId = null)
     {
         if (allocatedAmount <= 0)
             return PaymentErrors.AllocationAmountMustBePositive;
 
-        return new PaymentAllocation(id, paymentId, invoiceId, allocatedAmount, allocatedAtUtc);
+        return new PaymentAllocation(id, paymentId, invoiceId, allocatedAmount, allocatedAtUtc, installmentId);
     }
 
     /// <summary>

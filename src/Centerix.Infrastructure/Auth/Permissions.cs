@@ -277,6 +277,18 @@ public static class Permissions
     }
 
     /// <summary>
+    /// Installments (payment obligations): tenant-scoped financial obligations that track
+    /// when amounts are due, what service periods they cover, and their settlement status.
+    /// </summary>
+    public static class Installments
+    {
+        public const string Read = "Installments.Read";
+        public const string Create = "Installments.Create";
+        public const string Update = "Installments.Update";
+        public const string Cancel = "Installments.Cancel";
+    }
+
+    /// <summary>
     /// Promotion / Offer Engine: platform-scoped commercial rules for calculating promotional offers.
     /// </summary>
     public static class Promotions
@@ -322,6 +334,7 @@ public static class Permissions
         Benefits.View,
         Offers.Read, Offers.Calculate, Offers.Accept,
         Contracts.Read,
+        Installments.Read,
     ];
 
     public static string[] GetTenantUserPermissions() =>

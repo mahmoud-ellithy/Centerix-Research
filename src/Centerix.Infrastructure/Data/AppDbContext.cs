@@ -10,6 +10,7 @@ using Centerix.Domain.Platform.Auditing;
 using Centerix.Domain.Platform.Authorization;
 using Centerix.Domain.Platform.Billing.BillingCycles;
 using Centerix.Domain.Platform.Billing.Credits;
+using Centerix.Domain.Platform.Billing.Installments;
 using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Billing.Payments;
 using Centerix.Domain.Platform.Billing.Refunds;
@@ -73,6 +74,7 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     public DbSet<CustomerLedgerEntry> CustomerLedgerEntries { get; set; } = default!;
     public DbSet<Refund> Refunds { get; set; } = default!;
     public DbSet<TenantCredit> TenantCredits { get; set; } = default!;
+    public DbSet<Installment> Installments { get; set; } = default!;
     public DbSet<PlatformAuditLog> PlatformAuditLogs { get; set; } = default!;
     public DbSet<TenantCRMLead> TenantCRMLeads { get; set; } = default!;
     public DbSet<Permission> Permissions { get; set; } = default!;

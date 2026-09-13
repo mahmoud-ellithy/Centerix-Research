@@ -5,6 +5,7 @@ using Centerix.Domain.Platform.Auditing;
 using Centerix.Domain.Platform.Authorization;
 using Centerix.Domain.Platform.Billing.BillingCycles;
 using Centerix.Domain.Platform.Billing.Credits;
+using Centerix.Domain.Platform.Billing.Installments;
 using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Billing.Payments;
 using Centerix.Domain.Platform.Billing.Refunds;
@@ -103,6 +104,9 @@ public interface IAppDbContext
     DbSet<PaymentReceipt> PaymentReceipts { get; }
     DbSet<CustomerLedgerEntry> CustomerLedgerEntries { get; }
     DbSet<Refund> Refunds { get; }
+
+    // Billing: Installments (payment obligations)
+    DbSet<Installment> Installments { get; }
 
     // Billing: Credits
     DbSet<TenantCredit> TenantCredits { get; }

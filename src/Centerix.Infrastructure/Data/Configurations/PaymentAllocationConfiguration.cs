@@ -26,6 +26,9 @@ public class PaymentAllocationConfiguration : IEntityTypeConfiguration<PaymentAl
             .HasColumnType("uniqueidentifier")
             .IsRequired();
 
+        builder.Property(pa => pa.InstallmentId)
+            .HasColumnType("uniqueidentifier");
+
         builder.Property(pa => pa.AllocatedAmount)
             .HasPrecision(18, 2)
             .IsRequired();
@@ -62,12 +65,21 @@ public class PaymentAllocationConfiguration : IEntityTypeConfiguration<PaymentAl
             .HasForeignKey(pa => pa.InvoiceId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // Installment relationship (optional)
+        builder.HasOne(pa => pa.Installment)
+            .WithMany(i => i.PaymentAllocations)
+            .HasForeignKey(pa => pa.InstallmentId)
+            .OnDelete(DeleteBehavior.Restrict)
+            .IsRequired(false);
+
         // Indexes
         builder.HasIndex(pa => pa.TenantId);
         builder.HasIndex(pa => pa.PaymentId);
         builder.HasIndex(pa => pa.InvoiceId);
+        builder.HasIndex(pa => pa.InstallmentId);
         builder.HasIndex(pa => new { pa.TenantId, pa.InvoiceId });
         builder.HasIndex(pa => new { pa.TenantId, pa.PaymentId });
+        builder.HasIndex(pa => new { pa.TenantId, pa.InstallmentId });
 
         // Idempotency support: prevents duplicate active allocations for the same
         // payment+invoice+amount combination. This is a filtered unique index that

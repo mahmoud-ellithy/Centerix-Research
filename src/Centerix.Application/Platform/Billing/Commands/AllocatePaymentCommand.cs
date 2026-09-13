@@ -4,6 +4,7 @@ using System.Data;
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Billing.Invoicing;
+using Centerix.Domain.Platform.Billing.Installments;
 using Centerix.Domain.Platform.Billing.Payments;
 using Centerix.Domain.Platform.Billing.Payments.Enums;
 
@@ -12,7 +13,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 
-public record AllocatePaymentCommand(Guid PaymentId, Guid InvoiceId, decimal AllocatedAmount) : IRequest<Result<Updated>>;
+public record AllocatePaymentCommand(Guid PaymentId, Guid InvoiceId, decimal AllocatedAmount, Guid? InstallmentId = null) : IRequest<Result<Updated>>;
 
 public class AllocatePaymentHandler(
     IAppDbContext dbContext,
@@ -200,6 +201,25 @@ public class AllocatePaymentHandler(
             return Result.Updated;
         }
 
+        // If an installment is specified, validate it exists and is valid for this tenant
+        Installment? installment = null;
+        if (request.InstallmentId.HasValue)
+        {
+            installment = await dbContext.Installments
+                .FirstOrDefaultAsync(i => i.Id == request.InstallmentId.Value && i.TenantId == payment.TenantId, cancellationToken);
+
+            if (installment is null)
+                return InstallmentErrors.NotFound;
+
+            if (installment.ContractId != invoice.ContractId)
+                return Error.Conflict("PaymentAllocation.InstallmentContractMismatch",
+                    "Installment does not belong to the same contract as the invoice.");
+
+            // Validate allocation doesn't exceed installment remaining
+            if (request.AllocatedAmount > installment.RemainingAmount)
+                return InstallmentErrors.AllocationExceedsInstallment;
+        }
+
         // Compute the current ledger balance by reconstructing from immutable movements.
         // This is the authoritative balance, not the cached RunningBalance.
         // Note: We use EntryType directly instead of IsDebit because IsDebit is a computed
@@ -213,7 +233,8 @@ public class AllocatePaymentHandler(
             request.PaymentId,
             request.InvoiceId,
             request.AllocatedAmount,
-            DateTime.UtcNow);
+            DateTime.UtcNow,
+            request.InstallmentId);
 
         if (!allocationResult.IsSuccess)
         {
@@ -229,6 +250,14 @@ public class AllocatePaymentHandler(
         if (!updateResult.IsSuccess)
         {
             return updateResult.Errors!;
+        }
+
+        // If an installment is specified, apply the allocation to settle it
+        if (installment is not null)
+        {
+            var installmentResult = installment.ApplyAllocation(allocation, DateTime.UtcNow);
+            if (!installmentResult.IsSuccess)
+                return installmentResult.Errors!;
         }
 
         // Create the corresponding PaymentSettlement ledger entry from the actual allocated

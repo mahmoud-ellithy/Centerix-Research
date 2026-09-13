@@ -10,7 +10,8 @@ using Microsoft.EntityFrameworkCore;
 
 /// <summary>
 /// Command to check and update a benefit's eligibility status.
-/// Evaluates the benefit against contract status and payment obligations.
+/// Evaluates the benefit against contract status, payment obligations,
+/// and installment compliance (no overdue required installments).
 /// </summary>
 public record CheckBenefitEligibilityCommand(
     Guid ContractId,
@@ -53,8 +54,18 @@ public class CheckBenefitEligibilityHandler(
                     && a.Invoice.ContractId == contract.Id)
                 .Sum(a => a.AllocatedAmount), cancellationToken);
 
+        // Check for overdue installments on this contract
+        var utcNow = DateTime.UtcNow;
+        var hasOverdueInstallment = await dbContext.Installments
+            .AnyAsync(i => i.ContractId == contract.Id
+                && i.TenantId == tenantId
+                && i.Status != Domain.Platform.Billing.Installments.InstallmentStatus.Cancelled
+                && i.Status != Domain.Platform.Billing.Installments.InstallmentStatus.Paid
+                && i.DueDateUtc < utcNow
+                && i.RemainingAmount > 0, cancellationToken);
+
         var determinedStatus = eligibilityService.DetermineEligibilityStatus(
-            benefit, contract, completedPaymentTotal, contract.ContractedAmount);
+            benefit, contract, completedPaymentTotal, contract.ContractedAmount, hasOverdueInstallment);
 
         // If benefit can become eligible and is currently NotEligible, mark it
         if (determinedStatus == BenefitEligibilityStatus.Eligible

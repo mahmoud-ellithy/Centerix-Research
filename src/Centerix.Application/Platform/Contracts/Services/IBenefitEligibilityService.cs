@@ -16,11 +16,6 @@ using Centerix.Domain.Platform.Contracts.Enums;
 ///
 /// Zero-value benefits (ContractualValue = 0) are NOT exempt from eligibility checks.
 /// All benefits, regardless of value, must satisfy the same conditions.
-///
-/// Overdue-installment validation depends on the future Installment Schedule/Obligation engine.
-///
-/// For non-physical benefits (Service, FinancialCredit, etc.), eligibility
-/// may follow different rules as determined by the business policy.
 /// </remarks>
 public interface IBenefitEligibilityService
 {
@@ -31,12 +26,14 @@ public interface IBenefitEligibilityService
     /// <param name="contract">The associated contract.</param>
     /// <param name="completedPaymentTotal">Total amount of completed payments for this contract.</param>
     /// <param name="contractedAmount">The contracted amount (total obligation).</param>
+    /// <param name="hasOverdueInstallment">Whether the contract has any overdue required installments.</param>
     /// <returns>True if the benefit can become eligible.</returns>
     bool CanBecomeEligible(
         ContractBenefit benefit,
         Contract contract,
         decimal completedPaymentTotal,
-        decimal contractedAmount);
+        decimal contractedAmount,
+        bool hasOverdueInstallment = false);
 
     /// <summary>
     /// Determines the effective eligibility status for a benefit given the current state.
@@ -45,5 +42,6 @@ public interface IBenefitEligibilityService
         ContractBenefit benefit,
         Contract contract,
         decimal completedPaymentTotal,
-        decimal contractedAmount);
+        decimal contractedAmount,
+        bool hasOverdueInstallment = false);
 }
