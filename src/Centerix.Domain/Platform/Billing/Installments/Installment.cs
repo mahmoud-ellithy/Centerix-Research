@@ -172,8 +172,8 @@ public class Installment : AuditableEntity<Guid>
         DateTime coveredPeriodEndUtc,
         decimal amount)
     {
-        if (Status is InstallmentStatus.Paid or InstallmentStatus.Cancelled)
-            return InstallmentErrors.CannotUpdatePaidOrCancelled;
+        if (Status != InstallmentStatus.Pending)
+            return InstallmentErrors.CannotUpdateNonPending;
 
         if (dueDateUtc == default)
             return InstallmentErrors.DueDateRequired;
@@ -267,7 +267,7 @@ public class Installment : AuditableEntity<Guid>
     /// <summary>
     /// Returns true if this installment is overdue: RemainingAmount > 0 AND DueDateUtc < now.
     /// </summary>
-    public bool IsOverdue(DateTime utcNow) => RemainingAmount > 0 && DueDateUtc < utcNow;
+    public bool IsOverdue(DateTime utcNow) => Status != InstallmentStatus.Cancelled && RemainingAmount > 0 && DueDateUtc < utcNow;
 
     /// <summary>
     /// Returns the total settled amount from active allocations.

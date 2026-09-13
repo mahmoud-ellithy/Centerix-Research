@@ -34,6 +34,11 @@ public class UpdateInstallmentHandler(
         if (installment.TenantId != tenantId)
             return InstallmentErrors.CrossTenantAccess;
 
+        // Only Pending installments can be updated.
+        // This prevents mutation of settled or overdue financial history.
+        if (installment.Status != InstallmentStatus.Pending)
+            return InstallmentErrors.CannotUpdateNonPending;
+
         // Validate covered period within contract
         var contract = await dbContext.Contracts
             .FirstOrDefaultAsync(c => c.Id == installment.ContractId, cancellationToken);
@@ -47,6 +52,35 @@ public class UpdateInstallmentHandler(
         if (request.CoveredPeriodEndUtc > contract.EndsAtUtc)
             return InstallmentErrors.CoveredPeriodExceedsContract;
 
+        // Validate total obligation invariant after the update
+        var otherInstallmentsTotal = await dbContext.Installments
+            .Where(i => i.ContractId == installment.ContractId
+                && i.TenantId == tenantId
+                && i.Id != installment.Id)
+            .SumAsync(i => i.Amount, cancellationToken);
+
+        if (otherInstallmentsTotal + request.Amount > contract.ContractedAmount)
+            return InstallmentErrors.ScheduleExceedsContractObligation(
+                otherInstallmentsTotal + request.Amount, contract.ContractedAmount);
+
+        // Validate period integrity: no overlap with other installments
+        var otherInstallments = await dbContext.Installments
+            .Where(i => i.ContractId == installment.ContractId
+                && i.TenantId == tenantId
+                && i.Id != installment.Id)
+            .Select(i => new { i.Id, i.CoveredPeriodStartUtc, i.CoveredPeriodEndUtc })
+            .ToListAsync(cancellationToken);
+
+        foreach (var other in otherInstallments)
+        {
+            if (request.CoveredPeriodStartUtc < other.CoveredPeriodEndUtc
+                && request.CoveredPeriodEndUtc > other.CoveredPeriodStartUtc)
+            {
+                return InstallmentErrors.OverlappingPeriod(other.Id);
+            }
+        }
+
+        // Apply the update (domain-level validation for Pending status happens inside entity)
         var updateResult = installment.Update(
             request.DueDateUtc,
             request.CoveredPeriodStartUtc,

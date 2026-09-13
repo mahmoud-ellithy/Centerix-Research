@@ -115,6 +115,31 @@ public class AddInstallmentHandler(
         if (request.Amount <= 0)
             return InstallmentErrors.AmountMustBePositive;
 
+        // Validate total obligation invariant: SUM(existing + new) <= Contract.ContractedAmount
+        var existingTotalAmount = await dbContext.Installments
+            .Where(i => i.ContractId == request.ContractId && i.TenantId == tenantId)
+            .SumAsync(i => i.Amount, cancellationToken);
+
+        if (existingTotalAmount + request.Amount > contract.ContractedAmount)
+            return InstallmentErrors.ScheduleExceedsContractObligation(
+                existingTotalAmount + request.Amount, contract.ContractedAmount);
+
+        // Validate period integrity: no overlap, no duplicate coverage with existing installments
+        var existingInstallments = await dbContext.Installments
+            .Where(i => i.ContractId == request.ContractId && i.TenantId == tenantId)
+            .Select(i => new { i.Id, i.CoveredPeriodStartUtc, i.CoveredPeriodEndUtc })
+            .ToListAsync(cancellationToken);
+
+        foreach (var existing in existingInstallments)
+        {
+            // Overlap: new start < existing end AND new end > existing start
+            if (request.CoveredPeriodStartUtc < existing.CoveredPeriodEndUtc
+                && request.CoveredPeriodEndUtc > existing.CoveredPeriodStartUtc)
+            {
+                return InstallmentErrors.OverlappingPeriod(existing.Id);
+            }
+        }
+
         var id = Guid.NewGuid();
         var result = Installment.Create(
             id,

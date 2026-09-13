@@ -190,7 +190,7 @@ public class Phase8InstallmentDomainTests
             5000m);
 
         Assert.False(result.IsSuccess);
-        Assert.Contains(result.Errors!, e => e.Code == "Installment.CannotUpdatePaidOrCancelled");
+        Assert.Contains(result.Errors!, e => e.Code == "Installment.CannotUpdateNonPending");
     }
 
     [Fact]
@@ -206,7 +206,7 @@ public class Phase8InstallmentDomainTests
             5000m);
 
         Assert.False(result.IsSuccess);
-        Assert.Contains(result.Errors!, e => e.Code == "Installment.CannotUpdatePaidOrCancelled");
+        Assert.Contains(result.Errors!, e => e.Code == "Installment.CannotUpdateNonPending");
     }
 
     [Fact]

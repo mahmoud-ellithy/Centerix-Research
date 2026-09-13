@@ -101,4 +101,16 @@ public static class InstallmentErrors
     public static Error DuplicateSequenceNumber(int sequenceNumber) =>
         Error.Conflict("Installment.DuplicateSequenceNumber",
             $"An installment with sequence number {sequenceNumber} already exists for this contract.");
+
+    public static Error CannotUpdateNonPending =>
+        Error.Conflict("Installment.CannotUpdateNonPending",
+            "Only Pending installments can be updated.");
+
+    public static Error ScheduleExceedsContractObligation(decimal scheduledTotal, decimal contractedAmount) =>
+        Error.Validation("Installment.Schedule_ExceedsContractObligation",
+            $"Total scheduled installment amount ({scheduledTotal}) would exceed the contract obligation ({contractedAmount}).");
+
+    public static Error AmountWouldCorruptSettlement =>
+        Error.Conflict("Installment.AmountWouldCorruptSettlement",
+            "New amount would result in settled amount exceeding the installment amount.");
 }

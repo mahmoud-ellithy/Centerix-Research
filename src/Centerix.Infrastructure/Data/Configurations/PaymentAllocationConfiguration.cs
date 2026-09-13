@@ -82,10 +82,12 @@ public class PaymentAllocationConfiguration : IEntityTypeConfiguration<PaymentAl
         builder.HasIndex(pa => new { pa.TenantId, pa.InstallmentId });
 
         // Idempotency support: prevents duplicate active allocations for the same
-        // payment+invoice+amount combination. This is a filtered unique index that
+        // payment+invoice+installment+amount combination. This is a filtered unique index that
         // only applies to Active allocations, allowing legitimate separate allocations
-        // (different amounts or reversed allocations).
-        builder.HasIndex(pa => new { pa.TenantId, pa.PaymentId, pa.InvoiceId, pa.AllocatedAmount })
+        // (different amounts, different installments, or reversed allocations).
+        // Including InstallmentId ensures that allocating to different installments
+        // is treated as distinct operations even when payment, invoice, and amount match.
+        builder.HasIndex(pa => new { pa.TenantId, pa.PaymentId, pa.InvoiceId, pa.InstallmentId, pa.AllocatedAmount })
             .HasFilter("[Status] = 'Active'")
             .IsUnique()
             .HasDatabaseName("UX_PaymentAllocations_Idempotent");

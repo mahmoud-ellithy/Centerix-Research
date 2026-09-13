@@ -138,6 +138,7 @@ public class Phase8InstallmentCommandTests : IClassFixture<TestWebApplicationFac
             InstallmentErrors.TotalScheduleExceedsContractDuration,
             InstallmentErrors.NotFound,
             InstallmentErrors.CannotUpdatePaidOrCancelled,
+            InstallmentErrors.CannotUpdateNonPending,
             InstallmentErrors.CannotCancelPaidOrCancelled,
             InstallmentErrors.CannotCancelHasAllocations,
             InstallmentErrors.CrossTenantAccess,

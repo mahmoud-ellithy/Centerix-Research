@@ -174,7 +174,7 @@ public class AllocatePaymentHandler(
             return PaymentErrors.AllocationExceedsInvoiceRemaining;
         }
 
-        // Idempotency check: if an identical allocation already exists (same payment, invoice, amount),
+        // Idempotency check: if an identical allocation already exists (same payment, invoice, installment, amount),
         // return success without creating a duplicate. This prevents retry from creating duplicate
         // financial effects while still allowing legitimate different allocations.
         // IMPORTANT: This check happens AFTER the financial invariant checks to ensure that
@@ -184,6 +184,7 @@ public class AllocatePaymentHandler(
         var existingAllocation = await dbContext.PaymentAllocations
             .Where(a => a.PaymentId == request.PaymentId
                 && a.InvoiceId == request.InvoiceId
+                && a.InstallmentId == request.InstallmentId
                 && a.AllocatedAmount == request.AllocatedAmount
                 && a.Status == PaymentAllocationStatus.Active
                 && a.TenantId == payment.TenantId)
