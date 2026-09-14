@@ -61,9 +61,14 @@ public class SubscriptionReconciliationService(
         if (subscription.ContractId is null)
             return;
 
-        // Load installments for this subscription's contract
+        // Load installments for this subscription's contract.
+        // Scope to the subscription when the installment is explicitly linked;
+        // include contract-level installments (SubscriptionId null) for backward compatibility.
+        // TenantId filter enforces tenant isolation at the query level.
         var installments = await dbContext.Installments
-            .Where(i => i.ContractId == subscription.ContractId.Value)
+            .Where(i => i.ContractId == subscription.ContractId.Value
+                && i.TenantId == tenantId
+                && (i.SubscriptionId == null || i.SubscriptionId == subscription.Id))
             .ToListAsync(cancellationToken);
 
         var hasOverdue = installments.Any(i => i.IsOverdue(now));
@@ -136,8 +141,14 @@ public class SubscriptionReconciliationService(
             .AsNoTracking()
             .FirstOrDefaultAsync(cancellationToken);
 
-        // Default to 7 days if no policy configured
-        return policy?.GracePeriodDays ?? 7;
+        if (policy is null)
+            throw new InvalidOperationException(
+                "SubscriptionPolicy is not configured. The central commercial policy " +
+                "must be seeded before subscription reconciliation can operate. " +
+                "Grace period is a centrally controlled platform policy that cannot be " +
+                "silently defaulted to an invented business value.");
+
+        return policy.GracePeriodDays;
     }
 
     private void DetachEntity(object entity)
