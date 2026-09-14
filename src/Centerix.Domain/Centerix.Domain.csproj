@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Centerix.Infrastructure" />
+    <InternalsVisibleTo Include="Centerix.SecurityTests" />
   </ItemGroup>
 
   <ItemGroup>

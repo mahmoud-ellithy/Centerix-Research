@@ -130,6 +130,7 @@ public static class DependencyInjection
 
         // Phase 2: subscription state, feature entitlement and plan-limit enforcement
         services.AddScoped<ISubscriptionStateService, SubscriptionStateService>();
+        services.AddScoped<ISubscriptionReconciliationService, SubscriptionReconciliationService>();
         services.AddScoped<IFeatureAccessService, FeatureAccessService>();
         services.AddScoped<ILimitService, LimitService>();
         services.AddScoped<IPlatformAdminGuard, PlatformAdminGuard>();

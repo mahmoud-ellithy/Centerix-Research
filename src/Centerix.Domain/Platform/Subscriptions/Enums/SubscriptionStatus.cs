@@ -14,4 +14,10 @@ public enum SubscriptionStatus : byte
     Expired = 2,
     Cancelled = 3,
     Suspended = 4,
+
+    /// <summary>
+    /// System-derived: at least one financial obligation is overdue but the applicable
+    /// Grace Period has not yet expired. Cannot be set directly by any administrator.
+    /// </summary>
+    PastDue = 5,
 }

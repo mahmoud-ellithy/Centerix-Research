@@ -7,6 +7,7 @@ using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Billing.Installments;
 using Centerix.Domain.Platform.Billing.Payments;
 using Centerix.Domain.Platform.Billing.Payments.Enums;
+using Centerix.Domain.Platform.Subscriptions;
 
 using MediatR;
 using Microsoft.Data.SqlClient;
@@ -17,7 +18,8 @@ public record AllocatePaymentCommand(Guid PaymentId, Guid InvoiceId, decimal All
 
 public class AllocatePaymentHandler(
     IAppDbContext dbContext,
-    IAuditWriter auditWriter) : IRequestHandler<AllocatePaymentCommand, Result<Updated>>
+    IAuditWriter auditWriter,
+    ISubscriptionReconciliationService reconciliationService) : IRequestHandler<AllocatePaymentCommand, Result<Updated>>
 {
     /// <summary>
     /// Maximum number of retry attempts when a SQL Server deadlock (error 1205) occurs.
@@ -344,6 +346,14 @@ public class AllocatePaymentHandler(
                 allocation.AllocatedAmount
             }),
             cancellationToken: cancellationToken);
+
+        // Trigger subscription state reconciliation after successful payment settlement.
+        // This may recover a PastDue/Suspended subscription back to Active if the
+        // overdue obligation has been fully settled.
+        if (payment.TenantId is not null)
+        {
+            await reconciliationService.ReconcileAsync(payment.TenantId, cancellationToken);
+        }
 
         return Result.Updated;
     }

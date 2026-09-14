@@ -103,7 +103,7 @@ public class Phase8_1_3InstallmentRehydrationTests
     private static async Task<AllocatePaymentHandler> CreateHandler(AppDbContext db)
     {
         var auditWriter = Substitute.For<IAuditWriter>();
-        return new AllocatePaymentHandler(db, auditWriter);
+        return new AllocatePaymentHandler(db, auditWriter, NullSubscriptionReconciliationService.Instance);
     }
 
     /// <summary>
@@ -923,7 +923,7 @@ public class Phase8_1_3RehydrationSqlServerTests
     private static async Task<AllocatePaymentHandler> CreateHandler(AppDbContext db)
     {
         var auditWriter = Substitute.For<IAuditWriter>();
-        return new AllocatePaymentHandler(db, auditWriter);
+        return new AllocatePaymentHandler(db, auditWriter, NullSubscriptionReconciliationService.Instance);
     }
 
     /// <summary>

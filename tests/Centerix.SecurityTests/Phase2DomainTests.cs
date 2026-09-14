@@ -247,16 +247,16 @@ public class Phase2DomainTests
     }
 
     [Fact]
-    public void Subscription_SuspendBlocksAccess_ReactivateRestores()
+    public void Subscription_SuspendFromObligationBlocksAccess_ReactivateFromRecoveryRestores()
     {
         var sub = NewSubscription(startsAt: DateTime.UtcNow, status: SubscriptionStatus.Pending);
         sub.Activate(DateTime.UtcNow);
         Assert.True(sub.IsActiveAsOf(DateTime.UtcNow));
 
-        sub.Suspend();
+        sub.SuspendFromObligation();
         Assert.False(sub.IsActiveAsOf(DateTime.UtcNow)); // suspended blocks even before expiry
 
-        sub.Reactivate(DateTime.UtcNow);
+        sub.ReactivateFromFinancialRecovery(DateTime.UtcNow);
         Assert.True(sub.IsActiveAsOf(DateTime.UtcNow));
     }
 

@@ -222,15 +222,16 @@ public class TenantPlan : AuditableEntity<Guid>
         Status == SubscriptionStatus.Active && utcNow < EffectiveEndsAtUtc;
 
     /// <summary>
-    /// Commercially activates a PENDING subscription. Rejected when already expired as of
-    /// <paramref name="utcNow"/>.
+    /// Commercially activates a PENDING subscription. Only Pending → Active is allowed
+    /// through this admin-operated path. PastDue and Suspended are system-derived states
+    /// that can only be resolved through financial reconciliation.
     /// </summary>
     public Result<Updated> Activate(DateTime utcNow)
     {
         if (Status == SubscriptionStatus.Active)
             return TenantPlanErrors.AlreadyActive;
 
-        if (Status is not (SubscriptionStatus.Pending or SubscriptionStatus.Suspended))
+        if (Status != SubscriptionStatus.Pending)
             return TenantPlanErrors.InvalidStateTransition(Status, "activate");
 
         if (utcNow >= EffectiveEndsAtUtc)
@@ -292,22 +293,43 @@ public class TenantPlan : AuditableEntity<Guid>
         return Result.Updated;
     }
 
-    public Result<Updated> Suspend()
+    /// <summary>
+    /// System-derived transition to Suspended when a financial obligation remains unpaid
+    /// after the applicable Grace Period. Only callable by the reconciliation service.
+    /// PastDue → Suspended or Active → Suspended (when overdue beyond grace period).
+    /// </summary>
+    internal Result<Updated> SuspendFromObligation()
     {
-        if (Status != SubscriptionStatus.Active)
-            return TenantPlanErrors.NotActive;
+        if (Status is not (SubscriptionStatus.Active or SubscriptionStatus.PastDue))
+            return TenantPlanErrors.InvalidStateTransition(Status, "suspend for non-payment");
 
         Status = SubscriptionStatus.Suspended;
         return Result.Updated;
     }
 
-    public Result<Updated> Reactivate(DateTime utcNow)
+    /// <summary>
+    /// System-derived transition to PastDue when a financial obligation is overdue
+    /// but the applicable Grace Period has not yet expired.
+    /// Only callable by the reconciliation service. Active → PastDue.
+    /// </summary>
+    internal Result<Updated> MarkPastDue()
     {
-        if (Status == SubscriptionStatus.Active)
-            return TenantPlanErrors.AlreadyActive;
+        if (Status != SubscriptionStatus.Active)
+            return TenantPlanErrors.InvalidStateTransition(Status, "mark as past due");
 
-        if (Status is not (SubscriptionStatus.Suspended or SubscriptionStatus.Expired or SubscriptionStatus.Pending))
-            return TenantPlanErrors.InvalidStateTransition(Status, "reactivate");
+        Status = SubscriptionStatus.PastDue;
+        return Result.Updated;
+    }
+
+    /// <summary>
+    /// System-derived recovery transition back to Active when overdue obligations
+    /// have been settled. PastDue/Suspended → Active (if subscription has not expired).
+    /// Only callable by the reconciliation service.
+    /// </summary>
+    internal Result<Updated> ReactivateFromFinancialRecovery(DateTime utcNow)
+    {
+        if (Status is not (SubscriptionStatus.PastDue or SubscriptionStatus.Suspended))
+            return TenantPlanErrors.InvalidStateTransition(Status, "reactivate from financial recovery");
 
         if (utcNow >= EffectiveEndsAtUtc)
             return TenantPlanErrors.AlreadyExpired;

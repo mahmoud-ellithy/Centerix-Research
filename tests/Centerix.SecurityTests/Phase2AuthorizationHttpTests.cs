@@ -358,27 +358,25 @@ public class Phase2AuthorizationHttpTests : IClassFixture<TestWebApplicationFact
 
     [Fact]
     [Trait("Category", "Phase2Http")]
-    public async Task SuspendSubscription_BlocksImmediately_Reactivate_Restores()
+    public async Task SuspendEndpoint_Removed_ManualSuspendBlocked()
     {
         var (platformToken, tenantAdminToken, tenantId, identifier) = await SeedAsync();
         var planId = await CreatePlanAsync(platformToken);
         var (subscriptionId, _) = await ApproveAndActivateAsync(platformToken, tenantId, planId);
 
+        // The suspend endpoint has been removed — PastDue/Suspended are now system-derived states.
+        // The request may receive 403 (authorization), 404 (not found), or 405 (method not allowed)
+        // depending on the middleware pipeline; any of these confirm the endpoint is unavailable.
         var suspend = await _client.SendAsync(Post("/api/tenantplans/suspend",
             new { tenantId, reason = "non-payment" }, platformToken));
-        Assert.Equal(HttpStatusCode.NoContent, suspend.StatusCode);
+        Assert.True(
+            suspend.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed,
+            $"Expected 403/404/405 but got {(int)suspend.StatusCode}");
 
-        var stateDuringSuspension = await GetMySubscriptionAsync(tenantAdminToken, identifier);
-        Assert.Equal("Suspended", stateDuringSuspension.Status);
-        Assert.False(stateDuringSuspension.IsActiveNow);
-
-        var reactivate = await _client.SendAsync(Post("/api/tenantplans/activate",
-            new { tenantId }, platformToken));
-        Assert.Equal(HttpStatusCode.NoContent, reactivate.StatusCode);
-
-        var restored = await GetMySubscriptionAsync(tenantAdminToken, identifier);
-        Assert.Equal("Active", restored.Status);
-        Assert.True(restored.IsActiveNow);
+        // Subscription remains Active — no manual suspension is possible
+        var state = await GetMySubscriptionAsync(tenantAdminToken, identifier);
+        Assert.Equal("Active", state.Status);
+        Assert.True(state.IsActiveNow);
     }
 
     [Fact]

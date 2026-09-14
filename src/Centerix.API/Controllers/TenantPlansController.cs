@@ -76,18 +76,6 @@ public class TenantPlansController(ILocalizer localizer, IMediator mediator) : A
             Problem);
     }
 
-    /// <summary>PLATFORM: suspends the active subscription (e.g. non-payment).</summary>
-    [HttpPost("suspend")]
-    [HasPermission(Permissions.Subscriptions.Manage)]
-    public async Task<IActionResult> SuspendSubscription(SuspendSubscriptionCommand command, CancellationToken cancellationToken)
-    {
-        var result = await mediator.Send(command, cancellationToken);
-
-        return result.Match(
-            _ => NoContent(),
-            Problem);
-    }
-
     /// <summary>PLATFORM: cancels the current subscription (history preserved).</summary>
     [HttpPost("cancel")]
     [HasPermission(Permissions.Subscriptions.Manage)]

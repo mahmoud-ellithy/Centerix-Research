@@ -63,11 +63,12 @@ public class TenantPlanConfiguration : IEntityTypeConfiguration<TenantPlan>
             .HasColumnName("ModifiedBy")
             .HasMaxLength(450);
 
-        // DATABASE-LEVEL single-non-terminal-subscription invariant: at most one Active or
-        // Suspended subscription per tenant. History rows (Expired/Cancelled/Pending) do not
-        // participate. Application checks remain as defense in depth only.
+        // DATABASE-LEVEL single-non-terminal-subscription invariant: at most one Active,
+        // Suspended, or PastDue subscription per tenant. History rows (Expired/Cancelled/Pending)
+        // do not participate. PastDue is non-terminal because the subscription can recover to
+        // Active upon settlement of overdue obligations.
         builder.HasIndex(tp => tp.TenantId)
-            .HasFilter($"[{nameof(TenantPlan.Status)}] IN (1, 4)")
+            .HasFilter($"[{nameof(TenantPlan.Status)}] IN (1, 4, 5)")
             .IsUnique()
             .HasDatabaseName("UX_TenantPlans_TenantId_NonTerminalStatus");
 

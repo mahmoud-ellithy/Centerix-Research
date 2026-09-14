@@ -86,7 +86,7 @@ public class Phase9FinancialLedgerHardeningTests
     private static async Task<AllocatePaymentHandler> CreateHandler(AppDbContext db)
     {
         var auditWriter = Substitute.For<IAuditWriter>();
-        return new AllocatePaymentHandler(db, auditWriter);
+        return new AllocatePaymentHandler(db, auditWriter, NullSubscriptionReconciliationService.Instance);
     }
 
     // ------------------------------------------------------------------

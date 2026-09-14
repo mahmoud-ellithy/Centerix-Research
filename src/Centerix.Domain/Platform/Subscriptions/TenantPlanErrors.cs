@@ -61,6 +61,18 @@ public static class TenantPlanErrors
     public static Error CannotRenewCancelled =>
         Error.Conflict("TenantPlan.CannotRenewCancelled", "Cannot renew a cancelled subscription");
 
+    public static Error AlreadyPastDue =>
+        Error.Conflict("TenantPlan.AlreadyPastDue", "This subscription is already past due");
+
+    public static Error CannotMarkPastDue =>
+        Error.Conflict("TenantPlan.CannotMarkPastDue", "Cannot mark a subscription as past due from its current state");
+
+    public static Error CannotSuspendFromObligation =>
+        Error.Conflict("TenantPlan.CannotSuspendFromObligation", "Cannot suspend a subscription for non-payment from its current state");
+
+    public static Error CannotReactivateFromRecovery =>
+        Error.Conflict("TenantPlan.CannotReactivateFromRecovery", "Cannot reactivate a subscription from financial recovery in its current state");
+
     /// <summary>Describes an illegal transition from <paramref name="current"/> to the target action.</summary>
     public static Error InvalidStateTransition(Enums.SubscriptionStatus current, string action) =>
         Error.Conflict("TenantPlan.InvalidStateTransition",

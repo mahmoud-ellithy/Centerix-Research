@@ -122,6 +122,9 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     public DbSet<Offer> Offers { get; set; } = default!;
     public DbSet<OfferBenefit> OfferBenefits { get; set; } = default!;
 
+    // Subscription policy (platform-level centrally controlled configuration)
+    public DbSet<SubscriptionPolicy> SubscriptionPolicies { get; set; } = default!;
+
     // Billing foundation
     public DbSet<BillingCycle> BillingCycles { get; set; } = default!;
 

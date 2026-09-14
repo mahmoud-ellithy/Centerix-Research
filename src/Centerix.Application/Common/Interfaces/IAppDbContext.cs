@@ -108,6 +108,9 @@ public interface IAppDbContext
     // Billing: Installments (payment obligations)
     DbSet<Installment> Installments { get; }
 
+    // Subscription policy (platform-level centrally controlled configuration)
+    DbSet<SubscriptionPolicy> SubscriptionPolicies { get; }
+
     // Billing: Credits
     DbSet<TenantCredit> TenantCredits { get; }
 

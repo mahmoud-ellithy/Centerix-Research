@@ -229,7 +229,7 @@ public class Phase2SqlServerTests
             var sa = await da.TenantPlans.IgnoreQueryFilters().SingleAsync(tp => tp.Id == subId);   // tracked
             var sb = await dbb.TenantPlans.IgnoreQueryFilters().SingleAsync(tp => tp.Id == subId);  // tracked
 
-            sb.Suspend();
+            sb.SuspendFromObligation();
             await dbb.SaveChangesAsync();
 
             sa.Renew(1, 0, DateTime.UtcNow); // stale RowVersion
