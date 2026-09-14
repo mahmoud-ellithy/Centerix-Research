@@ -1,6 +1,7 @@
 namespace Centerix.Infrastructure.Data.Configurations;
 
 using Centerix.Domain.Platform.Billing.Installments;
+using Centerix.Domain.Platform.Subscriptions;
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -24,6 +25,13 @@ public class InstallmentConfiguration : IEntityTypeConfiguration<Installment>
 
         builder.Property(i => i.SubscriptionId)
             .HasColumnType("uniqueidentifier");
+
+        // FK: Installment.SubscriptionId → TenantPlan.Id (optional — historical data may have null).
+        // Restrict: a subscription must not be deleted while it has linked installments.
+        builder.HasOne<TenantPlan>()
+            .WithMany()
+            .HasForeignKey(i => i.SubscriptionId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         builder.Property(i => i.InvoiceId)
             .HasColumnType("uniqueidentifier");
