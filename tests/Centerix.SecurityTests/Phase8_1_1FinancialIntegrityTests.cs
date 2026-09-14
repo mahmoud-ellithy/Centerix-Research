@@ -10,6 +10,10 @@ using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Billing.Invoicing.Enums;
 using Centerix.Domain.Platform.Billing.Payments;
 using Centerix.Domain.Platform.Billing.Payments.Enums;
+using Centerix.Domain.Platform.Contracts;
+using Centerix.Domain.Platform.Contracts.Enums;
+using Centerix.Domain.Platform.Subscriptions;
+using Centerix.Domain.Platform.Subscriptions.Enums;
 using Centerix.Infrastructure.Data;
 using Centerix.Infrastructure.Tenancy;
 using Finbuckle.MultiTenant.Abstractions;
@@ -802,14 +806,69 @@ public class Phase8_1_1ConcurrencySqlServerTests
         return invoice;
     }
 
-    private static Installment CreateInstallment(AppDbContext db, string tenantId, Guid contractId, decimal amount)
+    private static Contract CreateAndPersistContract(AppDbContext db, string tenantId)
+    {
+        var contract = Contract.Create(
+            Guid.NewGuid(),
+            tenantId,
+            $"CON-{Guid.NewGuid().ToString()[..8]}",
+            1,
+            new DateTime(2026, 1, 1),
+            new DateTime(2026, 12, 31),
+            12,
+            1000m,
+            1000m,
+            "EGP",
+            12000m).Value!;
+        contract.SubmitForApproval();
+        contract.Activate(DateTime.UtcNow);
+        db.Contracts.Add(contract);
+        db.StampAddedTenantIds(tenantId);
+        db.SaveChanges();
+        db.Entry(contract).State = EntityState.Detached;
+        return contract;
+    }
+
+    private static TenantPlan CreateAndPersistSubscription(AppDbContext db, string tenantId, Guid contractId)
+    {
+        var planCode = $"P8C{Guid.NewGuid():N}"[..28];
+        var plan = Centerix.Domain.Platform.Plans.Plan.Create(
+            0, planCode, "Test Plan", 100m,
+            100, 50, 10, 20, 50, 1000,
+            currencyCode: "EGP", durationMonths: 12).Value!;
+        db.Plans.Add(plan);
+        db.SaveChanges();
+        db.Entry(plan).State = EntityState.Detached;
+
+        var result = TenantPlan.Create(
+            Guid.NewGuid(),
+            tenantId,
+            planId: plan.Id,
+            snapshotPrice: 100m,
+            snapshotCurrency: "EGP",
+            12,
+            bonusMonths: 0,
+            startsAtUtc: DateTime.UtcNow,
+            autoRenew: false,
+            status: SubscriptionStatus.Pending);
+        var subscription = result.Value;
+        subscription.Activate(DateTime.UtcNow);
+        subscription.LinkToContract(contractId);
+        db.TenantPlans.Add(subscription);
+        db.StampAddedTenantIds(tenantId);
+        db.SaveChanges();
+        db.Entry(subscription).State = EntityState.Detached;
+        return subscription;
+    }
+
+    private static Installment CreateInstallment(AppDbContext db, string tenantId, Guid contractId, decimal amount, Guid subscriptionId)
     {
         var installment = Installment.Create(
             Guid.NewGuid(), contractId, 1,
             DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
             amount, "EGP",
-            Guid.NewGuid()).Value;
+            subscriptionId).Value;
         db.Installments.Add(installment);
         db.StampAddedTenantIds(tenantId);
         return installment;
@@ -831,7 +890,6 @@ public class Phase8_1_1ConcurrencySqlServerTests
     public async Task Concurrent_IdenticalRetry_Installment_CreatesOnlyOneAllocation()
     {
         var tenantId = $"tenant-{Guid.NewGuid():N}"[..20];
-        var contractId = Guid.NewGuid();
         Guid paymentId, invoiceId, installmentId;
 
         using (var scope = _env.Factory.Services.CreateScope())
@@ -839,14 +897,17 @@ public class Phase8_1_1ConcurrencySqlServerTests
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             await EnsureTenantExists(scope.ServiceProvider, tenantId);
 
+            var contract = CreateAndPersistContract(db, tenantId);
+            var subscription = CreateAndPersistSubscription(db, tenantId, contract.Id);
+
             var payment = CreatePayment(db, tenantId, 4000m, $"PAY-{tenantId}");
             payment.Complete(DateTime.UtcNow);
             paymentId = payment.Id;
 
-            var invoice = CreateInvoice(db, tenantId, 4000m, $"INV-{tenantId}", contractId: contractId);
+            var invoice = CreateInvoice(db, tenantId, 4000m, $"INV-{tenantId}", contractId: contract.Id);
             invoiceId = invoice.Id;
 
-            var installment = CreateInstallment(db, tenantId, contractId, 4000m);
+            var installment = CreateInstallment(db, tenantId, contract.Id, 4000m, subscription.Id);
             installmentId = installment.Id;
 
             await db.SaveChangesAsync();
@@ -934,7 +995,6 @@ public class Phase8_1_1ConcurrencySqlServerTests
     public async Task Concurrent_DifferentInstallments_BothSucceed_WhenCapacityPermits()
     {
         var tenantId = $"tenant-{Guid.NewGuid():N}"[..20];
-        var contractId = Guid.NewGuid();
         Guid paymentId, invoiceId, installment1Id, installment2Id;
 
         using (var scope = _env.Factory.Services.CreateScope())
@@ -942,22 +1002,25 @@ public class Phase8_1_1ConcurrencySqlServerTests
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             await EnsureTenantExists(scope.ServiceProvider, tenantId);
 
+            var contract = CreateAndPersistContract(db, tenantId);
+            var subscription = CreateAndPersistSubscription(db, tenantId, contract.Id);
+
             var payment = CreatePayment(db, tenantId, 10000m, $"PAY-{tenantId}");
             payment.Complete(DateTime.UtcNow);
             paymentId = payment.Id;
 
-            var invoice = CreateInvoice(db, tenantId, 10000m, $"INV-{tenantId}", contractId: contractId);
+            var invoice = CreateInvoice(db, tenantId, 10000m, $"INV-{tenantId}", contractId: contract.Id);
             invoiceId = invoice.Id;
 
-            var installment1 = CreateInstallment(db, tenantId, contractId, 5000m);
+            var installment1 = CreateInstallment(db, tenantId, contract.Id, 5000m, subscription.Id);
             installment1Id = installment1.Id;
 
             var installment2 = Installment.Create(
-                Guid.NewGuid(), contractId, 2,
+                Guid.NewGuid(), contract.Id, 2,
                 DateTime.UtcNow.AddDays(30),
                 new DateTime(2026, 5, 1), new DateTime(2026, 8, 31),
                 5000m, "EGP",
-                Guid.NewGuid()).Value;
+                subscription.Id).Value;
             db.Installments.Add(installment2);
             installment2Id = installment2.Id;
 

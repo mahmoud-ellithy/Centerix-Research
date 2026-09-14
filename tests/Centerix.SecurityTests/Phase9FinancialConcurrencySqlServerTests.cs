@@ -5,12 +5,15 @@ using Centerix.Application.Platform.Billing.Commands;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Billing.Invoicing.Enums;
+using Centerix.Domain.Platform.Billing.Installments;
 using Centerix.Domain.Platform.Billing.Payments;
 using Centerix.Domain.Platform.Billing.Payments.Enums;
 using Centerix.Domain.Platform.Billing.Refunds;
 using Centerix.Domain.Platform.Billing.Refunds.Enums;
 using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Contracts.Enums;
+using Centerix.Domain.Platform.Subscriptions;
+using Centerix.Domain.Platform.Subscriptions.Enums;
 using Centerix.Infrastructure.Data;
 using Centerix.Infrastructure.Tenancy;
 using Finbuckle.MultiTenant.Abstractions;
@@ -1729,6 +1732,178 @@ public class Phase9FinancialConcurrencySqlServerTests
 
             // Verify the settlement amount equals the refund amount
             Assert.Equal(4275.89m, refundSettlements[0].Amount);
+        }
+    }
+
+    // ==================================================================
+    // Task 9.2 — FK Delete Restrict Verification
+    // ==================================================================
+
+    /// <summary>
+    /// Direct SQL Server integration test proving that FK_Installments_TenantPlans_SubscriptionId
+    /// prevents deletion of a TenantPlan that is referenced by an Installment.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    [Trait("Category", "Phase9_2")]
+    public async Task DeleteRestrict_TenantPlan_ReferencedByInstallment_IsRejected()
+    {
+        var tenantId = $"tenant-{Guid.NewGuid():N}"[..20];
+
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await EnsureTenantExists(scope.ServiceProvider, tenantId);
+
+            var contract = Contract.Create(
+                Guid.NewGuid(),
+                tenantId,
+                $"CON-{Guid.NewGuid().ToString()[..8]}",
+                1,
+                new DateTime(2026, 1, 1),
+                new DateTime(2026, 12, 31),
+                12,
+                1000m,
+                1000m,
+                "EGP",
+                12000m).Value!;
+            contract.SubmitForApproval();
+            contract.Activate(DateTime.UtcNow);
+            db.Contracts.Add(contract);
+            db.StampAddedTenantIds(tenantId);
+            await db.SaveChangesAsync();
+            db.Entry(contract).State = EntityState.Detached;
+
+            var planCode = $"P9C{Guid.NewGuid():N}"[..28];
+            var plan = Centerix.Domain.Platform.Plans.Plan.Create(
+                0, planCode, "Test Plan", 100m,
+                100, 50, 10, 20, 50, 1000,
+                currencyCode: "EGP", durationMonths: 12).Value!;
+            db.Plans.Add(plan);
+            await db.SaveChangesAsync();
+            db.Entry(plan).State = EntityState.Detached;
+
+            var subscriptionResult = TenantPlan.Create(
+                Guid.NewGuid(),
+                tenantId,
+                planId: plan.Id,
+                snapshotPrice: 100m,
+                snapshotCurrency: "EGP",
+                12,
+                bonusMonths: 0,
+                startsAtUtc: DateTime.UtcNow,
+                autoRenew: false,
+                status: SubscriptionStatus.Pending);
+            var subscription = subscriptionResult.Value;
+            subscription.Activate(DateTime.UtcNow);
+            subscription.LinkToContract(contract.Id);
+            db.TenantPlans.Add(subscription);
+            db.StampAddedTenantIds(tenantId);
+            await db.SaveChangesAsync();
+
+            var installmentResult = Installment.Create(
+                Guid.NewGuid(), contract.Id, 1,
+                DateTime.UtcNow.AddDays(30),
+                new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
+                1000m, "EGP",
+                subscription.Id);
+            var installment = installmentResult.Value;
+            db.Installments.Add(installment);
+            db.StampAddedTenantIds(tenantId);
+            await db.SaveChangesAsync();
+
+            db.Entry(installment).State = EntityState.Detached;
+            db.Entry(subscription).State = EntityState.Deleted;
+
+            var ex = await Assert.ThrowsAsync<DbUpdateException>(async () =>
+            {
+                await db.SaveChangesAsync();
+            });
+
+            Assert.Contains("FK_Installments_TenantPlans_SubscriptionId", ex.InnerException?.Message ?? "");
+        }
+    }
+
+    /// <summary>
+    /// Verifies that a historical Installment with SubscriptionId = NULL can still exist,
+    /// confirming backward-compatible nullable FK behavior.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    [Trait("Category", "Phase9_2")]
+    public async Task NullSubscriptionId_HistoricalInstallment_CanExist()
+    {
+        var tenantId = $"tenant-{Guid.NewGuid():N}"[..20];
+
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await EnsureTenantExists(scope.ServiceProvider, tenantId);
+
+            var contract = Contract.Create(
+                Guid.NewGuid(),
+                tenantId,
+                $"CON-{Guid.NewGuid().ToString()[..8]}",
+                1,
+                new DateTime(2026, 1, 1),
+                new DateTime(2026, 12, 31),
+                12,
+                1000m,
+                1000m,
+                "EGP",
+                12000m).Value!;
+            contract.SubmitForApproval();
+            contract.Activate(DateTime.UtcNow);
+            db.Contracts.Add(contract);
+            db.StampAddedTenantIds(tenantId);
+            await db.SaveChangesAsync();
+            db.Entry(contract).State = EntityState.Detached;
+
+            var planCode = $"P9C{Guid.NewGuid():N}"[..28];
+            var plan = Centerix.Domain.Platform.Plans.Plan.Create(
+                0, planCode, "Test Plan", 100m,
+                100, 50, 10, 20, 50, 1000,
+                currencyCode: "EGP", durationMonths: 12).Value!;
+            db.Plans.Add(plan);
+            await db.SaveChangesAsync();
+            db.Entry(plan).State = EntityState.Detached;
+
+            var subscriptionResult = TenantPlan.Create(
+                Guid.NewGuid(),
+                tenantId,
+                planId: plan.Id,
+                snapshotPrice: 100m,
+                snapshotCurrency: "EGP",
+                12,
+                bonusMonths: 0,
+                startsAtUtc: DateTime.UtcNow,
+                autoRenew: false,
+                status: SubscriptionStatus.Pending);
+            var subscription = subscriptionResult.Value;
+            subscription.Activate(DateTime.UtcNow);
+            db.TenantPlans.Add(subscription);
+            db.StampAddedTenantIds(tenantId);
+            await db.SaveChangesAsync();
+
+            var installmentResult = Installment.Create(
+                Guid.NewGuid(), contract.Id, 1,
+                DateTime.UtcNow.AddDays(30),
+                new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
+                1000m, "EGP",
+                subscription.Id);
+            var installment = installmentResult.Value;
+            db.Installments.Add(installment);
+            db.StampAddedTenantIds(tenantId);
+            await db.SaveChangesAsync();
+
+            db.Entry(installment).Property(i => i.SubscriptionId).CurrentValue = null;
+            await db.SaveChangesAsync();
+
+            var reloaded = await db.Installments
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .FirstAsync(i => i.Id == installment.Id);
+            Assert.Null(reloaded.SubscriptionId);
         }
     }
 }
