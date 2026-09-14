@@ -36,7 +36,8 @@ using Xunit;
 ///   6. Missing Subscription rejected when required
 ///   7. Subscription from another tenant rejected
 ///   8. Subscription.ContractId mismatch rejected
-///   9. Invalid subscription lifecycle rejected
+///   9. Expired subscription may still be referenced by installments (historical financial obligation;
+///      the Contract—not the subscription—is the financial authority; both handlers require Contract.IsActive)
 ///
 /// Reconciliation:
 ///  10. Current Subscription sees its own Installments
@@ -439,11 +440,15 @@ public class Phase9_2SubscriptionInstallmentOwnershipFinalizationTests
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // 9. Validation: Expired subscription cannot be used for new installments
+    // 9. Expired subscription: historical financial obligation still recordable
+    //    Both handlers validate Contract.IsActive but NOT subscription status.
+    //    The Contract is the financial authority; subscription lifecycle is a
+    //    service concept. Installments may reference expired subscriptions when
+    //    they represent an existing/historical financial obligation.
     // ═══════════════════════════════════════════════════════════════════
 
     [Fact]
-    public async Task AddInstallmentCommand_ExpiredSubscription_CanBeUsedForInstallments()
+    public async Task AddInstallmentCommand_ExpiredSubscription_AllowedForHistoricalFinancialObligation()
     {
         var tenantId = "tenant-92-09";
         await using var db = CreateDbContext(tenantId);
