@@ -98,7 +98,8 @@ public class Phase8_1_1FinancialIntegrityTests
             new DateTime(2026, 1, 1),
             new DateTime(2026, 4, 30),
             amount,
-            "EGP").Value;
+            "EGP",
+            Guid.NewGuid()).Value;
         db.Installments.Add(installment);
         db.StampAddedTenantIds(tenantId);
         return installment;
@@ -265,7 +266,8 @@ public class Phase8_1_1FinancialIntegrityTests
             Guid.NewGuid(), contractId, 2,
             DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 5, 1), new DateTime(2026, 8, 31),
-            4000m, "EGP").Value;
+            4000m, "EGP",
+            Guid.NewGuid()).Value;
         db.Installments.Add(installment2);
         db.StampAddedTenantIds(tenantId);
         await db.SaveChangesAsync();
@@ -413,7 +415,8 @@ public class Phase8_1_1FinancialIntegrityTests
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-            10000m, "EGP").Value;
+            10000m, "EGP",
+            Guid.NewGuid()).Value;
 
         var allocationA = PaymentAllocation.Create(
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
@@ -443,7 +446,8 @@ public class Phase8_1_1FinancialIntegrityTests
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-            10000m, "EGP").Value;
+            10000m, "EGP",
+            Guid.NewGuid()).Value;
 
         var allocationA = PaymentAllocation.Create(
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
@@ -481,7 +485,8 @@ public class Phase8_1_1FinancialIntegrityTests
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-            5000m, "EGP").Value;
+            5000m, "EGP",
+            Guid.NewGuid()).Value;
 
         var allocationA = PaymentAllocation.Create(
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
@@ -516,7 +521,8 @@ public class Phase8_1_1FinancialIntegrityTests
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-            5000m, "EGP").Value;
+            5000m, "EGP",
+            Guid.NewGuid()).Value;
 
         var allocationA = PaymentAllocation.Create(
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
@@ -545,7 +551,8 @@ public class Phase8_1_1FinancialIntegrityTests
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow.AddDays(-5),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-            5000m, "EGP").Value;
+            5000m, "EGP",
+            Guid.NewGuid()).Value;
 
         var allocation = PaymentAllocation.Create(
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
@@ -621,7 +628,8 @@ public class Phase8_1_1FinancialIntegrityTests
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-            4000m, "EGP").Value;
+            4000m, "EGP",
+            Guid.NewGuid()).Value;
 
         installment.ApplyAllocation(
             PaymentAllocation.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1500m, DateTime.UtcNow).Value,
@@ -645,7 +653,8 @@ public class Phase8_1_1FinancialIntegrityTests
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-            5000m, "EGP").Value;
+            5000m, "EGP",
+            Guid.NewGuid()).Value;
 
         installment.ApplyAllocation(
             PaymentAllocation.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 2000m, DateTime.UtcNow).Value,
@@ -666,7 +675,8 @@ public class Phase8_1_1FinancialIntegrityTests
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-            4000m, "EGP").Value;
+            4000m, "EGP",
+            Guid.NewGuid()).Value;
 
         installment.ApplyAllocation(
             PaymentAllocation.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 3000m, DateTime.UtcNow).Value,
@@ -690,7 +700,8 @@ public class Phase8_1_1FinancialIntegrityTests
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-            10000m, "EGP").Value;
+            10000m, "EGP",
+            Guid.NewGuid()).Value;
 
         Assert.Equal(0m, installment.SettledAmount);
 
@@ -722,7 +733,8 @@ public class Phase8_1_1FinancialIntegrityTests
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow.AddDays(-5),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-            10000m, "EGP").Value;
+            10000m, "EGP",
+            Guid.NewGuid()).Value;
 
         installment.Cancel(DateTime.UtcNow);
 
@@ -796,7 +808,8 @@ public class Phase8_1_1ConcurrencySqlServerTests
             Guid.NewGuid(), contractId, 1,
             DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-            amount, "EGP").Value;
+            amount, "EGP",
+            Guid.NewGuid()).Value;
         db.Installments.Add(installment);
         db.StampAddedTenantIds(tenantId);
         return installment;
@@ -943,7 +956,8 @@ public class Phase8_1_1ConcurrencySqlServerTests
                 Guid.NewGuid(), contractId, 2,
                 DateTime.UtcNow.AddDays(30),
                 new DateTime(2026, 5, 1), new DateTime(2026, 8, 31),
-                5000m, "EGP").Value;
+                5000m, "EGP",
+                Guid.NewGuid()).Value;
             db.Installments.Add(installment2);
             installment2Id = installment2.Id;
 

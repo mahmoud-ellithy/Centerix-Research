@@ -47,19 +47,19 @@ public class SubscriptionReconciliationService(
             var expiryResult = subscription.MarkExpired(now);
             if (!expiryResult.IsSuccess)
             {
-                logger.LogWarning(
-                    "Failed to mark subscription {SubscriptionId} as expired: {Errors}",
-                    subscription.Id, string.Join(", ", expiryResult.Errors!.Select(e => e.Description)));
-                return;
+                var errors = string.Join(", ", expiryResult.Errors!.Select(e => e.Description));
+                throw new InvalidOperationException(
+                    $"Failed to mark subscription {subscription.Id} as expired: {errors}. " +
+                    "Reconciliation cannot proceed when expiration state transition fails.");
             }
 
             var saveResult = await dbContext.SaveChangesAsync(cancellationToken);
             if (saveResult == 0)
             {
-                logger.LogWarning(
-                    "Failed to persist expiration for subscription {SubscriptionId}: SaveChangesAsync returned 0",
-                    subscription.Id);
-                return;
+                throw new InvalidOperationException(
+                    $"Failed to persist expiration for subscription {subscription.Id}: " +
+                    "SaveChangesAsync returned 0 rows affected. " +
+                    "Reconciliation cannot proceed when persistence fails.");
             }
 
             DetachEntity(subscription);

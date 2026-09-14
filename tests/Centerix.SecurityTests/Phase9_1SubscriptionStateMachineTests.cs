@@ -66,7 +66,7 @@ public class Phase9_1SubscriptionStateMachineTests
     }
 
     private static Installment CreateOverdueInstallment(
-        Guid contractId, Guid? subscriptionId, string tenantId,
+        Guid contractId, Guid subscriptionId, string tenantId,
         decimal amount = 1000m, int daysOverdue = 10)
     {
         var result = Installment.Create(
@@ -83,7 +83,7 @@ public class Phase9_1SubscriptionStateMachineTests
     }
 
     private static Installment CreateFutureInstallment(
-        Guid contractId, Guid? subscriptionId, string tenantId,
+        Guid contractId, Guid subscriptionId, string tenantId,
         decimal amount = 1000m, int daysUntilDue = 30)
     {
         var result = Installment.Create(
@@ -517,17 +517,17 @@ public class Phase9_1SubscriptionStateMachineTests
         var contractId = Guid.NewGuid();
 
         // Future installment: not overdue
-        var future = CreateFutureInstallment(contractId, null, "t1", daysUntilDue: 30);
+        var future = CreateFutureInstallment(contractId, Guid.NewGuid(), "t1", daysUntilDue: 30);
         Assert.False(future.IsOverdue(DateTime.UtcNow));
         Assert.Equal(InstallmentStatus.Pending, future.Status);
 
         // Past-due installment: overdue
-        var overdue = CreateOverdueInstallment(contractId, null, "t1", daysOverdue: 10);
+        var overdue = CreateOverdueInstallment(contractId, Guid.NewGuid(), "t1", daysOverdue: 10);
         Assert.True(overdue.IsOverdue(DateTime.UtcNow));
         Assert.Equal(InstallmentStatus.Overdue, overdue.Status);
 
         // Paid installment: not overdue even if past due
-        var paid = CreateOverdueInstallment(contractId, null, "t1", amount: 100m, daysOverdue: 10);
+        var paid = CreateOverdueInstallment(contractId, Guid.NewGuid(), "t1", amount: 100m, daysOverdue: 10);
         // Apply full settlement
         var allocation = PaymentAllocation.Create(
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),

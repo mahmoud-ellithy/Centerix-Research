@@ -178,7 +178,7 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
     public async Task UpdateInstallment_PendingInstallment_Succeeds()
     {
         var contract = await SeedContractAsync();
-        var installmentId = await SeedInstallmentAsync(contract.Id);
+        var installmentId = await SeedInstallmentAsync(contract.Id, Guid.NewGuid());
 
         var cmd = new UpdateInstallmentCommand(
             installmentId,
@@ -193,7 +193,7 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
     public async Task UpdateInstallment_NonPending_Rejected()
     {
         var contract = await SeedContractAsync();
-        var installmentId = await SeedInstallmentAsync(contract.Id);
+        var installmentId = await SeedInstallmentAsync(contract.Id, Guid.NewGuid());
 
         var installment = await _dbContext.Installments
             .FirstAsync(i => i.Id == installmentId);
@@ -219,9 +219,9 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
     {
         var contract = await SeedContractAsync(contractedAmount: 10000m);
 
-        var i1 = await SeedInstallmentAsync(contract.Id, amount: 5000m,
+        var i1 = await SeedInstallmentAsync(contract.Id, Guid.NewGuid(), amount: 5000m,
             start: new DateTime(2026, 1, 1), end: new DateTime(2026, 6, 30), seq: 1);
-        var i2 = await SeedInstallmentAsync(contract.Id, amount: 5000m,
+        var i2 = await SeedInstallmentAsync(contract.Id, Guid.NewGuid(), amount: 5000m,
             start: new DateTime(2026, 7, 1), end: new DateTime(2026, 12, 31), seq: 2);
 
         var cmd = new UpdateInstallmentCommand(
@@ -238,9 +238,9 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
     {
         var contract = await SeedContractAsync();
 
-        var i1 = await SeedInstallmentAsync(contract.Id,
+        var i1 = await SeedInstallmentAsync(contract.Id, Guid.NewGuid(),
             start: new DateTime(2026, 1, 1), end: new DateTime(2026, 4, 30), seq: 1);
-        var i2 = await SeedInstallmentAsync(contract.Id,
+        var i2 = await SeedInstallmentAsync(contract.Id, Guid.NewGuid(),
             start: new DateTime(2026, 5, 1), end: new DateTime(2026, 8, 31), seq: 2);
 
         var cmd = new UpdateInstallmentCommand(
@@ -260,7 +260,7 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
     public async Task CancelInstallment_NoAllocations_Succeeds()
     {
         var contract = await SeedContractAsync();
-        var installmentId = await SeedInstallmentAsync(contract.Id);
+        var installmentId = await SeedInstallmentAsync(contract.Id, Guid.NewGuid());
 
         var result = await Mediator.Send(new CancelInstallmentCommand(installmentId));
         Assert.True(result.IsSuccess);
@@ -274,7 +274,7 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
     public async Task Installment_SettledAmountDerived_FromAllocations()
     {
         var contract = await SeedContractAsync();
-        var installmentId = await SeedInstallmentAsync(contract.Id, amount: 4000m);
+        var installmentId = await SeedInstallmentAsync(contract.Id, Guid.NewGuid(), amount: 4000m);
 
         var installment = await _dbContext.Installments
             .Include(i => i.PaymentAllocations)
@@ -367,11 +367,11 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
 
     private async Task<Guid> SeedInstallmentAsync(
         Guid contractId,
+        Guid subscriptionId,
         decimal amount = 4000m,
         DateTime? start = null,
         DateTime? end = null,
-        int seq = 1,
-        Guid? subscriptionId = null)
+        int seq = 1)
     {
         var installment = Installment.Create(
             Guid.NewGuid(),

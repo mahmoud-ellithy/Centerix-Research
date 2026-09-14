@@ -5,6 +5,7 @@ using Centerix.Domain.Platform.Subscriptions;
 using Centerix.Domain.Platform.Subscriptions.Enums;
 using Centerix.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 /// <summary>
 /// Resolves the tenant's effective subscription state with LAZY expiration AND
@@ -15,7 +16,8 @@ using Microsoft.EntityFrameworkCore;
 /// </summary>
 public class SubscriptionStateService(
     IAppDbContext dbContext,
-    ISubscriptionReconciliationService reconciliationService) : ISubscriptionStateService
+    ISubscriptionReconciliationService reconciliationService,
+    ILogger<SubscriptionStateService> logger) : ISubscriptionStateService
 {
     public async Task<SubscriptionStateInfo> GetCurrentAsync(string tenantId, CancellationToken cancellationToken = default)
     {
@@ -54,9 +56,12 @@ public class SubscriptionStateService(
                 if (dbContext is Microsoft.EntityFrameworkCore.DbContext concrete)
                     concrete.Entry(subscription).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
             }
-            catch
+            catch (Exception ex)
             {
-                // Write-through convergence only; denial already decided by the date comparison.
+                logger.LogWarning(ex,
+                    "Failed to persist lazy expiration for subscription {SubscriptionId}: " +
+                    "denial was already decided by date comparison, but persistence failure is now observable",
+                    subscription.Id);
             }
         }
 

@@ -57,7 +57,7 @@ public class Installment : AuditableEntity<Guid>
     private Installment(
         Guid id,
         Guid contractId,
-        Guid? subscriptionId,
+        Guid subscriptionId,
         Guid? invoiceId,
         int sequenceNumber,
         DateTime dueDateUtc,
@@ -93,7 +93,7 @@ public class Installment : AuditableEntity<Guid>
         DateTime coveredPeriodEndUtc,
         decimal amount,
         string currencyCode,
-        Guid? subscriptionId = null,
+        Guid subscriptionId,
         Guid? invoiceId = null)
     {
         if (id == Guid.Empty)
@@ -101,6 +101,9 @@ public class Installment : AuditableEntity<Guid>
 
         if (contractId == Guid.Empty)
             return InstallmentErrors.ContractIdRequired;
+
+        if (subscriptionId == Guid.Empty)
+            return InstallmentErrors.SubscriptionRequired;
 
         if (sequenceNumber <= 0)
             return InstallmentErrors.SequenceNumberMustBePositive;
@@ -146,7 +149,7 @@ public class Installment : AuditableEntity<Guid>
         decimal amount,
         string currencyCode,
         DateTime utcNow,
-        Guid? subscriptionId = null,
+        Guid subscriptionId,
         Guid? invoiceId = null)
     {
         var result = Create(id, contractId, sequenceNumber, dueDateUtc,

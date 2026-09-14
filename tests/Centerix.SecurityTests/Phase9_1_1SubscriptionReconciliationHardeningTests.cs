@@ -122,9 +122,9 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         string tenantId,
         Guid contractId,
         DateTime dueDateUtc,
+        Guid subscriptionId,
         decimal amount = 1000m,
-        int sequenceNumber = 1,
-        Guid? subscriptionId = null)
+        int sequenceNumber = 1)
     {
         var result = Installment.Create(
             Guid.NewGuid(),
@@ -1058,9 +1058,21 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         var contractId = Guid.NewGuid();
         LinkToContract(db, sub, contractId);
 
-        // Create installment WITHOUT subscriptionId (legacy contract-level installment)
-        // After Task 9.1.2, null SubscriptionId installments are EXCLUDED from reconciliation
-        CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-3), sequenceNumber: 1);
+        // Simulate historical legacy installment with NULL SubscriptionId.
+        // Create via factory (to satisfy domain rules), then null out SubscriptionId
+        // via EF to simulate pre-Task-9.1.2 legacy data.
+        var legacyInstallment = Installment.Create(
+            Guid.NewGuid(), contractId, 1,
+            now.AddDays(-3), now.AddMonths(-1), now.AddDays(-3),
+            1000m, "USD", Guid.NewGuid()).Value!;
+        db.Installments.Add(legacyInstallment);
+        db.StampAddedTenantIds(tenantId);
+        db.SaveChanges();
+
+        // Simulate legacy: null out the SubscriptionId via EF property access
+        db.Entry(legacyInstallment).Property(i => i.SubscriptionId).CurrentValue = null;
+        db.SaveChanges();
+        db.Entry(legacyInstallment).State = EntityState.Detached;
 
         var service = CreateReconciliationService(db, new TestTimeProvider(now));
         await service.ReconcileAsync(tenantId);

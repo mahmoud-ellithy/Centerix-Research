@@ -193,13 +193,13 @@ public class Phase8InstallmentAllocationTests : IClassFixture<TestWebApplication
         {
             Installment.Create(Guid.NewGuid(), Guid.NewGuid(), 1,
                 new DateTime(2026, 1, 1), new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-                4000m, "EGP"),
+                4000m, "EGP", Guid.NewGuid()),
             Installment.Create(Guid.NewGuid(), Guid.NewGuid(), 2,
                 new DateTime(2026, 5, 1), new DateTime(2026, 5, 1), new DateTime(2026, 8, 31),
-                4000m, "EGP"),
+                4000m, "EGP", Guid.NewGuid()),
             Installment.Create(Guid.NewGuid(), Guid.NewGuid(), 3,
                 new DateTime(2026, 9, 1), new DateTime(2026, 9, 1), new DateTime(2026, 12, 31),
-                4000m, "EGP"),
+                4000m, "EGP", Guid.NewGuid()),
         };
 
         var totalAmount = installments.Sum(i => i.Value!.Amount);
@@ -213,13 +213,13 @@ public class Phase8InstallmentAllocationTests : IClassFixture<TestWebApplication
         {
             Installment.Create(Guid.NewGuid(), Guid.NewGuid(), 1,
                 new DateTime(2026, 1, 1), new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-                5000m, "EGP"),
+                5000m, "EGP", Guid.NewGuid()),
             Installment.Create(Guid.NewGuid(), Guid.NewGuid(), 2,
                 new DateTime(2026, 5, 1), new DateTime(2026, 5, 1), new DateTime(2026, 8, 31),
-                3000m, "EGP"),
+                3000m, "EGP", Guid.NewGuid()),
             Installment.Create(Guid.NewGuid(), Guid.NewGuid(), 3,
                 new DateTime(2026, 9, 1), new DateTime(2026, 9, 1), new DateTime(2026, 12, 31),
-                4000m, "EGP"),
+                4000m, "EGP", Guid.NewGuid()),
         };
 
         var totalAmount = installments.Sum(i => i.Value!.Amount);
@@ -234,7 +234,8 @@ public class Phase8InstallmentAllocationTests : IClassFixture<TestWebApplication
         var installment = Installment.Create(
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow, DateTime.UtcNow, DateTime.UtcNow.AddDays(30),
-            1000m, contractCurrency);
+            1000m, contractCurrency,
+            Guid.NewGuid());
 
         Assert.True(installment.IsSuccess);
         Assert.Equal(contractCurrency, installment.Value!.CurrencyCode);
@@ -247,7 +248,8 @@ public class Phase8InstallmentAllocationTests : IClassFixture<TestWebApplication
         var installment = Installment.Create(
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow, DateTime.UtcNow, DateTime.UtcNow.AddDays(30),
-            4000m, "EGP");
+            4000m, "EGP",
+            Guid.NewGuid());
 
         var originalAmount = installment.Value!.Amount;
         var originalCurrency = installment.Value.CurrencyCode;

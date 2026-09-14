@@ -20,7 +20,8 @@ public class Phase8InstallmentDomainTests
             id, contractId, 1,
             DateTime.UtcNow.AddDays(30),
             start, end,
-            4000m, "EGP");
+            4000m, "EGP",
+            Guid.NewGuid());
 
         Assert.True(result.IsSuccess);
         Assert.Equal(id, result.Value!.Id);
@@ -39,7 +40,8 @@ public class Phase8InstallmentDomainTests
         var result = Installment.Create(
             Guid.Empty, Guid.NewGuid(), 1,
             DateTime.UtcNow, DateTime.UtcNow, DateTime.UtcNow.AddDays(30),
-            1000m, "EGP");
+            1000m, "EGP",
+            Guid.NewGuid());
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "Installment.Id_Required");
@@ -51,7 +53,8 @@ public class Phase8InstallmentDomainTests
         var result = Installment.Create(
             Guid.NewGuid(), Guid.Empty, 1,
             DateTime.UtcNow, DateTime.UtcNow, DateTime.UtcNow.AddDays(30),
-            1000m, "EGP");
+            1000m, "EGP",
+            Guid.NewGuid());
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "Installment.ContractId_Required");
@@ -63,7 +66,8 @@ public class Phase8InstallmentDomainTests
         var result = Installment.Create(
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow, DateTime.UtcNow, DateTime.UtcNow.AddDays(30),
-            0m, "EGP");
+            0m, "EGP",
+            Guid.NewGuid());
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "Installment.Amount_MustBePositive");
@@ -75,7 +79,8 @@ public class Phase8InstallmentDomainTests
         var result = Installment.Create(
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow, DateTime.UtcNow, DateTime.UtcNow.AddDays(30),
-            -500m, "EGP");
+            -500m, "EGP",
+            Guid.NewGuid());
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "Installment.Amount_MustBePositive");
@@ -90,7 +95,8 @@ public class Phase8InstallmentDomainTests
         var result = Installment.Create(
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow, start, end,
-            1000m, "EGP");
+            1000m, "EGP",
+            Guid.NewGuid());
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "Installment.CoveredPeriod_Invalid");
@@ -102,7 +108,8 @@ public class Phase8InstallmentDomainTests
         var result = Installment.Create(
             Guid.NewGuid(), Guid.NewGuid(), 0,
             DateTime.UtcNow, DateTime.UtcNow, DateTime.UtcNow.AddDays(30),
-            1000m, "EGP");
+            1000m, "EGP",
+            Guid.NewGuid());
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "Installment.SequenceNumber_MustBePositive");
@@ -114,7 +121,8 @@ public class Phase8InstallmentDomainTests
         var result = Installment.Create(
             Guid.NewGuid(), Guid.NewGuid(), -1,
             DateTime.UtcNow, DateTime.UtcNow, DateTime.UtcNow.AddDays(30),
-            1000m, "EGP");
+            1000m, "EGP",
+            Guid.NewGuid());
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "Installment.SequenceNumber_MustBePositive");
@@ -126,7 +134,8 @@ public class Phase8InstallmentDomainTests
         var result = Installment.Create(
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow, DateTime.UtcNow, DateTime.UtcNow.AddDays(30),
-            1000m, "  egp  ");
+            1000m, "  egp  ",
+            Guid.NewGuid());
 
         Assert.True(result.IsSuccess);
         Assert.Equal("EGP", result.Value!.CurrencyCode);
@@ -138,7 +147,8 @@ public class Phase8InstallmentDomainTests
         var result = Installment.Create(
             Guid.NewGuid(), Guid.NewGuid(), 1,
             default, DateTime.UtcNow, DateTime.UtcNow.AddDays(30),
-            1000m, "EGP");
+            1000m, "EGP",
+            Guid.NewGuid());
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "Installment.DueDate_Required");
@@ -150,7 +160,8 @@ public class Phase8InstallmentDomainTests
         var result = Installment.Create(
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow, default, DateTime.UtcNow.AddDays(30),
-            1000m, "EGP");
+            1000m, "EGP",
+            Guid.NewGuid());
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "Installment.CoveredPeriod_Required");
@@ -454,7 +465,8 @@ public class Phase8InstallmentDomainTests
             new DateTime(2026, 1, 1),
             new DateTime(2026, 4, 30),
             amount,
-            "EGP");
+            "EGP",
+            Guid.NewGuid());
 
         return installment.Value!;
     }

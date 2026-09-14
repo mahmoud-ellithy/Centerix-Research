@@ -44,10 +44,10 @@ public class Phase8InstallmentHardeningTests : IClassFixture<TestWebApplicationF
         var contract = CreateActiveContract(contractedAmount: 10000m);
         var i1 = Installment.Create(Guid.NewGuid(), contract.Id, 1,
             DateTime.UtcNow.AddDays(30), new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-            5000m, "EGP").Value!;
+            5000m, "EGP", Guid.NewGuid()).Value!;
         var i2 = Installment.Create(Guid.NewGuid(), contract.Id, 2,
             DateTime.UtcNow.AddDays(60), new DateTime(2026, 5, 1), new DateTime(2026, 8, 31),
-            5000m, "EGP").Value!;
+            5000m, "EGP", Guid.NewGuid()).Value!;
 
         Assert.Equal(10000m, i1.Amount + i2.Amount);
         Assert.Equal(contract.ContractedAmount, i1.Amount + i2.Amount);
@@ -59,7 +59,7 @@ public class Phase8InstallmentHardeningTests : IClassFixture<TestWebApplicationF
         var contract = CreateActiveContract(contractedAmount: 10000m);
         var i1 = Installment.Create(Guid.NewGuid(), contract.Id, 1,
             DateTime.UtcNow.AddDays(30), new DateTime(2026, 1, 1), new DateTime(2026, 6, 30),
-            10000m, "EGP").Value!;
+            10000m, "EGP", Guid.NewGuid()).Value!;
 
         Assert.Equal(contract.ContractedAmount, i1.Amount);
     }
@@ -70,7 +70,8 @@ public class Phase8InstallmentHardeningTests : IClassFixture<TestWebApplicationF
         var result = Installment.Create(
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow, DateTime.UtcNow, DateTime.UtcNow.AddDays(30),
-            0m, "EGP");
+            0m, "EGP",
+            Guid.NewGuid());
 
         Assert.False(result.IsSuccess);
     }
@@ -81,7 +82,8 @@ public class Phase8InstallmentHardeningTests : IClassFixture<TestWebApplicationF
         var result = Installment.Create(
             Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow, DateTime.UtcNow, DateTime.UtcNow.AddDays(30),
-            -100m, "EGP");
+            -100m, "EGP",
+            Guid.NewGuid());
 
         Assert.False(result.IsSuccess);
     }
@@ -496,7 +498,8 @@ public class Phase8InstallmentHardeningTests : IClassFixture<TestWebApplicationF
             start ?? new DateTime(2026, 1, 1),
             end ?? new DateTime(2026, 4, 30),
             amount,
-            "EGP").Value!;
+            "EGP",
+            Guid.NewGuid()).Value!;
     }
 
     private static PaymentAllocation CreateAllocation(decimal amount)

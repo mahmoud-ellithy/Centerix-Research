@@ -94,7 +94,8 @@ public class Phase8_1_3InstallmentRehydrationTests
             new DateTime(2026, 1, 1),
             new DateTime(2026, 4, 30),
             amount,
-            "EGP").Value;
+            "EGP",
+            Guid.NewGuid()).Value;
         db.Installments.Add(installment);
         db.StampAddedTenantIds(tenantId);
         return installment;
@@ -914,7 +915,8 @@ public class Phase8_1_3RehydrationSqlServerTests
             Guid.NewGuid(), contractId, 1,
             DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
-            amount, "EGP").Value;
+            amount, "EGP",
+            Guid.NewGuid()).Value;
         db.Installments.Add(installment);
         db.StampAddedTenantIds(tenantId);
         return installment;
