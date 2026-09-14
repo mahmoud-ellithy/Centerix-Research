@@ -44,16 +44,25 @@ public class SubscriptionReconciliationService(
         // Lazy expiration: Active subscription past its effective end date
         if (subscription.Status == SubscriptionStatus.Active && now >= subscription.EffectiveEndsAtUtc)
         {
-            try
+            var expiryResult = subscription.MarkExpired(now);
+            if (!expiryResult.IsSuccess)
             {
-                subscription.MarkExpired(now);
-                await dbContext.SaveChangesAsync(cancellationToken);
-                DetachEntity(subscription);
+                logger.LogWarning(
+                    "Failed to mark subscription {SubscriptionId} as expired: {Errors}",
+                    subscription.Id, string.Join(", ", expiryResult.Errors!.Select(e => e.Description)));
+                return;
             }
-            catch (Exception ex)
+
+            var saveResult = await dbContext.SaveChangesAsync(cancellationToken);
+            if (saveResult == 0)
             {
-                logger.LogWarning(ex, "Failed to mark subscription {SubscriptionId} as expired", subscription.Id);
+                logger.LogWarning(
+                    "Failed to persist expiration for subscription {SubscriptionId}: SaveChangesAsync returned 0",
+                    subscription.Id);
+                return;
             }
+
+            DetachEntity(subscription);
             return;
         }
 
@@ -61,14 +70,14 @@ public class SubscriptionReconciliationService(
         if (subscription.ContractId is null)
             return;
 
-        // Load installments for this subscription's contract.
-        // Scope to the subscription when the installment is explicitly linked;
-        // include contract-level installments (SubscriptionId null) for backward compatibility.
-        // TenantId filter enforces tenant isolation at the query level.
+        // Load installments explicitly owned by this subscription.
+        // SubscriptionId must be set for all new installments (Task 9.1.2).
+        // Legacy null SubscriptionId installments are excluded — they require
+        // a deterministic backfill migration before they can participate in reconciliation.
         var installments = await dbContext.Installments
             .Where(i => i.ContractId == subscription.ContractId.Value
                 && i.TenantId == tenantId
-                && (i.SubscriptionId == null || i.SubscriptionId == subscription.Id))
+                && i.SubscriptionId == subscription.Id)
             .ToListAsync(cancellationToken);
 
         var hasOverdue = installments.Any(i => i.IsOverdue(now));

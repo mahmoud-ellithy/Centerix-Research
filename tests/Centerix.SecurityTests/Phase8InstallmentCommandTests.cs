@@ -39,6 +39,7 @@ public class Phase8InstallmentCommandTests : IClassFixture<TestWebApplicationFac
 
         var command = new CreateInstallmentScheduleCommand(
             contractId,
+            Guid.NewGuid(),
             [
                 new(1, new DateTime(2026, 1, 1), new DateTime(2026, 1, 1), new DateTime(2026, 12, 31), 12000m),
             ]);
@@ -55,7 +56,7 @@ public class Phase8InstallmentCommandTests : IClassFixture<TestWebApplicationFac
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
 
         var command = new AddInstallmentCommand(
-            Guid.NewGuid(), 1,
+            Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow, DateTime.UtcNow, DateTime.UtcNow.AddDays(30),
             1000m);
 

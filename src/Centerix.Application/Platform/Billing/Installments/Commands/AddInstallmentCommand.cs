@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 
 public record AddInstallmentCommand(
     Guid ContractId,
+    Guid SubscriptionId,
     int SequenceNumber,
     DateTime DueDateUtc,
     DateTime CoveredPeriodStartUtc,
@@ -93,6 +94,21 @@ public class AddInstallmentHandler(
         if (contract.Status != Domain.Platform.Contracts.Enums.ContractStatus.Active)
             return InstallmentErrors.ContractNotActive;
 
+        if (request.SubscriptionId == Guid.Empty)
+            return InstallmentErrors.SubscriptionRequired;
+
+        var subscription = await dbContext.TenantPlans
+            .FirstOrDefaultAsync(s => s.Id == request.SubscriptionId, cancellationToken);
+
+        if (subscription is null)
+            return InstallmentErrors.SubscriptionNotFound;
+
+        if (subscription.TenantId != tenantId)
+            return InstallmentErrors.SubscriptionBelongsToDifferentTenant;
+
+        if (subscription.ContractId != request.ContractId)
+            return InstallmentErrors.SubscriptionBelongsToDifferentContract;
+
         // Validate no duplicate sequence number
         var existingSequences = await dbContext.Installments
             .Where(i => i.ContractId == request.ContractId && i.TenantId == tenantId)
@@ -149,7 +165,8 @@ public class AddInstallmentHandler(
             request.CoveredPeriodStartUtc,
             request.CoveredPeriodEndUtc,
             request.Amount,
-            contract.CurrencyCode);
+            contract.CurrencyCode,
+            subscriptionId: request.SubscriptionId);
 
         if (!result.IsSuccess)
             return result.Errors!;

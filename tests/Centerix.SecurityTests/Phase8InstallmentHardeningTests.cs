@@ -431,7 +431,7 @@ public class Phase8InstallmentHardeningTests : IClassFixture<TestWebApplicationF
     {
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
         var command = new AddInstallmentCommand(
-            Guid.NewGuid(), 1,
+            Guid.NewGuid(), Guid.NewGuid(), 1,
             DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
             1000m);

@@ -19,6 +19,7 @@ public record InstallmentScheduleItem(
 
 public record CreateInstallmentScheduleCommand(
     Guid ContractId,
+    Guid SubscriptionId,
     List<InstallmentScheduleItem> Installments) : IRequest<Result<List<Guid>>>;
 
 public class CreateInstallmentScheduleHandler(
@@ -100,6 +101,21 @@ public class CreateInstallmentScheduleHandler(
         if (contract.Status != Domain.Platform.Contracts.Enums.ContractStatus.Active)
             return InstallmentErrors.ContractNotActive;
 
+        if (request.SubscriptionId == Guid.Empty)
+            return InstallmentErrors.SubscriptionRequired;
+
+        var subscription = await dbContext.TenantPlans
+            .FirstOrDefaultAsync(s => s.Id == request.SubscriptionId, cancellationToken);
+
+        if (subscription is null)
+            return InstallmentErrors.SubscriptionNotFound;
+
+        if (subscription.TenantId != tenantId)
+            return InstallmentErrors.SubscriptionBelongsToDifferentTenant;
+
+        if (subscription.ContractId != request.ContractId)
+            return InstallmentErrors.SubscriptionBelongsToDifferentContract;
+
         // Validate currency matches contract
         var currencyCode = contract.CurrencyCode;
 
@@ -164,7 +180,8 @@ public class CreateInstallmentScheduleHandler(
                 item.CoveredPeriodStartUtc,
                 item.CoveredPeriodEndUtc,
                 item.Amount,
-                currencyCode);
+                currencyCode,
+                subscriptionId: request.SubscriptionId);
 
             if (!result.IsSuccess)
                 return result.Errors!;

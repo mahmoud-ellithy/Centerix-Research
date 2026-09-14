@@ -113,4 +113,20 @@ public static class InstallmentErrors
     public static Error AmountWouldCorruptSettlement =>
         Error.Conflict("Installment.AmountWouldCorruptSettlement",
             "New amount would result in settled amount exceeding the installment amount.");
+
+    public static Error SubscriptionNotFound =>
+        Error.NotFound("Installment.SubscriptionNotFound",
+            "The specified subscription was not found.");
+
+    public static Error SubscriptionBelongsToDifferentContract =>
+        Error.Validation("Installment.SubscriptionBelongsToDifferentContract",
+            "The specified subscription belongs to a different contract.");
+
+    public static Error SubscriptionBelongsToDifferentTenant =>
+        Error.Forbidden("Installment.SubscriptionBelongsToDifferentTenant",
+            "The specified subscription belongs to a different tenant.");
+
+    public static Error SubscriptionRequired =>
+        Error.Validation("Installment.SubscriptionRequired",
+            "A SubscriptionId is required for new installment creation. Installments must explicitly belong to a subscription.");
 }

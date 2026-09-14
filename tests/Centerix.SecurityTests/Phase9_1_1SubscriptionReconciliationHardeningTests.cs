@@ -185,7 +185,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         LinkToContract(db, sub, contractId);
 
         // Installment overdue by 10 days — within 14-day grace period → PastDue
-        CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-10), sequenceNumber: 1);
+        CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-10), sequenceNumber: 1, subscriptionId: sub.Id);
 
         // Reload subscription
         var service = CreateReconciliationService(db, new TestTimeProvider(now));
@@ -215,7 +215,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         LinkToContract(db, sub, contractId);
 
         // Installment overdue by 5 days — beyond 3-day grace period → Suspended
-        CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-5), sequenceNumber: 1);
+        CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-5), sequenceNumber: 1, subscriptionId: sub.Id);
 
         var service = CreateReconciliationService(db, new TestTimeProvider(now));
         await service.ReconcileAsync(tenantId);
@@ -243,7 +243,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         var contractId = Guid.NewGuid();
         LinkToContract(db, sub, contractId);
 
-        CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-3), sequenceNumber: 1);
+        CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-3), sequenceNumber: 1, subscriptionId: sub.Id);
 
         var service = CreateReconciliationService(db, new TestTimeProvider(now));
 
@@ -291,7 +291,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         LinkToContract(db, sub, contractId);
 
         CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-3),
-            amount: 500m, sequenceNumber: 1);
+            amount: 500m, sequenceNumber: 1, subscriptionId: sub.Id);
 
         var service = CreateReconciliationService(db, new TestTimeProvider(now));
         await service.ReconcileAsync(tenantId);
@@ -327,7 +327,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         LinkToContract(db, subB, contractB);
 
         // Installment for contract A is overdue — should NOT affect subscription B
-        CreateAndPersistInstallment(db, tenantId, contractA, now.AddDays(-10), sequenceNumber: 1);
+        CreateAndPersistInstallment(db, tenantId, contractA, now.AddDays(-10), sequenceNumber: 1, subscriptionId: subA.Id);
 
         // No installments for contract B
         var service = CreateReconciliationService(db, new TestTimeProvider(now));
@@ -428,7 +428,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         LinkToContract(db, sub, contractId);
 
         // Overdue by 3 days — within 7-day grace → PastDue
-        CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-3), sequenceNumber: 1);
+        CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-3), sequenceNumber: 1, subscriptionId: sub.Id);
 
         var service = CreateReconciliationService(db, new TestTimeProvider(now));
         await service.ReconcileAsync(tenantId);
@@ -457,7 +457,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         LinkToContract(db, sub, contractId);
 
         // Overdue by 10 days — beyond 7-day grace → Suspended
-        CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-10), sequenceNumber: 1);
+        CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-10), sequenceNumber: 1, subscriptionId: sub.Id);
 
         var service = CreateReconciliationService(db, new TestTimeProvider(now));
         await service.ReconcileAsync(tenantId);
@@ -487,7 +487,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
 
         // Create overdue installment, then settle it
         var installment = CreateAndPersistInstallment(db, tenantId, contractId,
-            now.AddDays(-3), amount: 500m, sequenceNumber: 1);
+            now.AddDays(-3), amount: 500m, sequenceNumber: 1, subscriptionId: sub.Id);
 
         // Transition to PastDue
         var service1 = CreateReconciliationService(db, new TestTimeProvider(now));
@@ -526,7 +526,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
 
         // Create overdue installment, suspend, then settle
         var installment = CreateAndPersistInstallment(db, tenantId, contractId,
-            now.AddDays(-10), amount: 500m, sequenceNumber: 1);
+            now.AddDays(-10), amount: 500m, sequenceNumber: 1, subscriptionId: sub.Id);
 
         // Transition to Suspended (overdue beyond grace)
         var service1 = CreateReconciliationService(db, new TestTimeProvider(now));
@@ -687,7 +687,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         var contractId = Guid.NewGuid();
         LinkToContract(db, sub, contractId);
 
-        CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-3), sequenceNumber: 1);
+        CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-3), sequenceNumber: 1, subscriptionId: sub.Id);
 
         var service = CreateReconciliationService(db, new TestTimeProvider(now));
 
@@ -727,11 +727,11 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
 
         // Oldest overdue: 10 days (beyond 7-day grace → Suspended)
         CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-10),
-            amount: 500m, sequenceNumber: 1);
+            amount: 500m, sequenceNumber: 1, subscriptionId: sub.Id);
 
         // Newer overdue: 3 days (within grace, but oldest drives the decision)
         CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-3),
-            amount: 500m, sequenceNumber: 2);
+            amount: 500m, sequenceNumber: 2, subscriptionId: sub.Id);
 
         var service = CreateReconciliationService(db, new TestTimeProvider(now));
         await service.ReconcileAsync(tenantId);
@@ -762,11 +762,11 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
 
         // Oldest overdue: 3 days (within 7-day grace → PastDue)
         CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-3),
-            amount: 500m, sequenceNumber: 1);
+            amount: 500m, sequenceNumber: 1, subscriptionId: sub.Id);
 
         // Newer overdue: 1 day
         CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-1),
-            amount: 500m, sequenceNumber: 2);
+            amount: 500m, sequenceNumber: 2, subscriptionId: sub.Id);
 
         var service = CreateReconciliationService(db, new TestTimeProvider(now));
         await service.ReconcileAsync(tenantId);
@@ -795,7 +795,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         LinkToContract(db, sub, contractId);
 
         var installment = CreateAndPersistInstallment(db, tenantId, contractId,
-            now.AddDays(-3), amount: 1000m, sequenceNumber: 1);
+            now.AddDays(-3), amount: 1000m, sequenceNumber: 1, subscriptionId: sub.Id);
 
         // Partially settle (200 of 1000)
         SettleInstallment(db, tenantId, installment, 200m, now);
@@ -829,7 +829,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         LinkToContract(db, sub, contractId);
 
         var installment = CreateAndPersistInstallment(db, tenantId, contractId,
-            now.AddDays(-3), amount: 500m, sequenceNumber: 1);
+            now.AddDays(-3), amount: 500m, sequenceNumber: 1, subscriptionId: sub.Id);
 
         // Settle fully
         SettleInstallment(db, tenantId, installment, 500m, now);
@@ -862,7 +862,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         var subA = CreateAndPersistSubscription(dbA, tenantA);
         var contractA = Guid.NewGuid();
         LinkToContract(dbA, subA, contractA);
-        CreateAndPersistInstallment(dbA, tenantA, contractA, now.AddDays(-3), sequenceNumber: 1);
+        CreateAndPersistInstallment(dbA, tenantA, contractA, now.AddDays(-3), sequenceNumber: 1, subscriptionId: subA.Id);
 
         // Create subscription for tenant B with NO overdue installments
         var subB = CreateAndPersistSubscription(dbA, tenantB);
@@ -931,7 +931,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
 
         // Installment overdue by exactly 7 days (at boundary)
         // The reconciliation uses <= for PastDue, so 7 <= 7 is true → PastDue
-        CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-7), sequenceNumber: 1);
+        CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-7), sequenceNumber: 1, subscriptionId: sub.Id);
 
         var service = CreateReconciliationService(db, new TestTimeProvider(now));
         await service.ReconcileAsync(tenantId);
@@ -992,7 +992,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         db.SaveChanges();
         db.Entry(sub).State = EntityState.Detached;
 
-        CreateAndPersistInstallment(db, tenantId, contractId, DateTime.UtcNow.AddDays(-5), sequenceNumber: 1);
+        CreateAndPersistInstallment(db, tenantId, contractId, DateTime.UtcNow.AddDays(-5), sequenceNumber: 1, subscriptionId: sub.Id);
 
         var service = CreateReconciliationService(db);
         await service.ReconcileAsync(tenantId);
@@ -1022,10 +1022,10 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         LinkToContract(db, sub, contractId);
 
         var installment1 = CreateAndPersistInstallment(db, tenantId, contractId,
-            now.AddDays(-5), amount: 500m, sequenceNumber: 1);
+            now.AddDays(-5), amount: 500m, sequenceNumber: 1, subscriptionId: sub.Id);
 
         var installment2 = CreateAndPersistInstallment(db, tenantId, contractId,
-            now.AddDays(-3), amount: 500m, sequenceNumber: 2);
+            now.AddDays(-3), amount: 500m, sequenceNumber: 2, subscriptionId: sub.Id);
 
         // Settle installment1 fully, installment2 still overdue
         SettleInstallment(db, tenantId, installment1, 500m, now);
@@ -1043,10 +1043,10 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         Assert.Equal(SubscriptionStatus.PastDue, reloaded!.Status);
     }
 
-    // ── 27. Installment with SubscriptionId=null included for contract-level installments ──
+    // ── 27. Installment with SubscriptionId=null is EXCLUDED from reconciliation ──
 
     [Fact]
-    public async Task Installment_NullSubscriptionId_IncludedInReconciliation()
+    public async Task Installment_NullSubscriptionId_ExcludedFromReconciliation()
     {
         var tenantId = "tenant-nullsub1";
         var now = DateTime.UtcNow;
@@ -1058,7 +1058,8 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         var contractId = Guid.NewGuid();
         LinkToContract(db, sub, contractId);
 
-        // Create installment WITHOUT subscriptionId (contract-level, backward compat)
+        // Create installment WITHOUT subscriptionId (legacy contract-level installment)
+        // After Task 9.1.2, null SubscriptionId installments are EXCLUDED from reconciliation
         CreateAndPersistInstallment(db, tenantId, contractId, now.AddDays(-3), sequenceNumber: 1);
 
         var service = CreateReconciliationService(db, new TestTimeProvider(now));
@@ -1069,7 +1070,8 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
             .OrderByDescending(tp => tp.StartsAtUtc)
             .FirstOrDefaultAsync();
 
-        Assert.Equal(SubscriptionStatus.PastDue, reloaded!.Status);
+        // Null SubscriptionId installment should NOT affect the subscription
+        Assert.Equal(SubscriptionStatus.Active, reloaded!.Status);
     }
 
     // ── 28. Suspended subscription beyond grace with no overdue → recovers ──

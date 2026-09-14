@@ -47,10 +47,11 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
     public async Task AddInstallment_ExceedsContractObligation_Rejected()
     {
         var contract = await SeedContractAsync(contractedAmount: 10000m);
+        var subscriptionId = await SeedSubscriptionAsync(contract.Id);
 
         // First installment: 5000 within contract period
         var cmd1 = new AddInstallmentCommand(
-            contract.Id, 1, DateTime.UtcNow.AddDays(30),
+            contract.Id, subscriptionId, 1, DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
             5000m);
         var r1 = await Mediator.Send(cmd1);
@@ -58,7 +59,7 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
 
         // Second installment: 5000 within contract period → total = 10000 = contract amount
         var cmd2 = new AddInstallmentCommand(
-            contract.Id, 2, DateTime.UtcNow.AddDays(60),
+            contract.Id, subscriptionId, 2, DateTime.UtcNow.AddDays(60),
             new DateTime(2026, 5, 1), new DateTime(2026, 8, 31),
             5000m);
         var r2 = await Mediator.Send(cmd2);
@@ -66,7 +67,7 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
 
         // Third installment: 1000 within contract period → total would be 11000 > 10000 → REJECT
         var cmd3 = new AddInstallmentCommand(
-            contract.Id, 3, DateTime.UtcNow.AddDays(90),
+            contract.Id, subscriptionId, 3, DateTime.UtcNow.AddDays(90),
             new DateTime(2026, 9, 1), new DateTime(2026, 12, 31),
             1000m);
         var r3 = await Mediator.Send(cmd3);
@@ -78,9 +79,10 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
     public async Task AddInstallment_ValidIncrementalInstallment_Succeeds()
     {
         var contract = await SeedContractAsync(contractedAmount: 12000m);
+        var subscriptionId = await SeedSubscriptionAsync(contract.Id);
 
         var cmd = new AddInstallmentCommand(
-            contract.Id, 1, DateTime.UtcNow.AddDays(30),
+            contract.Id, subscriptionId, 1, DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 6, 30),
             4000m);
         var result = await Mediator.Send(cmd);
@@ -92,16 +94,17 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
     public async Task AddInstallment_OverlappingPeriod_Rejected()
     {
         var contract = await SeedContractAsync();
+        var subscriptionId = await SeedSubscriptionAsync(contract.Id);
 
         var cmd1 = new AddInstallmentCommand(
-            contract.Id, 1, DateTime.UtcNow.AddDays(30),
+            contract.Id, subscriptionId, 1, DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 4, 30),
             4000m);
         var r1 = await Mediator.Send(cmd1);
         Assert.True(r1.IsSuccess);
 
         var cmd2 = new AddInstallmentCommand(
-            contract.Id, 2, DateTime.UtcNow.AddDays(60),
+            contract.Id, subscriptionId, 2, DateTime.UtcNow.AddDays(60),
             new DateTime(2026, 3, 1), new DateTime(2026, 6, 30),
             3000m);
         var r2 = await Mediator.Send(cmd2);
@@ -113,16 +116,17 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
     public async Task AddInstallment_DuplicatePeriod_Rejected()
     {
         var contract = await SeedContractAsync();
+        var subscriptionId = await SeedSubscriptionAsync(contract.Id);
 
         var cmd1 = new AddInstallmentCommand(
-            contract.Id, 1, DateTime.UtcNow.AddDays(30),
+            contract.Id, subscriptionId, 1, DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 6, 30),
             6000m);
         var r1 = await Mediator.Send(cmd1);
         Assert.True(r1.IsSuccess);
 
         var cmd2 = new AddInstallmentCommand(
-            contract.Id, 2, DateTime.UtcNow.AddDays(60),
+            contract.Id, subscriptionId, 2, DateTime.UtcNow.AddDays(60),
             new DateTime(2026, 1, 1), new DateTime(2026, 6, 30),
             4000m);
         var r2 = await Mediator.Send(cmd2);
@@ -134,9 +138,10 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
     public async Task AddInstallment_PeriodBeyondContract_Rejected()
     {
         var contract = await SeedContractAsync();
+        var subscriptionId = await SeedSubscriptionAsync(contract.Id);
 
         var cmd = new AddInstallmentCommand(
-            contract.Id, 1, DateTime.UtcNow.AddDays(30),
+            contract.Id, subscriptionId, 1, DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2027, 6, 30),
             4000m);
         var result = await Mediator.Send(cmd);
@@ -148,15 +153,16 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
     public async Task AddInstallment_DuplicateSequenceNumber_Rejected()
     {
         var contract = await SeedContractAsync();
+        var subscriptionId = await SeedSubscriptionAsync(contract.Id);
 
         var cmd1 = new AddInstallmentCommand(
-            contract.Id, 1, DateTime.UtcNow.AddDays(30),
+            contract.Id, subscriptionId, 1, DateTime.UtcNow.AddDays(30),
             new DateTime(2026, 1, 1), new DateTime(2026, 6, 30),
             4000m);
         await Mediator.Send(cmd1);
 
         var cmd2 = new AddInstallmentCommand(
-            contract.Id, 1, DateTime.UtcNow.AddDays(60),
+            contract.Id, subscriptionId, 1, DateTime.UtcNow.AddDays(60),
             new DateTime(2026, 7, 1), new DateTime(2026, 12, 31),
             6000m);
         var result = await Mediator.Send(cmd2);
@@ -364,7 +370,8 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
         decimal amount = 4000m,
         DateTime? start = null,
         DateTime? end = null,
-        int seq = 1)
+        int seq = 1,
+        Guid? subscriptionId = null)
     {
         var installment = Installment.Create(
             Guid.NewGuid(),
@@ -374,13 +381,36 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
             start ?? new DateTime(2026, 1, 1),
             end ?? new DateTime(2026, 4, 30),
             amount,
-            "EGP").Value!;
+            "EGP",
+            subscriptionId: subscriptionId).Value!;
 
         _dbContext.Installments.Add(installment);
         _dbContext.StampAddedTenantIds(TestTenantId);
         await _dbContext.SaveChangesAsync();
 
         return installment.Id;
+    }
+
+    private async Task<Guid> SeedSubscriptionAsync(Guid contractId)
+    {
+        var subscription = Domain.Platform.Subscriptions.TenantPlan.Create(
+            Guid.NewGuid(),
+            TestTenantId,
+            1,
+            1000m,
+            "EGP",
+            12,
+            0,
+            new DateTime(2026, 1, 1),
+            status: Domain.Platform.Subscriptions.Enums.SubscriptionStatus.Active).Value!;
+
+        subscription.LinkToContract(contractId);
+
+        _dbContext.TenantPlans.Add(subscription);
+        _dbContext.StampAddedTenantIds(TestTenantId);
+        await _dbContext.SaveChangesAsync();
+
+        return subscription.Id;
     }
 }
 
