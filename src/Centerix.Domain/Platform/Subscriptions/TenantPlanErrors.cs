@@ -99,4 +99,8 @@ public static class TenantPlanErrors
     public static Error PlanInactive =>
         Error.Conflict("TenantPlan.PlanInactive",
             "Cannot renew to an inactive plan.");
+
+    public static Error ConcurrentRenewalConflict =>
+        Error.Conflict("TenantPlan.ConcurrentRenewalConflict",
+            "Another renewal for this subscription is already in progress. Please retry.");
 }
