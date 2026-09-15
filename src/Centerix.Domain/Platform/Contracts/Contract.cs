@@ -80,6 +80,13 @@ public class Contract : AuditableEntity<Guid>
     /// </summary>
     public int? ChargedMonths { get; private set; }
 
+    /// <summary>
+    /// When this Contract is a renewal, references the previous Subscription (TenantPlan)
+    /// that was renewed. Preserves renewal traceability without constraining the relationship
+    /// to a specific Contract or requiring a versioning system.
+    /// </summary>
+    public Guid? PreviousSubscriptionId { get; private set; }
+
     /// <summary>Snapshot of pricing tiers for this contract.</summary>
     private readonly List<ContractPricingTier> _pricingTiers = [];
     public IReadOnlyList<ContractPricingTier> PricingTiers => _pricingTiers.AsReadOnly();
@@ -387,6 +394,19 @@ public class Contract : AuditableEntity<Guid>
 
         // Fallback: no applicable tier, use monthly list price
         return MonthlyListPrice * elapsedMonths;
+    }
+
+    /// <summary>
+    /// Links this contract to the previous subscription that was renewed.
+    /// Called during renewal to establish traceability.
+    /// </summary>
+    public Result<Updated> LinkToPreviousSubscription(Guid previousSubscriptionId)
+    {
+        if (previousSubscriptionId == Guid.Empty)
+            return Error.Validation("Contract.PreviousSubscriptionId_Invalid", "Previous subscription ID must not be empty.");
+
+        PreviousSubscriptionId = previousSubscriptionId;
+        return Result.Updated;
     }
 
     /// <summary>EF navigation mutator for rehydration of pricing tiers.</summary>

@@ -83,6 +83,9 @@ public class ContractConfiguration : IEntityTypeConfiguration<Contract>
 
         builder.Property(c => c.ChargedMonths);
 
+        // Renewal traceability: optional reference to the previous subscription that was renewed
+        builder.Property(c => c.PreviousSubscriptionId);
+
         // Indexes
         builder.HasIndex(c => new { c.TenantId, c.Status })
             .HasDatabaseName("IX_Contracts_TenantId_Status");

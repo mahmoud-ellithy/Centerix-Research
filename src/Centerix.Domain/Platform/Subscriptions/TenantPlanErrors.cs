@@ -77,4 +77,26 @@ public static class TenantPlanErrors
     public static Error InvalidStateTransition(Enums.SubscriptionStatus current, string action) =>
         Error.Conflict("TenantPlan.InvalidStateTransition",
             $"Cannot {action} a subscription in status '{current}'");
+
+    // ---- Renewal-specific errors (Task 9.3) ----
+
+    public static Error CannotRenewSuspended =>
+        Error.Conflict("TenantPlan.CannotRenewSuspended",
+            "Cannot renew a suspended subscription. Resolve financial obligations first.");
+
+    public static Error CannotRenewPending =>
+        Error.Conflict("TenantPlan.CannotRenewPending",
+            "Cannot renew a pending subscription. Activate or cancel it first.");
+
+    public static Error OverlappingActiveSubscription =>
+        Error.Conflict("TenantPlan.Overlap",
+            "An active or pending subscription already exists for this tenant. Cannot create overlapping renewal.");
+
+    public static Error PlanNotFound =>
+        Error.NotFound("TenantPlan.PlanNotFound",
+            "The specified plan was not found.");
+
+    public static Error PlanInactive =>
+        Error.Conflict("TenantPlan.PlanInactive",
+            "Cannot renew to an inactive plan.");
 }

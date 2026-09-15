@@ -52,7 +52,7 @@ public class TenantPlansController(ILocalizer localizer, IMediator mediator) : A
             Problem);
     }
 
-    /// <summary>PLATFORM: renews (extends) the tenant's current subscription.</summary>
+    /// <summary>PLATFORM: renews (extends) the tenant's current subscription by appending months.</summary>
     [HttpPost("renew")]
     [HasPermission(Permissions.Subscriptions.Manage)]
     public async Task<IActionResult> RenewSubscription(RenewSubscriptionCommand command, CancellationToken cancellationToken)
@@ -61,6 +61,34 @@ public class TenantPlansController(ILocalizer localizer, IMediator mediator) : A
 
         return result.Match(
             _ => NoContent(),
+            Problem);
+    }
+
+    /// <summary>
+    /// PLATFORM: Renews a subscription as a NEW commercial transaction.
+    /// Creates a new Offer → Contract → Subscription chain using current commercial terms.
+    /// Old promotions/discounts/benefits are NOT inherited. The old subscription remains immutable.
+    /// </summary>
+    [HttpPost("{id}/renew-commercial")]
+    [HasPermission(Permissions.Subscriptions.Manage)]
+    public async Task<IActionResult> RenewSubscriptionCommercial(
+        Guid id,
+        [FromBody] RenewSubscriptionCommercialRequest request,
+        CancellationToken cancellationToken)
+    {
+        var command = new RenewSubscriptionOfferCommand(
+            id,
+            request?.PlanId,
+            request?.DurationMonths);
+
+        var result = await mediator.Send(command, cancellationToken);
+
+        return result.Match(
+            contractId => Ok(new
+            {
+                ContractId = contractId,
+                Message = "Renewal completed as a new commercial transaction. New Contract and Subscription created."
+            }),
             Problem);
     }
 
@@ -87,4 +115,18 @@ public class TenantPlansController(ILocalizer localizer, IMediator mediator) : A
             _ => NoContent(),
             Problem);
     }
+}
+
+/// <summary>
+/// Request body for the commercial renewal endpoint.
+/// Only PlanId and DurationMonths are allowed as optional overrides.
+/// All commercial values (price, discount, benefits) are server-derived from the Offer engine.
+/// </summary>
+public class RenewSubscriptionCommercialRequest
+{
+    /// <summary>Optional: override the plan for renewal. Null = use current plan.</summary>
+    public int? PlanId { get; set; }
+
+    /// <summary>Optional: override the duration. Null = use plan's default duration.</summary>
+    public int? DurationMonths { get; set; }
 }
