@@ -294,24 +294,6 @@ public class TenantPlan : AuditableEntity<Guid>
     }
 
     /// <summary>
-    /// Expires the subscription immediately, releasing the non-terminal unique index constraint.
-    /// Used by the renewal workflow to terminate the old subscription before creating a new one.
-    /// Only callable on Active subscriptions.
-    /// </summary>
-    public Result<Updated> ExpireEarlyForRenewal(DateTime utcNow)
-    {
-        if (Status == SubscriptionStatus.Expired)
-            return Result.Updated;
-
-        if (Status != SubscriptionStatus.Active)
-            return TenantPlanErrors.NotActive;
-
-        EffectiveEndsAtUtc = utcNow;
-        Status = SubscriptionStatus.Expired;
-        return Result.Updated;
-    }
-
-    /// <summary>
     /// System-derived transition to Suspended when a financial obligation remains unpaid
     /// after the applicable Grace Period. Only callable by the reconciliation service.
     /// PastDue → Suspended or Active → Suspended (when overdue beyond grace period).

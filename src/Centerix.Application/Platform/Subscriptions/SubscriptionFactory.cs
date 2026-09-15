@@ -30,6 +30,25 @@ public interface ISubscriptionFactory
     /// Creates an activated subscription from an explicit commercial snapshot (renewal path).
     /// All commercial values come from the accepted Offer/Contract — NOT from the Plan catalog.
     /// Features are still resolved from the current Plan catalog.
+    /// When <paramref name="activate"/> is false, the subscription remains Pending (used for
+    /// future-starting subscriptions that coexist with an Active old subscription).
+    /// </summary>
+    Task<Result<TenantPlan>> CreateFromSnapshotAsync(
+        string tenantId,
+        int planId,
+        decimal snapshotPrice,
+        string snapshotCurrency,
+        int durationMonths,
+        int bonusMonths,
+        DateTime startsAtUtc,
+        bool autoRenew,
+        bool activate,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Creates an activated subscription from an explicit commercial snapshot (renewal path).
+    /// All commercial values come from the accepted Offer/Contract — NOT from the Plan catalog.
+    /// Features are still resolved from the current Plan catalog.
     /// </summary>
     Task<Result<TenantPlan>> CreateFromSnapshotAsync(
         string tenantId,
@@ -120,6 +139,20 @@ public class SubscriptionFactory(IAppDbContext dbContext) : ISubscriptionFactory
         DateTime startsAtUtc,
         bool autoRenew,
         CancellationToken cancellationToken)
+        => await CreateFromSnapshotAsync(tenantId, planId, snapshotPrice, snapshotCurrency,
+            durationMonths, bonusMonths, startsAtUtc, autoRenew, activate: true, cancellationToken);
+
+    public async Task<Result<TenantPlan>> CreateFromSnapshotAsync(
+        string tenantId,
+        int planId,
+        decimal snapshotPrice,
+        string snapshotCurrency,
+        int durationMonths,
+        int bonusMonths,
+        DateTime startsAtUtc,
+        bool autoRenew,
+        bool activate,
+        CancellationToken cancellationToken)
     {
         var plan = await dbContext.Plans
             .Include(p => p.PlanFeatures)
@@ -170,9 +203,12 @@ public class SubscriptionFactory(IAppDbContext dbContext) : ISubscriptionFactory
                 return grant.Errors!;
         }
 
-        var activation = subscription.Activate(startsAtUtc);
-        if (!activation.IsSuccess)
-            return activation.Errors!;
+        if (activate)
+        {
+            var activation = subscription.Activate(startsAtUtc);
+            if (!activation.IsSuccess)
+                return activation.Errors!;
+        }
 
         return subscription;
     }

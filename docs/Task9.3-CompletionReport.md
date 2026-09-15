@@ -2,14 +2,20 @@
 
 ## 30.1 Status
 
-**COMPLETE**
+**COMPLETE** (Task 9.3.2 correction applied)
 
-All acceptance criteria pass. Renewal creates a new commercial transaction (Offer → Contract → Subscription) using current commercial terms. Old subscriptions/contracts remain immutable.
+All acceptance criteria pass. Renewal creates a new commercial transaction (Offer → Contract → Subscription) using current commercial terms. Old subscriptions/contracts remain immutable. Old Active subscriptions are NEVER expired early by renewal.
 
 ## 30.2 Actual Commit SHA
 
 ```
-d0ca39b
+TBD (Task 9.3.2 commit)
+```
+
+### Prior commits
+```
+d0ca39b — Task 9.3: Subscription Renewal as New Commercial Transaction
+5f67c68 — Task 9.3.1: Renewal Commercial Snapshot & Financial Chain Hardening
 ```
 
 ## 30.3 Files Changed
@@ -17,90 +23,82 @@ d0ca39b
 | File | Change |
 |---|---|
 | `src/Centerix.Domain/Platform/Contracts/Contract.cs` | Added `PreviousSubscriptionId` nullable field + `LinkToPreviousSubscription()` method |
-| `src/Centerix.Domain/Platform/Subscriptions/TenantPlanErrors.cs` | Added 5 renewal-specific error codes |
-| `src/Centerix.Application/Platform/Commands/RenewSubscriptionOfferCommand.cs` | **NEW** — Core renewal handler (Offer → Contract → Subscription orchestration) |
+| `src/Centerix.Domain/Platform/Subscriptions/TenantPlan.cs` | Added `AddCalendarMonths` static helper (removed `ExpireEarlyForRenewal` in 9.3.2) |
+| `src/Centerix.Domain/Platform/Subscriptions/TenantPlanErrors.cs` | Added renewal-specific error codes |
+| `src/Centerix.Application/Platform/Commands/RenewSubscriptionOfferCommand.cs` | Core renewal handler — temporal overlap guard, no early expiration |
+| `src/Centerix.Application/Platform/Subscriptions/SubscriptionFactory.cs` | Added `activate` parameter to `CreateFromSnapshotAsync` |
 | `src/Centerix.Infrastructure/Data/Configurations/ContractConfiguration.cs` | Added EF configuration for `PreviousSubscriptionId` |
+| `src/Centerix.Infrastructure/Data/Migrations/20260915193613_AddContractPreviousSubscriptionId.cs` | Migration for PreviousSubscriptionId column |
 | `src/Centerix.API/Controllers/TenantPlansController.cs` | Added `POST /api/tenantplans/{id}/renew-commercial` endpoint + request DTO |
-| `tests/Centerix.SecurityTests/Phase9_3SubscriptionRenewalTests.cs` | **NEW** — 46 comprehensive domain-level tests |
+| `tests/Centerix.SecurityTests/Phase9_3SubscriptionRenewalTests.cs` | 46 domain-level tests |
+| `tests/Centerix.SecurityTests/Phase9_3_1RenewalHardeningTests.cs` | 41 domain tests + 6 SQL Server tests |
 
-## 30.4 Business Behavior
+## 30.4 Business Behavior (Task 9.3.2 Corrected)
 
 ```
-Existing Subscription (Active/Expired)
-       ↓
-Current Plan + Current Active Promotion(s)
-       ↓
-Calculate Offer (authoritative pricing engine)
-       ↓
-Accept Offer (domain validation)
-       ↓
-New Contract (new immutable commercial snapshot)
-       ↓
-New Subscription (TenantPlan) created via SubscriptionFactory
-       ↓
-Contract linked to previous subscription for traceability
+Old Subscription (Active, EffectiveEndsAtUtc = future)
+        │
+        │ Renewal requested
+        ▼
+Old Subscription remains Active (UNCHANGED)
+until its natural EffectiveEndsAtUtc
+        │
+        ▼
+New Subscription starts at
+Old EffectiveEndsAtUtc
+        │
+        ▼
+New Subscription Status:
+  - Pending (if startsAt > now) — coexists with old Active via unique index
+  - Active (if startsAt <= now) — old already expired
 ```
 
-The old Subscription remains immutable. The old Contract remains immutable. No old promotions, discounts, gifts, or benefits are automatically inherited.
+### Critical Business Rules (Task 9.3.2)
+
+1. **Old subscription is NEVER modified by renewal** — no early expiration, no cancellation
+2. **Old subscription remains Active** until its natural `EffectiveEndsAtUtc`
+3. **New subscription starts exactly at old's `EffectiveEndsAtUtc`** when old is still Active
+4. **Renewal ≠ Cancellation** — renewal does not invoke refund or cancellation lifecycle
+5. **Sequential entitlement** — old Active + new Pending = valid sequential arrangement
 
 ## 30.5 Renewal Rules
 
 ### Pricing
 - New Offer uses **current Plan pricing** (MonthlyPrice + PricingTier)
 - Old subscription's SnapshotPrice is never read for new terms
-- Plan repricing affects only future renewals, not historical records
 
-### Promotion
-- New Offer calculated by `IPromotionCalculationService` with **current active Promotions**
-- Old promotion (PromotionId, PromotionType, DiscountPercentage) is NOT inherited
-- If no current promotion exists, new Contract has no discount
+### Start Date
+- Old Active with future end → `new.StartsAtUtc = old.EffectiveEndsAtUtc`
+- Old Expired → `new.StartsAtUtc = now`
 
-### Discount
-- Old discount (DiscountAmount) is NOT carried forward
-- New discount derived entirely from current Offer calculation
-- Historical Contract discount unchanged
+### Overlap Prevention (Temporal)
+The overlap guard uses **temporal service period overlap**, not status-based blocking:
+```
+reject if: existing.StartsAtUtc < new.EffectiveEndsAtUtc
+       AND existing.EffectiveEndsAtUtc > new.StartsAtUtc
+       AND existing is not terminal (Expired/Cancelled)
+       AND existing is not the old subscription being renewed
+```
+This correctly allows sequential subscriptions where old ends exactly when new begins.
 
-### Gifts/Benefits
-- Old `ContractBenefit` rows are NOT copied
-- New benefits sourced from current Offer's `OfferBenefit` snapshot
-- If current Offer has no benefits, new Contract has none
-- Benefit value, eligibility, delivery are independent per Contract
+### Unique Index Compatibility
+- Filtered index `UX_TenantPlans_TenantId_NonTerminalStatus` filters on `Status IN (1, 4, 5)` (Active, Suspended, PastDue)
+- **Pending (0) is NOT in the filter** — allows Old Active + New Pending coexistence
+- When old naturally expires (Status → Expired), new can be activated (Status → Active)
 
-### Installments
-- Renewal creates new Subscription with new Contract
-- Installments are NOT automatically created by renewal (per spec: no automatic payment collection)
-- Payment remains a separate transaction
-
-### Billing
-- No automatic billing cycle creation during renewal
-- Billing follows existing subscription/contract lifecycle
-
-### Invoice
-- No automatic invoice creation during renewal
-- Invoicing follows existing billing workflow
-
-### Authorization
-- `IPlatformAdminGuard.EnsurePlatformAdmin()` enforced at handler entry
-- `Permissions.Subscriptions.Manage` required on endpoint
-- Tenant isolation: old subscription's TenantId used for all new entities
-- Cross-tenant renewal impossible (subscription loaded by ID, tenant verified)
-
-### Duplicate Prevention
-- Overlap check: queries for existing Active/Pending subscription for same tenant
-- If non-terminal subscription exists, renewal is rejected
-- Domain-level: `TenantPlanErrors.OverlappingActiveSubscription`
+### Concurrency
+- SERIALIZABLE transaction serializes concurrent renewal requests
+- Temporal overlap guard catches the second request (finds the first's new Pending subscription)
+- Deadlock retry with exponential backoff (3 attempts)
 
 ## 30.6 Historical Integrity
 
 The following records are NEVER mutated by renewal:
 
-- **Old Contract**: PlanId, MonthlyListPrice, ContractedAmount, DiscountAmount, PromotionId, ChargedMonths, PricingTiers, Benefits — all preserved exactly
-- **Old Subscription**: SnapshotPrice, DurationMonths, BonusMonths, StartsAtUtc, BaseEndsAtUtc, EffectiveEndsAtUtc, Status — all preserved exactly
-- **Old Offer**: All commercial terms, promotion snapshot — preserved exactly
-- **Old Benefits**: ContractualValue, EligibilityStatus, DeliveryStatus — all preserved exactly
-- **Old PricingTiers**: TierPrice, DurationMonths — all preserved exactly
-
-Demonstrated by tests: Test11, Test16, Test17, Test18, Test19, Test20, Test21
+- **Old Subscription**: Status remains Active, EffectiveEndsAtUtc unchanged, all snapshot fields unchanged
+- **Old Contract**: All commercial terms unchanged
+- **Old Offer**: All commercial terms unchanged
+- **Old Invoice/Payment/Ledger**: Unchanged
 
 ## 30.7 Test Evidence
 
@@ -111,75 +109,69 @@ Build succeeded.
   0 Error(s)
 ```
 
-### InMemory Tests
+### Task 9.3 Specific Tests (InMemory)
 ```
-Total tests: 782
-     Passed: 782
- (Non-SQL-Server tests — all pass)
-```
-
-### Task 9.3 Specific Tests
-```
-Total tests: 46
-     Passed: 46
- (Phase9_3SubscriptionRenewalTests — all pass)
+Total tests: 86
+     Passed: 86
 ```
 
-### SQL Server Tests
+### SQL Server Integration Tests
 ```
-52 pre-existing failures (SQL Server container not running in test environment)
-These are integration tests requiring Testcontainers.MsSql — NOT related to Task 9.3
+Total tests: 6
+     Passed: 6
+```
+
+- `Migration_PreviousSubscriptionId_ColumnExists` — PASS
+- `Migrations_NoPendingMigrations` — PASS
+- `Renewal_HandlerCreates_BillingCycleAndInvoice` — PASS
+- `Renewal_OldSubscription_RemainsActive_AfterRenewal` — PASS (NEW in 9.3.2)
+- `SequentialDuplicateRenewal_Rejected` — PASS
+- `Renewal_ConcurrentRequests_CannotBothSucceed` — PASS
+
+### Full Test Suite (non-SQL)
+```
+Total tests: 886
+     Passed: 884
+     Failed: 2 (pre-existing: Phase3AuthorizationHttpTests.Students_*)
 ```
 
 ### Test Categories Covered
 
 | Category | Tests | Status |
 |---|---|---|
-| Renewal eligibility (1-8) | Active, Expired, Cancelled, Pending, Suspended, PastDue states | PASS |
-| Commercial snapshot independence (9-15) | Current pricing, new contract values, plan change | PASS |
-| Historical immutability (16-21) | Old contract, subscription, offer, tiers, benefits unchanged | PASS |
-| Gifts/Benefits on renewal (22-25) | Old gift not copied, new from offer only | PASS |
-| Discounts/Promotions (26-29) | Old not inherited, current through offer engine | PASS |
-| Overlap prevention (30-33) | Active overlap blocked, expired can renew, future non-overlapping | PASS |
-| Contract traceability (34-36) | PreviousSubscriptionId set, empty rejected, null for non-renewal | PASS |
-| Start date calculation (37-40) | Before/after/expiry anchoring | PASS |
-| API request validation (41-43) | Null allowed, invalid plan/duration rejected | PASS |
-| Contract domain rules (44-46) | Validation, discount limits | PASS |
-
-### Pre-existing Failures (NOT Task 9.3)
-- Phase2SqlServerTests (9 failures) — SQL Server not running
-- Phase3AuthorizationHttpTests (2 failures) — HTTPS not configured
-- Phase5TeachersConcurrencySqlServerTests (4 failures) — SQL Server not running
-- Phase8_1_1ConcurrencySqlServerTests (2 failures) — SQL Server not running
-- Phase8_1_3RehydrationSqlServerTests (4 failures) — SQL Server not running
-- Phase9FinancialConcurrencySqlServerTests (14 failures) — SQL Server not running
-- SqlServerInvitationFlowTests (17 failures) — SQL Server not running
+| Renewal eligibility | Active, Expired, Cancelled, Pending, Suspended, PastDue states | PASS |
+| Commercial snapshot independence | Current pricing, new contract values, plan change | PASS |
+| Historical immutability | Old contract, subscription, offer, tiers, benefits unchanged | PASS |
+| Gifts/Benefits on renewal | Old gift not copied, new from offer only | PASS |
+| Discounts/Promotions | Old not inherited, current through offer engine | PASS |
+| Temporal overlap prevention | Sequential allowed, actual overlap blocked | PASS |
+| Start date calculation | Before/after/expiry anchoring | PASS |
+| Old subscription lifecycle | Remains Active, EffectiveEndsAtUtc unchanged | PASS |
+| Cancellation distinction | Renewal ≠ cancellation, no refund invoked | PASS |
+| Concurrency | SERIALIZABLE + temporal guard, exactly one succeeds | PASS |
+| SQL Server verification | Migration, billing chain, old sub preserved, concurrency | PASS |
 
 ## 30.8 Migration
 
-**No migration required.**
-
-The `PreviousSubscriptionId` is a nullable `Guid?` field on `Contract`. When deployed to a relational database, a migration should be generated to add the column. The EF configuration is already in place (`ContractConfiguration.cs`). The nullable nature ensures backward compatibility — existing rows will have `NULL` for this field.
+The `PreviousSubscriptionId` is a nullable `Guid?` field on `Contract`.
+Migration `20260915193613_AddContractPreviousSubscriptionId` adds the column.
 
 ## 30.9 Implementation Summary
 
 ### Architecture Decision
-Renewal reuses the existing Offer → Contract → Subscription architecture rather than creating a parallel renewal system. This means:
-- The `PromotionCalculationService` handles all pricing/promotion logic
-- The `SubscriptionFactory` handles all subscription creation
-- No pricing, discount, or benefit logic is duplicated
+Renewal reuses the existing Offer → Contract → Subscription architecture. No parallel renewal system.
 
-### Key Design Choices
-1. **New commercial transaction** — Not an update/extension of old subscription
-2. **Current Offer engine** — Uses `IPromotionCalculationService.Calculate()` for fresh pricing
-3. **Separate endpoint** — `POST /api/tenantplans/{id}/renew-commercial` (distinct from legacy `/renew`)
-4. **Traceability** — `Contract.PreviousSubscriptionId` links to the renewed subscription
-5. **Atomic persistence** — All new entities (Offer, Contract, Subscription) saved in one batch
+### Key Design Choices (Task 9.3.2)
+1. **No early expiration** — old subscription lifecycle is never interrupted by renewal
+2. **Temporal overlap guard** — based on service periods, not status flags
+3. **Pending status for future starts** — new subscription is Pending when starting in the future, coexisting with old Active via filtered unique index
+4. **Conditional activation** — `SubscriptionFactory.CreateFromSnapshotAsync(activate: bool)` controls whether new subscription is immediately Active
+5. **SERIALIZABLE serialization** — concurrent renewals serialized at database level
 
 ### What Was NOT Changed
 - Existing `RenewSubscriptionCommand` (legacy month-appending) preserved
 - No new billing/invoice/payment logic
 - No referral credit system
 - No automatic payment collection
-- No contract versioning system
 - No generic idempotency framework
+- No cancellation/refund invoked by renewal

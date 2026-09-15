@@ -141,18 +141,7 @@ public class RenewSubscriptionOfferHandler(
                     return eligibilityResult.Errors!;
             }
 
-            var hasOverlap = await dbContext.TenantPlans
-                .IgnoreQueryFilters()
-                .AnyAsync(tp =>
-                    tp.TenantId == oldSubscription.TenantId &&
-                    (tp.Status == SubscriptionStatus.Active || tp.Status == SubscriptionStatus.Pending) &&
-                    tp.Id != oldSubscription.Id,
-                    cancellationToken);
-
-            if (hasOverlap)
-                return TenantPlanErrors.OverlappingActiveSubscription;
-
-            // ── Step 4: Resolve plan and duration ──
+            // ── Step 4: Resolve plan and duration (before overlap guard) ──
             var planId = request.PlanId ?? oldSubscription.PlanId;
             var plan = await dbContext.Plans
                 .Include(p => p.PricingTiers)
@@ -167,7 +156,36 @@ public class RenewSubscriptionOfferHandler(
 
             var durationMonths = request.DurationMonths ?? plan.DurationMonths;
 
-            // ── Step 5: Calculate fresh Offer using current promotions ──
+            // ── Step 5: Compute renewal start date (before overlap guard) ──
+            // Active old sub with future end → new starts at old's EffectiveEndsAtUtc
+            // Expired old sub → new starts from now
+            var startsAt = oldSubscription.Status == SubscriptionStatus.Active &&
+                           oldSubscription.EffectiveEndsAtUtc > now
+                ? oldSubscription.EffectiveEndsAtUtc
+                : now;
+
+            var newEffectiveEndsAt = TenantPlan.AddCalendarMonths(startsAt, durationMonths + plan.BonusMonths);
+
+            // ── Step 6: Temporal overlap guard ──
+            // Reject if any non-terminal subscription for this tenant has a service period
+            // that overlaps with the proposed new subscription's period.
+            // The old subscription is excluded — its EffectiveEndsAtUtc == startsAt means
+            // it does NOT overlap (ends exactly when new begins).
+            var hasOverlap = await dbContext.TenantPlans
+                .IgnoreQueryFilters()
+                .AnyAsync(tp =>
+                    tp.TenantId == oldSubscription.TenantId &&
+                    tp.Id != oldSubscription.Id &&
+                    tp.Status != SubscriptionStatus.Expired &&
+                    tp.Status != SubscriptionStatus.Cancelled &&
+                    tp.StartsAtUtc < newEffectiveEndsAt &&
+                    tp.EffectiveEndsAtUtc > startsAt,
+                    cancellationToken);
+
+            if (hasOverlap)
+                return TenantPlanErrors.OverlappingActiveSubscription;
+
+            // ── Step 7: Calculate fresh Offer using current promotions ──
             var candidatePromotions = await dbContext.Promotions
                 .Where(p =>
                     (p.PlanId == 0 || p.PlanId == planId) &&
@@ -182,7 +200,7 @@ public class RenewSubscriptionOfferHandler(
 
             var calc = calculated.Value;
 
-            // ── Step 6: Persist the Offer as an immutable snapshot ──
+            // ── Step 8: Persist the Offer as an immutable snapshot ──
             var offerResult = Offer.Create(
                 id: Guid.NewGuid(),
                 tenantId: oldSubscription.TenantId,
@@ -211,7 +229,7 @@ public class RenewSubscriptionOfferHandler(
             if (!acceptResult.IsSuccess)
                 return acceptResult.Errors!;
 
-            // ── Step 7: Create new Contract from the Offer ──
+            // ── Step 9: Create new Contract from the Offer ──
             var effectiveAt = now;
             var endsAt = effectiveAt.AddMonths(durationMonths);
 
@@ -266,16 +284,12 @@ public class RenewSubscriptionOfferHandler(
             if (!markConvertedResult.IsSuccess)
                 return markConvertedResult.Errors!;
 
-            // ── Step 7.5: Expire the old subscription so the non-terminal unique index is released ──
-            var expireResult = oldSubscription.ExpireEarlyForRenewal(now);
-            if (!expireResult.IsSuccess)
-                return expireResult.Errors!;
-
-            // ── Step 8: Create new Subscription from the Contract/Offer snapshot ──
-            var startsAt = oldSubscription.Status == SubscriptionStatus.Active &&
-                           oldSubscription.EffectiveEndsAtUtc > now
-                ? oldSubscription.EffectiveEndsAtUtc
-                : now;
+            // ── Step 10: Create new Subscription ──
+            // Old subscription is NEVER modified. It remains Active with its original dates.
+            // When startsAt > now, the new subscription is created as Pending so the
+            // non-terminal unique index (Status IN 1,4,5) allows coexistence with the
+            // old Active subscription.
+            var activateNew = startsAt <= now;
 
             var subscriptionResult = await subscriptionFactory.CreateFromSnapshotAsync(
                 oldSubscription.TenantId,
@@ -286,6 +300,7 @@ public class RenewSubscriptionOfferHandler(
                 bonusMonths: plan.BonusMonths,
                 startsAtUtc: startsAt,
                 autoRenew: false,
+                activate: activateNew,
                 cancellationToken);
 
             if (!subscriptionResult.IsSuccess)
@@ -294,7 +309,7 @@ public class RenewSubscriptionOfferHandler(
             var subscription = subscriptionResult.Value;
             subscription.LinkToContract(contract.Id);
 
-            // ── Step 9: Create BillingCycle ──
+            // ── Step 11: Create BillingCycle ──
             var billingCycleResult = BillingCycle.Create(
                 id: Guid.NewGuid(),
                 tenantId: oldSubscription.TenantId,
@@ -307,7 +322,7 @@ public class RenewSubscriptionOfferHandler(
 
             var billingCycle = billingCycleResult.Value;
 
-            // ── Step 10: Create Invoice from the BillingCycle ──
+            // ── Step 12: Create Invoice from the BillingCycle ──
             var cycleDurationMonths = durationMonths;
             if (cycleDurationMonths <= 0)
                 cycleDurationMonths = 1;
@@ -341,7 +356,7 @@ public class RenewSubscriptionOfferHandler(
             if (!markInvoicedResult.IsSuccess)
                 return markInvoicedResult.Errors!;
 
-            // ── Step 11: Persist all new entities in one batch ──
+            // ── Step 13: Persist all new entities in one batch ──
             dbContext.Offers.Add(offer);
             dbContext.Contracts.Add(contract);
             dbContext.TenantPlans.Add(subscription);
@@ -364,7 +379,7 @@ public class RenewSubscriptionOfferHandler(
             if (transaction is not null)
                 await transaction.CommitAsync(cancellationToken);
 
-            // ── Step 12: Audit ──
+            // ── Step 14: Audit ──
             await auditWriter.WriteAsync(
                 action: "Subscription.RenewAsNewTransaction",
                 entityType: nameof(TenantPlan),

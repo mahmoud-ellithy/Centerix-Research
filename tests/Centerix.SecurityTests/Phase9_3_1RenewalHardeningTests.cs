@@ -995,6 +995,57 @@ public class Phase9_3_1RenewalSqlServerTests
 
     [Fact]
     [Trait("Category", "SqlServer")]
+    public async Task Renewal_OldSubscription_RemainsActive_AfterRenewal()
+    {
+        const string tenantId = "D4E5F6A7-B8C9-0123-DEF0-123456789012";
+        await SeedTenantAsync(tenantId);
+        var planId = await EnsurePlanAsync("RENEWOLD", price: 1000m, duration: 12);
+
+        Guid subId;
+        DateTime oldEndsAt;
+        using (var seed = _env.Factory.Services.CreateScope())
+        {
+            var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.StampAddedTenantIds(tenantId);
+            var sub = TenantPlan.Create(
+                Guid.NewGuid(), tenantId, planId, 1000m, "EGP", 12, 0,
+                DateTime.UtcNow.AddMonths(-6), false, SubscriptionStatus.Pending).Value;
+            sub.Activate(DateTime.UtcNow.AddMonths(-6));
+            db.TenantPlans.Add(sub);
+            await db.SaveChangesAsync();
+            subId = sub.Id;
+            oldEndsAt = sub.EffectiveEndsAtUtc;
+        }
+
+        using var scope = _env.Factory.Services.CreateScope();
+        var db2 = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db2.StampAddedTenantIds(tenantId);
+        var handler = CreateHandler(db2);
+
+        var result = await handler.Handle(
+            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 12),
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess, string.Join(", ", result.Errors?.Select(e => e.Code) ?? []));
+
+        using var verify = _env.Factory.Services.CreateScope();
+        var verifyDb = verify.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var oldSub = await verifyDb.TenantPlans.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(s => s.Id == subId);
+        Assert.NotNull(oldSub);
+        Assert.Equal(SubscriptionStatus.Active, oldSub.Status);
+        Assert.Equal(oldEndsAt, oldSub.EffectiveEndsAtUtc);
+
+        var newSub = await verifyDb.TenantPlans.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(s => s.ContractId == result.Value);
+        Assert.NotNull(newSub);
+        Assert.Equal(oldEndsAt, newSub.StartsAtUtc);
+        Assert.Equal(SubscriptionStatus.Pending, newSub.Status);
+    }
+
+    [Fact]
+    [Trait("Category", "SqlServer")]
     public async Task SequentialDuplicateRenewal_Rejected()
     {
         const string tenantId = "C3D4E5F6-A7B8-9012-CDEF-123456789012";
