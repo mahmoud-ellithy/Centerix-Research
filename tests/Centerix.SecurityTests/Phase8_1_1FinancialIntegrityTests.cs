@@ -964,6 +964,7 @@ public class Phase8_1_1ConcurrencySqlServerTests
         // Verify exactly one allocation
         using (var scope = _env.Factory.Services.CreateScope())
         {
+            AuthorizeTenant(scope.ServiceProvider, tenantId);
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
             var allocations = await db.PaymentAllocations
@@ -1019,7 +1020,7 @@ public class Phase8_1_1ConcurrencySqlServerTests
                 Guid.NewGuid(), contract.Id, 2,
                 DateTime.UtcNow.AddDays(30),
                 new DateTime(2026, 5, 1), new DateTime(2026, 8, 31),
-                5000m, "EGP",
+                6000m, "EGP",
                 subscription.Id).Value;
             db.Installments.Add(installment2);
             installment2Id = installment2.Id;
@@ -1078,6 +1079,7 @@ public class Phase8_1_1ConcurrencySqlServerTests
         // Verify both allocations exist
         using (var scope = _env.Factory.Services.CreateScope())
         {
+            AuthorizeTenant(scope.ServiceProvider, tenantId);
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
             var allocations = await db.PaymentAllocations

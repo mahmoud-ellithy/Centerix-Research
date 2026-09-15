@@ -38,6 +38,16 @@ public class AllocatePaymentHandler(
         // as the deadlock victim (error 1205), we retry with bounded exponential backoff.
         for (int attempt = 0; attempt <= MaxDeadlockRetries; attempt++)
         {
+            // Clear the ChangeTracker before each attempt so that a previous attempt's
+            // rolled-back state (Added entities, Modified entities) does not poison the
+            // retry. Without this, stale tracked entities from a deadlocked transaction
+            // cause incorrect validation (e.g. phantom installment allocations) or
+            // phantom idempotency hits.
+            if (dbContext is DbContext dbc)
+            {
+                dbc.ChangeTracker.Clear();
+            }
+
             var result = await TryHandleAsync(request, cancellationToken);
 
             // If the result is a deadlock error, retry after a short delay.

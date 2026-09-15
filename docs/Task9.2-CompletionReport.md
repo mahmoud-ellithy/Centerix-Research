@@ -1,6 +1,6 @@
 # Task 9.2 — Subscription Activation, Expiration & Financial Ownership — Completion Report
 
-## Status: COMPLETE
+## Status: COMPLETE (including Task 9.2.3 deadlock root-cause verification)
 
 ## Actual Commit SHA
 
@@ -125,23 +125,21 @@ SQL Server was available locally (`Server=.`). The existing `SqlServerIntegratio
 
 ```
 Total SQL Server tests: 50
-Passed: 47
-Failed: 3
+Passed: 49
+Failed: 1
 ```
 
 **All 6 previous FK-related failures — RESOLVED:**
 - Phase8 tests updated to create valid Plan/Contract/TenantPlan/Subscription entities before creating Installments
 - Phase8 rehydration tests: S7, S9, S11, S12 now pass
-- Phase8 concurrency tests: Concurrent_DifferentInstallments and Concurrent_IdenticalRetry now pass (deadlock victim only — see below)
+- Phase8 concurrency tests: Concurrent_DifferentInstallments and Concurrent_IdenticalRetry now pass (resolved in Task 9.2.3)
 
 **2 new SQL Server tests — ADDED & PASSING:**
 - `Phase9FinancialConcurrencySqlServerTests.DeleteRestrict_TenantPlan_ReferencedByInstallment_IsRejected` — Verifies direct delete-restriction behavior: creates TenantPlan + Installment, attempts delete, asserts `DbUpdateException` with FK name
 - `Phase9FinancialConcurrencySqlServerTests.NullSubscriptionId_HistoricalInstallment_CanExist` — Verifies historical NULL behavior: creates valid TenantPlan, saves installment, nulls SubscriptionId via direct property access, confirms NULL persists
 
-**3 remaining failures (transient deadlocks):**
-1. `Phase8_1_1ConcurrencySqlServerTests.Concurrent_IdenticalRetry_Installment_CreatesOnlyOneAllocation` — SQL Server deadlock; the concurrent allocation handler has deadlock retry logic (3 retries), but both transactions deadlock under Serializable isolation. This is a transient deadlock caused by the additional TenantPlan FK index participating in lock ordering. Not a logic error.
-2. `Phase8_1_1ConcurrencySqlServerTests.Concurrent_DifferentInstallments_BothSucceed_WhenCapacityPermits` — Same deadlock cause as above.
-3. `Phase9FinancialConcurrencySqlServerTests.Concurrent_PaymentAllocations_CannotExceedPaymentAmount` — Pre-existing deadlock, not caused by this task.
+**1 remaining failure (pre-existing):**
+1. `Phase9FinancialConcurrencySqlServerTests.Concurrent_PaymentAllocations_CannotExceedPaymentAmount` — Pre-existing deadlock, not caused by this task.
 
 ### Delete Restrict Behavior Verification
 
@@ -204,14 +202,14 @@ Failed: 2 (pre-existing Phase3AuthorizationHttpTests — not caused by this task
 - **Total: 802 InMemory tests, 800 passed, 2 pre-existing failures**
 
 ### SQL Server Integration Tests
-- 50 total, 47 passed, 3 failed (2 transient deadlocks in Phase8_1_1 concurrency tests from FK index contention, 1 pre-existing deadlock)
+- 50 total, 49 passed, 1 failed (1 pre-existing deadlock not caused by Task 9.2)
 
 ## Build Verification
 
 ```
 Build: PASS
 Errors: 0
-Warnings: 8203 (all pre-existing StyleCop warnings)
+Warnings: ~2800 (all pre-existing StyleCop warnings)
 ```
 
 ## Acceptance Criteria Verification
@@ -237,11 +235,93 @@ Warnings: 8203 (all pre-existing StyleCop warnings)
 
 ## Remaining Issues
 
-1. **2 transient deadlocks in Phase8_1_1 SQL Server concurrency tests** — The `Concurrent_IdenticalRetry` and `Concurrent_DifferentInstallments` tests occasionally deadlock on SQL Server under Serializable isolation. The new TenantPlan FK index adds an additional lock resource to the concurrent allocation handler's transaction. Both tests have deadlock retry logic (3 retries), but in rare cases both concurrent transactions deadlock against each other. This is a transient/environmental issue — not a logic error. Not caused by production code changes.
+1. **1 pre-existing deadlock** in `Phase9FinancialConcurrencySqlServerTests.Concurrent_PaymentAllocations_CannotExceedPaymentAmount` — not caused by this task.
 
-2. **1 pre-existing deadlock** in `Phase9FinancialConcurrencySqlServerTests` — not caused by this task.
+2. **2 pre-existing Phase3 test failures** — not caused by this task.
 
-3. **2 pre-existing Phase3 test failures** — not caused by this task.
+## Task 9.2.3 — Concurrency Deadlock Root-Cause Verification
+
+### Root Cause Analysis
+
+Three independent defects were identified and resolved:
+
+#### Defect 1: Missing `ChangeTracker.Clear()` in production retry logic (REAL PRODUCTION CONCURRENCY PROBLEM)
+
+**File:** `src/Centerix.Application/Platform/Billing/Commands/AllocatePaymentCommand.cs`
+
+**Severity:** HIGH — Production correctness defect
+
+**Evidence:**
+- SQL Server error 1205 (deadlock victim) confirmed in test output
+- After deadlock, the transaction is rolled back by SQL Server, but the `DbContext.ChangeTracker` retains stale entity state (Added allocations, Modified installments, Modified invoices) from the deadlocked attempt
+- On retry, the handler reuses the same `DbContext` instance without clearing the ChangeTracker
+- The Installment entity's `_paymentAllocations` collection still contains the rolled-back allocation
+- `GetSettledAmount()` includes the stale allocation, causing `AllocationExceedsInstallment` on every retry
+- All 4 retry attempts fail → zero allocations persisted, yet the test's success-count assertion passes because the idempotency path returns `Result.Updated`
+
+**Fix:** Added `dbContext.ChangeTracker.Clear()` (via `DbContext` cast) before each retry attempt. This ensures a clean state for each retry, forcing re-queries against the database rather than using stale in-memory entities.
+
+**Introduced by Task 9.2:** NO — pre-existing bug in `AllocatePaymentHandler` retry logic. The same bug exists in `ExecuteRefundHandler`, `CancelSubscriptionCommand`, `MarkBenefitDeliveredCommand`, `CreateInstallmentScheduleCommand`, and `AddInstallmentCommand`, but only `AllocatePaymentHandler` was fixed here since it's the only one triggered by the failing tests. Recommend applying the same fix to all retrying handlers.
+
+**Production impact:** Under concurrent payment allocations with Serializable isolation, a deadlock retry could silently fail to persist the allocation while reporting success. The idempotency check would then return success on subsequent retries of the same request (phantom idempotency), masking the fact that no allocation was written.
+
+#### Defect 2: Test setup data mismatch (TEST SETUP DEFECT)
+
+**File:** `tests/Centerix.SecurityTests/Phase8_1_1FinancialIntegrityTests.cs`
+
+**Evidence:**
+- `Concurrent_DifferentInstallments_BothSucceed_WhenCapacityPermits` creates installment2 with Amount=5000m but allocates 6000m to it
+- The handler correctly rejects this via `InstallmentErrors.AllocationExceedsInstallment` (6000 > 5000)
+- Test expects both allocations to succeed (`Assert.True(result2.IsSuccess)`) but the capacity validation prevents it
+- This is NOT a deadlock — it's a validation failure due to incorrect test data
+
+**Fix:** Changed installment2 amount from 5000m to 6000m, matching the allocation amount. Total installment capacity: 4000 + 6000 = 10000 = payment amount.
+
+**Introduced by Task 9.2:** NO — pre-existing test setup bug. The test was written before installment capacity validation was added to the handler.
+
+#### Defect 3: Missing `AuthorizeTenant` in verification scopes (TEST SETUP DEFECT)
+
+**File:** `tests/Centerix.SecurityTests/Phase8_1_1FinancialIntegrityTests.cs`
+
+**Evidence:**
+- Both concurrency tests' verification scopes create a new DI scope with a fresh `AppDbContext`
+- The `AppDbContext` has a global query filter: `HasQueryFilter(e => e.TenantId == _currentTenant.TenantId)`
+- The verification scope does NOT call `AuthorizeTenant()`, so `_currentTenant.TenantId` is empty
+- The filter evaluates to `WHERE TenantId == ''`, which returns zero results
+- This causes `Assert.Single() Failure: The collection was empty` even when allocations were successfully committed
+- The Phase9 concurrency tests correctly call `AuthorizeTenant()` in their verification scopes (line 474)
+
+**Fix:** Added `AuthorizeTenant(scope.ServiceProvider, tenantId)` to both verification scopes.
+
+**Introduced by Task 9.2:** NO — pre-existing test oversight. The tests were written with the assumption that the verification query would work without tenant authorization, but the global query filter requires it.
+
+### Lock Ordering Analysis
+
+**Handler lock acquisition order (Serializable isolation):**
+1. `Platform.Payments` — `FirstOrDefaultAsync(PaymentId = @id)`
+2. `Platform.Invoices` — `FirstOrDefaultAsync(InvoiceId = @id)`
+3. `Platform.PaymentAllocations` — idempotency check (WHERE PaymentId AND InvoiceId AND InstallmentId AND Amount)
+4. `Platform.Installments` — `FirstOrDefaultAsync(InstallmentId = @id)` (when InstallmentId specified)
+5. `Platform.CustomerLedgerEntries` — `SumAsync(TenantId = @tenantId)`
+6. `SaveChangesAsync` — INSERT PaymentAllocations, UPDATE Invoices, UPDATE Installments, INSERT CustomerLedgerEntries
+
+**Both concurrent transactions follow the same order**, so the deadlock is NOT caused by lock-ordering inversion. The deadlock occurs because under Serializable isolation, SQL Server acquires range locks on each table. When two concurrent transactions hold range locks on different tables (e.g., T1 holds Payments, T2 holds Invoices) and both try to acquire locks on the same table (PaymentAllocations), a deadlock occurs.
+
+**FK_Installments_TenantPlans_SubscriptionId lock dependency:** The FK does NOT introduce an additional lock dependency in the allocation handler's code path. The handler does not INSERT/UPDATE TenantPlans rows. The FK constraint is only checked during Installment INSERT/UPDATE, which is not part of the allocation handler's SaveChanges. The FK index was a red herring — the deadlock is caused by the fundamental Serializable isolation range-locking behavior, not by the FK.
+
+### Verification Summary
+
+| Test | Reproduced | Frequency | Root Cause | Introduced by Task 9.2 | Resolution |
+|------|-----------|-----------|------------|----------------------|------------|
+| Concurrent_IdenticalRetry | YES | Every run | Missing ChangeTracker.Clear() + missing AuthorizeTenant in verification | NO (pre-existing) | Production fix: ChangeTracker.Clear() + test fix: Add AuthorizeTenant |
+| Concurrent_DifferentInstallments | YES | Every run | Test data mismatch (5000m installment vs 6000m allocation) + missing AuthorizeTenant | NO (pre-existing) | Test fix: installment2 = 6000m + Add AuthorizeTenant |
+
+### Files Changed (Task 9.2.3)
+
+| File | Change | Description |
+|------|--------|-------------|
+| `src/Centerix.Application/Platform/Billing/Commands/AllocatePaymentCommand.cs` | Modified | Added `ChangeTracker.Clear()` before each retry attempt in the deadlock retry loop |
+| `tests/Centerix.SecurityTests/Phase8_1_1FinancialIntegrityTests.cs` | Modified | Fixed installment2 amount (5000→6000), added `AuthorizeTenant` to both verification scopes |
 
 ## Summary
 
@@ -254,3 +334,15 @@ Task 9.2 closes the financial ownership ambiguity by:
 5. **Expiration** (pre-existing): Expired is terminal; payment cannot reactivate
 
 The core ownership model was already correctly implemented in Tasks 9.1/9.1.1/9.1.2. Task 9.2 adds the database FK for referential integrity, a comprehensive regression test suite, SQL Server test fixes for FK compliance, and the completion report.
+
+Task 9.2.3 resolved two deadlock-related test failures through:
+- Production fix: `ChangeTracker.Clear()` between retry attempts in `AllocatePaymentHandler`
+- Test fixes: corrected installment amount mismatch and added missing `AuthorizeTenant` to verification scopes
+
+## Final SQL Server Tests
+
+```
+Total: 50
+Passed: 49
+Failed: 1 (pre-existing, not caused by Task 9.2)
+```
