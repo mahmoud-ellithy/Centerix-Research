@@ -2,18 +2,19 @@
 
 ## 30.1 Status
 
-**COMPLETE** (Task 9.3.2 correction applied)
+**COMPLETE** (Task 9.3.3 correction applied)
 
-All acceptance criteria pass. Renewal creates a new commercial transaction (Offer → Contract → Subscription) using current commercial terms. Old subscriptions/contracts remain immutable. Old Active subscriptions are NEVER expired early by renewal.
+All acceptance criteria pass. Renewal creates a new commercial transaction (Offer → Contract → Subscription) using current commercial terms. Old subscriptions/contracts remain immutable. Old Active subscriptions are NEVER expired early by renewal. Contract and Subscription effective starts are temporally aligned.
 
 ## 30.2 Actual Commit SHA
 
 ```
-TBD (Task 9.3.2 commit)
+99bca06 — Task 9.3.3: Fix Contract/Subscription temporal alignment in renewal handler
 ```
 
 ### Prior commits
 ```
+9f43e07 — Task 9.3.2: fix(renewal): Renewal Lifecycle Correction
 d0ca39b — Task 9.3: Subscription Renewal as New Commercial Transaction
 5f67c68 — Task 9.3.1: Renewal Commercial Snapshot & Financial Chain Hardening
 ```
@@ -25,15 +26,16 @@ d0ca39b — Task 9.3: Subscription Renewal as New Commercial Transaction
 | `src/Centerix.Domain/Platform/Contracts/Contract.cs` | Added `PreviousSubscriptionId` nullable field + `LinkToPreviousSubscription()` method |
 | `src/Centerix.Domain/Platform/Subscriptions/TenantPlan.cs` | Added `AddCalendarMonths` static helper (removed `ExpireEarlyForRenewal` in 9.3.2) |
 | `src/Centerix.Domain/Platform/Subscriptions/TenantPlanErrors.cs` | Added renewal-specific error codes |
-| `src/Centerix.Application/Platform/Commands/RenewSubscriptionOfferCommand.cs` | Core renewal handler — temporal overlap guard, no early expiration |
+| `src/Centerix.Application/Platform/Commands/RenewSubscriptionOfferCommand.cs` | Core renewal handler — **9.3.3: Fixed Contract effective start to align with Subscription start** |
 | `src/Centerix.Application/Platform/Subscriptions/SubscriptionFactory.cs` | Added `activate` parameter to `CreateFromSnapshotAsync` |
 | `src/Centerix.Infrastructure/Data/Configurations/ContractConfiguration.cs` | Added EF configuration for `PreviousSubscriptionId` |
 | `src/Centerix.Infrastructure/Data/Migrations/20260915193613_AddContractPreviousSubscriptionId.cs` | Migration for PreviousSubscriptionId column |
 | `src/Centerix.API/Controllers/TenantPlansController.cs` | Added `POST /api/tenantplans/{id}/renew-commercial` endpoint + request DTO |
 | `tests/Centerix.SecurityTests/Phase9_3SubscriptionRenewalTests.cs` | 46 domain-level tests |
-| `tests/Centerix.SecurityTests/Phase9_3_1RenewalHardeningTests.cs` | 41 domain tests + 6 SQL Server tests |
+| `tests/Centerix.SecurityTests/Phase9_3_1RenewalHardeningTests.cs` | 40 domain tests + 4 SQL Server tests |
+| `tests/Centerix.SecurityTests/Phase9_3_3ContractSubscriptionAlignmentTests.cs` | **NEW: 12 domain tests + 6 SQL Server tests for temporal alignment** |
 
-## 30.4 Business Behavior (Task 9.3.2 Corrected)
+## 30.4 Business Behavior (Task 9.3.3 Corrected)
 
 ```
 Old Subscription (Active, EffectiveEndsAtUtc = future)
@@ -48,18 +50,60 @@ New Subscription starts at
 Old EffectiveEndsAtUtc
         │
         ▼
+New Contract starts at
+New Subscription StartsAtUtc (IDENTICAL)
+        │
+        ▼
 New Subscription Status:
   - Pending (if startsAt > now) — coexists with old Active via unique index
   - Active (if startsAt <= now) — old already expired
 ```
 
-### Critical Business Rules (Task 9.3.2)
+### Critical Business Rules (Task 9.3.3 Invariant)
 
-1. **Old subscription is NEVER modified by renewal** — no early expiration, no cancellation
-2. **Old subscription remains Active** until its natural `EffectiveEndsAtUtc`
-3. **New subscription starts exactly at old's `EffectiveEndsAtUtc`** when old is still Active
-4. **Renewal ≠ Cancellation** — renewal does not invoke refund or cancellation lifecycle
-5. **Sequential entitlement** — old Active + new Pending = valid sequential arrangement
+1. **Contract/Subscription temporal alignment**: `NewContract.EffectiveAtUtc == NewSubscription.StartsAtUtc == startsAt`
+2. **Old subscription is NEVER modified by renewal** — no early expiration, no cancellation
+3. **Old subscription remains Active** until its natural `EffectiveEndsAtUtc`
+4. **New subscription starts exactly at old's `EffectiveEndsAtUtc`** when old is still Active
+5. **Renewal ≠ Cancellation** — renewal does not invoke refund or cancellation lifecycle
+6. **Sequential entitlement** — old Active + new Pending = valid sequential arrangement
+7. **Contract does not start during old service period**: `NewContract.EffectiveAtUtc >= OldSubscription.EffectiveEndsAtUtc`
+
+## 30.5 Task 9.3.3 Defect Corrected
+
+### Defect
+In `RenewSubscriptionOfferHandler`, Step 9 created the new Contract using `effectiveAt = now` instead of `effectiveAt = startsAt`. This caused the Contract to start at request time while the Subscription correctly started at `oldSubscription.EffectiveEndsAtUtc` for scheduled renewals.
+
+### Old Behavior (Defect)
+```csharp
+// Step 9 (BEFORE fix):
+var effectiveAt = now;                    // BUG: uses current time
+var endsAt = effectiveAt.AddMonths(durationMonths);
+```
+
+Result for scheduled renewal (old ends 2026-12-31, requested 2026-06-01):
+```
+Contract:   2026-06-01 → 2027-06-01  (WRONG: starts during old service)
+Subscription: 2026-12-31 → 2027-12-31  (CORRECT)
+```
+
+### New Behavior (Corrected)
+```csharp
+// Step 9 (AFTER fix):
+var effectiveAt = startsAt;              // CORRECT: aligned with subscription
+var endsAt = startsAt.AddMonths(durationMonths);
+```
+
+Result for scheduled renewal:
+```
+Contract:     2026-12-31 → 2027-12-31  (ALIGNED)
+Subscription: 2026-12-31 → 2027-12-31  (ALIGNED)
+```
+
+### Contract End Date Semantics (Preserved)
+- `Contract.EndsAtUtc = startsAt + DurationMonths` (no bonus months)
+- `Subscription.EffectiveEndsAtUtc = startsAt + DurationMonths + BonusMonths` (bonus included)
+- This matches the existing `CreateContractFromOfferHandler` behavior where `endsAt = effectiveAt.AddMonths(offer.DurationMonths)`
 
 ## 30.5 Renewal Rules
 
@@ -109,30 +153,70 @@ Build succeeded.
   0 Error(s)
 ```
 
-### Task 9.3 Specific Tests (InMemory)
+### Task 9.3 Domain Tests (InMemory)
 ```
 Total tests: 86
      Passed: 86
 ```
 
-### SQL Server Integration Tests
+### Task 9.3.3 Domain Tests (Contract/Subscription Alignment)
+```
+Total tests: 12
+     Passed: 12
+```
+
+Tests:
+- Test01: Scheduled Renewal — Contract/Subscription Start Alignment
+- Test02: Contract Does Not Start During Old Service Period
+- Test03: Immediate Renewal — Contract/Subscription Start Alignment
+- Test04: Old Subscription Remains Active After Scheduled Renewal
+- Test05: Historical Contract Unchanged After Renewal
+- Test06: Billing Cycle Alignment With Subscription
+- Test07: Contract End Date Matches Contract Duration (No Bonus)
+- Test08: Scheduled Renewal With Bonus Months — Contract vs Subscription End
+- Test09: Contract Does Not Overlap Previous Contract
+- Test10: Immediate Renewal — Expired Sub Aligns Contract and Sub
+- Test11: Scheduled Renewal — Start Date Computation Preserves Invariant
+- Test12: Contract EffectiveAt Never Before Old Subscription Ends
+
+### SQL Server Integration Tests (Existing)
+```
+Total tests: 4
+     Passed: 4
+```
+
+- `Renewal_HandlerCreates_BillingCycleAndInvoice` — PASS
+- `Renewal_OldSubscription_RemainsActive_AfterRenewal` — PASS
+- `SequentialDuplicateRenewal_Rejected` — PASS
+- `Renewal_ConcurrentRequests_CannotBothSucceed` — PASS
+
+### SQL Server Integration Tests (Task 9.3.3 Alignment)
 ```
 Total tests: 6
      Passed: 6
 ```
 
+- `Sql01_ScheduledRenewal_ContractEffectiveAt_EqualsSubscriptionStartsAt` — PASS
+- `Sql02_ContractEffectiveAt_NotBeforeOldSubscriptionEnds` — PASS
+- `Sql03_ImmediateRenewal_ContractAndSubscriptionAligned` — PASS
+- `Sql04_OldSubscription_RemainsActive_AfterScheduledRenewal` — PASS
+- `Sql05_BillingCycle_Invoice_AlignedWithSubscription` — PASS
+- `Sql06_HistoricalContractUnchanged_AfterRenewal` — PASS
+
+### Migration Tests
+```
+Total tests: 2
+     Passed: 2
+```
+
 - `Migration_PreviousSubscriptionId_ColumnExists` — PASS
 - `Migrations_NoPendingMigrations` — PASS
-- `Renewal_HandlerCreates_BillingCycleAndInvoice` — PASS
-- `Renewal_OldSubscription_RemainsActive_AfterRenewal` — PASS (NEW in 9.3.2)
-- `SequentialDuplicateRenewal_Rejected` — PASS
-- `Renewal_ConcurrentRequests_CannotBothSucceed` — PASS
 
-### Full Test Suite (non-SQL)
+### Total Phase 9.3 Tests Executed
 ```
-Total tests: 886
-     Passed: 884
-     Failed: 2 (pre-existing: Phase3AuthorizationHttpTests.Students_*)
+Total tests: 110
+     Passed: 110
+     Failed: 0
 ```
 
 ### Test Categories Covered
@@ -149,7 +233,9 @@ Total tests: 886
 | Old subscription lifecycle | Remains Active, EffectiveEndsAtUtc unchanged | PASS |
 | Cancellation distinction | Renewal ≠ cancellation, no refund invoked | PASS |
 | Concurrency | SERIALIZABLE + temporal guard, exactly one succeeds | PASS |
-| SQL Server verification | Migration, billing chain, old sub preserved, concurrency | PASS |
+| Contract/Subscription alignment | **NEW 9.3.3**: Effective starts identical, no overlap | PASS |
+| Billing chain alignment | BillingCycle/Invoice aligned with subscription period | PASS |
+| SQL Server verification | Migration, billing chain, old sub preserved, concurrency, alignment | PASS |
 
 ## 30.8 Migration
 
@@ -161,12 +247,14 @@ Migration `20260915193613_AddContractPreviousSubscriptionId` adds the column.
 ### Architecture Decision
 Renewal reuses the existing Offer → Contract → Subscription architecture. No parallel renewal system.
 
-### Key Design Choices (Task 9.3.2)
-1. **No early expiration** — old subscription lifecycle is never interrupted by renewal
-2. **Temporal overlap guard** — based on service periods, not status flags
-3. **Pending status for future starts** — new subscription is Pending when starting in the future, coexisting with old Active via filtered unique index
-4. **Conditional activation** — `SubscriptionFactory.CreateFromSnapshotAsync(activate: bool)` controls whether new subscription is immediately Active
-5. **SERIALIZABLE serialization** — concurrent renewals serialized at database level
+### Key Design Choices (Task 9.3.3)
+1. **Contract/Subscription temporal alignment** — `NewContract.EffectiveAtUtc == NewSubscription.StartsAtUtc` for all renewal cases
+2. **Contract end date = DurationMonths only** — bonus months are a Subscription concept; Contract uses `startsAt.AddMonths(durationMonths)`
+3. **No early expiration** — old subscription lifecycle is never interrupted by renewal
+4. **Temporal overlap guard** — based on service periods, not status flags
+5. **Pending status for future starts** — new subscription is Pending when starting in the future, coexisting with old Active via filtered unique index
+6. **Conditional activation** — `SubscriptionFactory.CreateFromSnapshotAsync(activate: bool)` controls whether new subscription is immediately Active
+7. **SERIALIZABLE serialization** — concurrent renewals serialized at database level
 
 ### What Was NOT Changed
 - Existing `RenewSubscriptionCommand` (legacy month-appending) preserved
@@ -175,3 +263,5 @@ Renewal reuses the existing Offer → Contract → Subscription architecture. No
 - No automatic payment collection
 - No generic idempotency framework
 - No cancellation/refund invoked by renewal
+- No new domain entities introduced
+- No Task 9.4 work started

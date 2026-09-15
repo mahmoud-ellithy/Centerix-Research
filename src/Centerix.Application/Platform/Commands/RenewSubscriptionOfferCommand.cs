@@ -230,8 +230,12 @@ public class RenewSubscriptionOfferHandler(
                 return acceptResult.Errors!;
 
             // ── Step 9: Create new Contract from the Offer ──
-            var effectiveAt = now;
-            var endsAt = effectiveAt.AddMonths(durationMonths);
+            // The Contract must be temporally aligned with the Subscription:
+            //   Contract.EffectiveAtUtc == Subscription.StartsAtUtc == startsAt
+            // For scheduled renewals, startsAt == oldSubscription.EffectiveEndsAtUtc,
+            // so the new Contract does not start during the old service period.
+            var effectiveAt = startsAt;
+            var endsAt = startsAt.AddMonths(durationMonths);
 
             var contractResult = Contract.Create(
                 id: Guid.NewGuid(),
