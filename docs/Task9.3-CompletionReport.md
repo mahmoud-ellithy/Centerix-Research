@@ -9,7 +9,7 @@ All acceptance criteria pass. Renewal creates a new commercial transaction (Offe
 ## 30.2 Actual Commit SHA
 
 ```
-3d133ef — Task 9.3.3: Fix Contract/Subscription temporal alignment in renewal handler
+90cad8e — Task 9.3.3: Fix Contract/Subscription temporal alignment in renewal handler
 ```
 
 ### Prior commits
