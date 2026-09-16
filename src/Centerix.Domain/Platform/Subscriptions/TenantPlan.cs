@@ -343,8 +343,18 @@ public class TenantPlan : AuditableEntity<Guid>
         if (Status == SubscriptionStatus.Cancelled)
             return TenantPlanErrors.AlreadyCancelledSubscription;
 
-        if (Status == SubscriptionStatus.Expired || (Status == SubscriptionStatus.Active && utcNow >= EffectiveEndsAtUtc))
+        if (Status == SubscriptionStatus.Expired)
             return TenantPlanErrors.CannotCancelExpired;
+
+        if (Status == SubscriptionStatus.Active && utcNow >= EffectiveEndsAtUtc)
+            return TenantPlanErrors.CannotCancelExpired;
+
+        if (utcNow < StartsAtUtc)
+            return TenantPlanErrors.CancellationDateBeforeSubscriptionStart;
+
+        if (Status is not (SubscriptionStatus.Active or SubscriptionStatus.Pending
+            or SubscriptionStatus.PastDue or SubscriptionStatus.Suspended))
+            return TenantPlanErrors.InvalidStateTransition(Status, "cancel");
 
         Status = SubscriptionStatus.Cancelled;
 

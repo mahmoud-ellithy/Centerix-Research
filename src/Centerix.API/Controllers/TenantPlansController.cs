@@ -104,7 +104,7 @@ public class TenantPlansController(ILocalizer localizer, IMediator mediator) : A
             Problem);
     }
 
-    /// <summary>PLATFORM: cancels the current subscription (history preserved).</summary>
+    /// <summary>PLATFORM: cancels the current subscription (history preserved, no contract).</summary>
     [HttpPost("cancel")]
     [HasPermission(Permissions.Subscriptions.Manage)]
     public async Task<IActionResult> CancelSubscription(CancelSubscriptionCommand command, CancellationToken cancellationToken)
@@ -113,6 +113,30 @@ public class TenantPlansController(ILocalizer localizer, IMediator mediator) : A
 
         return result.Match(
             _ => NoContent(),
+            Problem);
+    }
+
+    /// <summary>
+    /// PLATFORM: cancels a subscription with full financial calculation.
+    /// For subscriptions linked to a Contract, this performs refund/outstanding calculation
+    /// using historical Contract pricing. This is the AUTHORITATIVE cancellation workflow.
+    /// </summary>
+    [HttpPost("{id}/cancel")]
+    [HasPermission(Permissions.Subscriptions.Manage)]
+    public async Task<IActionResult> CancelSubscriptionWithFinancials(
+        Guid id,
+        [FromBody] CancelSubscriptionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var command = new Centerix.Application.Platform.Billing.Commands.CancelSubscriptionCommand(
+            id,
+            request?.CancellationDateUtc ?? DateTime.UtcNow,
+            request?.Reason ?? "Platform cancellation");
+
+        var result = await mediator.Send(command, cancellationToken);
+
+        return result.Match(
+            cancellation => Ok(cancellation),
             Problem);
     }
 }
@@ -129,4 +153,17 @@ public class RenewSubscriptionCommercialRequest
 
     /// <summary>Optional: override the duration. Null = use plan's default duration.</summary>
     public int? DurationMonths { get; set; }
+}
+
+/// <summary>
+/// Request body for the financial cancellation endpoint.
+/// CancellationDateUtc is validated against the subscription lifecycle.
+/// </summary>
+public class CancelSubscriptionRequest
+{
+    /// <summary>The effective cancellation date (UTC). Must be validated against subscription lifecycle.</summary>
+    public DateTime CancellationDateUtc { get; set; } = DateTime.UtcNow;
+
+    /// <summary>Business reason for the cancellation.</summary>
+    public string Reason { get; set; } = "Platform cancellation";
 }

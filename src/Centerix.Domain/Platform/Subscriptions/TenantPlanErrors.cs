@@ -58,6 +58,10 @@ public static class TenantPlanErrors
     public static Error CannotCancelExpired =>
         Error.Conflict("TenantPlan.CannotCancelExpired", "Cannot cancel an expired subscription");
 
+    public static Error CancellationDateBeforeSubscriptionStart =>
+        Error.Validation("TenantPlan.CancellationDateBeforeStart",
+            "Cancellation date cannot be before the subscription start date.");
+
     public static Error CannotRenewCancelled =>
         Error.Conflict("TenantPlan.CannotRenewCancelled", "Cannot renew a cancelled subscription");
 

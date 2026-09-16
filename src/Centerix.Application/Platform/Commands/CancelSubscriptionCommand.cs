@@ -8,7 +8,18 @@ using FluentValidation;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
-/// <summary>PLATFORM-ONLY workflow: cancels the tenant's current subscription (history preserved).</summary>
+/// <summary>
+/// LEGACY platform-admin cancellation command. This command handles simple lifecycle-only
+/// cancellation for subscriptions WITHOUT an associated Contract (no financial consequences).
+///
+/// IMPORTANT: When the subscription has a Contract, this command REJECTS the request with
+/// ContractLinkedCancellationRequiresFinancialWorkflow. The caller MUST use the billing
+/// CancelSubscriptionCommand (Centerix.Application.Platform.Billing.Commands) which performs
+/// the full financial calculation (refund/outstanding) per the approved cancellation policy.
+///
+/// Rule: No production API may cancel a paid Contract/Subscription while bypassing
+/// the approved financial cancellation calculation when financial consequences exist.
+/// </summary>
 public record CancelSubscriptionCommand(Guid TenantId, string? Reason = null) : IRequest<Result<Updated>>;
 
 public class CancelSubscriptionValidator : AbstractValidator<CancelSubscriptionCommand>
@@ -49,14 +60,20 @@ public class CancelSubscriptionHandler(
             return Error.NotFound("Subscription.NotFound",
                 $"No subscription found for tenant '{request.TenantId}'.");
 
+        if (subscription.ContractId.HasValue)
+        {
+            return Error.Conflict("Cancellation.ContractLinked",
+                "This subscription is linked to a commercial Contract. " +
+                "Use the billing cancellation endpoint (POST /api/subscriptions/{id}/cancel) " +
+                "which performs the required financial calculation and refund processing.");
+        }
+
         var oldValue = AuditPayload.Serialize(new { Status = subscription.Status.ToString() });
 
         var result = subscription.Cancel(now);
         if (!result.IsSuccess)
             return result.Errors!;
 
-        // Commercial access ends now: clear the operational mirror so the tenant guard stops
-        // admitting requests on the strength of a stale expiry date. History remains auditable.
         tenant.SetValidUpTo(now);
         await tenantRegistrySync.SyncLifecycleAsync(tenant, cancellationToken);
 
