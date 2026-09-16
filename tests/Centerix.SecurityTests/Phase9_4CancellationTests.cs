@@ -494,7 +494,7 @@ public class Phase9_4CancellationTests
         var futureDate = DateTime.UtcNow.AddDays(30);
         var r = await h.Handle(new CancelSubscriptionCommand(s.Id, futureDate, "test"), CancellationToken.None);
         Assert.False(r.IsSuccess);
-        Assert.Contains(r.Errors!, e => e.Code == "Cancellation.FutureDate");
+        Assert.Contains(r.Errors!, e => e.Code == "TenantPlan.CancellationDateInFuture");
         Assert.Equal(SubscriptionStatus.Active, db.TenantPlans.Find(s.Id)!.Status);
         Assert.Empty(db.Refunds.Where(x => x.SubscriptionId == s.Id).ToList());
     }
@@ -821,6 +821,252 @@ public class Phase9_4CancellationTests
         var s = CreateSub(db, tid, c.Id);
         await h.Handle(new CancelSubscriptionCommand(s.Id, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "x"), CancellationToken.None);
         await sync.Received(1).SyncLifecycleAsync(Arg.Any<Tenant>(), Arg.Any<CancellationToken>());
+    }
+
+    // ── Task 9.4.2: Partial Payment Cancellation ──
+
+    [Fact]
+    public async Task Cancel_PartiallyPaidInstallment_Succeeds()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1");
+        var s = CreateSub(db, "tenant-1", c.Id);
+
+        var inv = CreateInv(db, "tenant-1", c.Id, 2000m);
+        var pr = Payment.Create(Guid.NewGuid(), "PAY-" + Guid.NewGuid().ToString("N")[..8], 2000m, "EGP", PaymentMethod.Cash);
+        Assert.True(pr.IsSuccess);
+        var p = pr.Value;
+        p.Complete(DateTime.UtcNow);
+        var alloc = PaymentAllocation.Create(Guid.NewGuid(), p.Id, inv.Id, 2000m, DateTime.UtcNow).Value;
+        db.Payments.Add(p);
+        db.PaymentAllocations.Add(alloc);
+        db.StampAddedTenantIds("tenant-1");
+        db.SaveChanges();
+
+        var partiallyPaidInst = CreateInst(db, "tenant-1", c.Id, s.Id, 1, 4000m, DateTime.UtcNow.AddMonths(-1));
+        var applyResult = partiallyPaidInst.ApplyAllocation(alloc, DateTime.UtcNow);
+        Assert.True(applyResult.IsSuccess);
+        db.SaveChanges();
+        Assert.True(partiallyPaidInst.Status is InstallmentStatus.PartiallyPaid or InstallmentStatus.Overdue);
+
+        var unpaidInst = CreateInst(db, "tenant-1", c.Id, s.Id, 2, 1000m, DateTime.UtcNow.AddMonths(7));
+
+        var r = await h.Handle(new CancelSubscriptionCommand(s.Id, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "x"), CancellationToken.None);
+        Assert.True(r.IsSuccess, ErrMsg(r));
+        Assert.True(r.Value.IsCancelled);
+
+        var partiallyPaidAfter = db.Installments.Find(partiallyPaidInst.Id);
+        Assert.True(partiallyPaidAfter!.Status is InstallmentStatus.PartiallyPaid or InstallmentStatus.Overdue);
+        Assert.False(partiallyPaidAfter.Status == InstallmentStatus.Cancelled);
+        Assert.Equal(2000m, partiallyPaidAfter.SettledAmount);
+
+        var unpaidAfter = db.Installments.Find(unpaidInst.Id);
+        Assert.Equal(InstallmentStatus.Cancelled, unpaidAfter!.Status);
+    }
+
+    [Fact]
+    public async Task Cancel_PartiallyPaidInstallment_AllocationPreserved()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1");
+        var s = CreateSub(db, "tenant-1", c.Id);
+
+        var inv = CreateInv(db, "tenant-1", c.Id, 2000m);
+        var pr = Payment.Create(Guid.NewGuid(), "PAY-" + Guid.NewGuid().ToString("N")[..8], 2000m, "EGP", PaymentMethod.Cash);
+        Assert.True(pr.IsSuccess);
+        var p = pr.Value;
+        p.Complete(DateTime.UtcNow);
+        var alloc = PaymentAllocation.Create(Guid.NewGuid(), p.Id, inv.Id, 2000m, DateTime.UtcNow).Value;
+        db.Payments.Add(p);
+        db.PaymentAllocations.Add(alloc);
+        db.StampAddedTenantIds("tenant-1");
+        db.SaveChanges();
+
+        var partiallyPaidInst = CreateInst(db, "tenant-1", c.Id, s.Id, 1, 4000m, DateTime.UtcNow.AddMonths(-1));
+        partiallyPaidInst.ApplyAllocation(alloc, DateTime.UtcNow);
+        db.SaveChanges();
+
+        var allocId = alloc.Id;
+        await h.Handle(new CancelSubscriptionCommand(s.Id, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "x"), CancellationToken.None);
+
+        var allocAfter = db.PaymentAllocations.Find(allocId);
+        Assert.NotNull(allocAfter);
+        Assert.Equal(PaymentAllocationStatus.Active, allocAfter.Status);
+        Assert.Equal(2000m, allocAfter.AllocatedAmount);
+    }
+
+    [Fact]
+    public async Task Cancel_PartiallyPaidInstallment_PaymentPreserved()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1");
+        var s = CreateSub(db, "tenant-1", c.Id);
+
+        var inv = CreateInv(db, "tenant-1", c.Id, 2000m);
+        var pr = Payment.Create(Guid.NewGuid(), "PAY-" + Guid.NewGuid().ToString("N")[..8], 2000m, "EGP", PaymentMethod.Cash);
+        Assert.True(pr.IsSuccess);
+        var p = pr.Value;
+        p.Complete(DateTime.UtcNow);
+        var alloc = PaymentAllocation.Create(Guid.NewGuid(), p.Id, inv.Id, 2000m, DateTime.UtcNow).Value;
+        db.Payments.Add(p);
+        db.PaymentAllocations.Add(alloc);
+        db.StampAddedTenantIds("tenant-1");
+        db.SaveChanges();
+
+        var partiallyPaidInst = CreateInst(db, "tenant-1", c.Id, s.Id, 1, 4000m, DateTime.UtcNow.AddMonths(-1));
+        partiallyPaidInst.ApplyAllocation(alloc, DateTime.UtcNow);
+        db.SaveChanges();
+
+        var payId = p.Id;
+        await h.Handle(new CancelSubscriptionCommand(s.Id, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "x"), CancellationToken.None);
+
+        var payAfter = db.Payments.Find(payId);
+        Assert.Equal(2000m, payAfter!.Amount);
+        Assert.Equal(PaymentStatus.Completed, payAfter.Status);
+    }
+
+    [Fact]
+    public async Task Cancel_PartiallyPaidInstallment_FinalFinancialResult_Deterministic()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1", 1000m);
+        var s = CreateSub(db, "tenant-1", c.Id);
+
+        var inv = CreateInv(db, "tenant-1", c.Id, 4000m);
+        var pr = Payment.Create(Guid.NewGuid(), "PAY-" + Guid.NewGuid().ToString("N")[..8], 4000m, "EGP", PaymentMethod.Cash);
+        Assert.True(pr.IsSuccess);
+        var p = pr.Value;
+        p.Complete(DateTime.UtcNow);
+        var alloc = PaymentAllocation.Create(Guid.NewGuid(), p.Id, inv.Id, 4000m, DateTime.UtcNow).Value;
+        db.Payments.Add(p);
+        db.PaymentAllocations.Add(alloc);
+        db.StampAddedTenantIds("tenant-1");
+        db.SaveChanges();
+
+        var partiallyPaidInst = CreateInst(db, "tenant-1", c.Id, s.Id, 1, 4000m, DateTime.UtcNow.AddMonths(-1));
+        partiallyPaidInst.ApplyAllocation(alloc, DateTime.UtcNow);
+        db.SaveChanges();
+
+        var r = await h.Handle(new CancelSubscriptionCommand(s.Id, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "x"), CancellationToken.None);
+        Assert.True(r.IsSuccess, ErrMsg(r));
+
+        Assert.NotNull(r.Value.Calculation);
+        Assert.Equal(4000m, r.Value.Calculation.AmountActuallyPaid);
+        Assert.True(r.Value.Calculation.CustomerOutstandingAmount > 0 || r.Value.RefundAmount >= 0);
+    }
+
+    [Fact]
+    public async Task Cancel_MixPaidAndUnpaidInstallments_CorrectBehavior()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1");
+        var s = CreateSub(db, "tenant-1", c.Id);
+
+        var inv = CreateInv(db, "tenant-1", c.Id, 1000m);
+        var pr = Payment.Create(Guid.NewGuid(), "PAY-" + Guid.NewGuid().ToString("N")[..8], 1000m, "EGP", PaymentMethod.Cash);
+        Assert.True(pr.IsSuccess);
+        var p = pr.Value;
+        p.Complete(DateTime.UtcNow);
+        var alloc = PaymentAllocation.Create(Guid.NewGuid(), p.Id, inv.Id, 1000m, DateTime.UtcNow).Value;
+        db.Payments.Add(p);
+        db.PaymentAllocations.Add(alloc);
+        db.StampAddedTenantIds("tenant-1");
+        db.SaveChanges();
+
+        var paidInst = CreateInst(db, "tenant-1", c.Id, s.Id, 1, 1000m, DateTime.UtcNow.AddMonths(-2));
+        paidInst.ApplyAllocation(alloc, DateTime.UtcNow);
+        db.SaveChanges();
+
+        var partiallyPaidInst = CreateInst(db, "tenant-1", c.Id, s.Id, 2, 4000m, DateTime.UtcNow.AddMonths(-1));
+        var inv2 = CreateInv(db, "tenant-1", c.Id, 2000m);
+        var pr2 = Payment.Create(Guid.NewGuid(), "PAY-" + Guid.NewGuid().ToString("N")[..8], 2000m, "EGP", PaymentMethod.Cash);
+        Assert.True(pr2.IsSuccess);
+        var p2 = pr2.Value;
+        p2.Complete(DateTime.UtcNow);
+        var alloc2 = PaymentAllocation.Create(Guid.NewGuid(), p2.Id, inv2.Id, 2000m, DateTime.UtcNow).Value;
+        db.Payments.Add(p2);
+        db.PaymentAllocations.Add(alloc2);
+        db.StampAddedTenantIds("tenant-1");
+        db.SaveChanges();
+        partiallyPaidInst.ApplyAllocation(alloc2, DateTime.UtcNow);
+        db.SaveChanges();
+
+        var unpaidFuture = CreateInst(db, "tenant-1", c.Id, s.Id, 3, 1000m, DateTime.UtcNow.AddMonths(7));
+
+        var r = await h.Handle(new CancelSubscriptionCommand(s.Id, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "x"), CancellationToken.None);
+        Assert.True(r.IsSuccess, ErrMsg(r));
+
+        var paidAfter = db.Installments.Find(paidInst.Id);
+        Assert.Equal(InstallmentStatus.Paid, paidAfter!.Status);
+
+        var partiallyPaidAfter = db.Installments.Find(partiallyPaidInst.Id);
+        Assert.True(partiallyPaidAfter!.Status is InstallmentStatus.PartiallyPaid or InstallmentStatus.Overdue);
+        Assert.False(partiallyPaidAfter.Status == InstallmentStatus.Cancelled);
+        Assert.Equal(2000m, partiallyPaidAfter.SettledAmount);
+
+        var unpaidAfter = db.Installments.Find(unpaidFuture.Id);
+        Assert.Equal(InstallmentStatus.Cancelled, unpaidAfter!.Status);
+    }
+
+    [Fact]
+    public async Task Cancel_PartiallyPaidInstallment_NoFinancialHistoryDeleted()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1");
+        var s = CreateSub(db, "tenant-1", c.Id);
+
+        var inv = CreateInv(db, "tenant-1", c.Id, 2000m);
+        var pr = Payment.Create(Guid.NewGuid(), "PAY-" + Guid.NewGuid().ToString("N")[..8], 2000m, "EGP", PaymentMethod.Cash);
+        Assert.True(pr.IsSuccess);
+        var p = pr.Value;
+        p.Complete(DateTime.UtcNow);
+        var alloc = PaymentAllocation.Create(Guid.NewGuid(), p.Id, inv.Id, 2000m, DateTime.UtcNow).Value;
+        db.Payments.Add(p);
+        db.PaymentAllocations.Add(alloc);
+        db.StampAddedTenantIds("tenant-1");
+        db.SaveChanges();
+
+        var partiallyPaidInst = CreateInst(db, "tenant-1", c.Id, s.Id, 1, 4000m, DateTime.UtcNow.AddMonths(-1));
+        partiallyPaidInst.ApplyAllocation(alloc, DateTime.UtcNow);
+        db.SaveChanges();
+
+        var payCount = db.Payments.Count();
+        var allocCount = db.PaymentAllocations.Count();
+        var invCount = db.Invoices.Count();
+
+        await h.Handle(new CancelSubscriptionCommand(s.Id, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "x"), CancellationToken.None);
+
+        Assert.Equal(payCount, db.Payments.Count());
+        Assert.Equal(allocCount, db.PaymentAllocations.Count());
+        Assert.Equal(invCount, db.Invoices.Count());
+    }
+
+    [Fact]
+    public async Task Cancel_ConcurrentIdempotency_InMemory()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1");
+        var s = CreateSub(db, "tenant-1", c.Id);
+        CreatePay(db, "tenant-1", c.Id, 12000m);
+        var cmd = new CancelSubscriptionCommand(s.Id, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "first");
+
+        var r1 = await h.Handle(cmd, CancellationToken.None);
+        Assert.True(r1.IsSuccess, ErrMsg(r1));
+        Assert.True(r1.Value.IsCancelled);
+
+        var r2 = await h.Handle(cmd, CancellationToken.None);
+        Assert.True(r2.IsSuccess, ErrMsg(r2));
+        Assert.False(r2.Value.IsCancelled);
+
+        Assert.Single(db.Refunds.Where(x => x.SubscriptionId == s.Id).ToList());
+        Assert.Equal(SubscriptionStatus.Cancelled, db.TenantPlans.Find(s.Id)!.Status);
     }
 }
 

@@ -155,8 +155,7 @@ public class CancelSubscriptionHandler(
 
         if (request.CancellationDateUtc > now)
         {
-            return Error.Validation("Cancellation.FutureDate",
-                "Cancellation date cannot be in the future. Immediate cancellation only.");
+            return TenantPlanErrors.CancellationDateInFuture;
         }
 
         if (request.CancellationDateUtc < subscription.StartsAtUtc)
@@ -245,6 +244,7 @@ public class CancelSubscriptionHandler(
         if (subscription.ContractId.HasValue)
         {
             var futureInstallments = await dbContext.Installments
+                .Include(i => i.PaymentAllocations)
                 .Where(i => i.SubscriptionId == subscription.Id
                     && i.ContractId == subscription.ContractId.Value
                     && i.Status != InstallmentStatus.Paid
@@ -253,6 +253,9 @@ public class CancelSubscriptionHandler(
 
             foreach (var installment in futureInstallments)
             {
+                if (installment.PaymentAllocations.Any(a => a.Status == PaymentAllocationStatus.Active))
+                    continue;
+
                 var cancelResult = installment.Cancel(now);
                 if (!cancelResult.IsSuccess)
                 {

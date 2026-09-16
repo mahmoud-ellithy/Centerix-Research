@@ -47,8 +47,13 @@ public class RefundConfiguration : IEntityTypeConfiguration<Refund>
         // Optional subscription reference
         builder.Property(r => r.SubscriptionId);
 
+        // One cancellation refund per subscription. Filtered unique: allows NULL SubscriptionId
+        // for non-subscription refunds (e.g., invoice-level refunds) while preventing duplicate
+        // cancellation refunds for the same subscription.
         builder.HasIndex(r => new { r.TenantId, r.SubscriptionId })
-            .HasDatabaseName("IX_Refunds_TenantId_SubscriptionId");
+            .IsUnique()
+            .HasFilter("[SubscriptionId] IS NOT NULL")
+            .HasDatabaseName("UX_Refunds_TenantId_SubscriptionId_OnePerSubscription");
 
         // Optional invoice reference
         builder.Property(r => r.InvoiceId);
