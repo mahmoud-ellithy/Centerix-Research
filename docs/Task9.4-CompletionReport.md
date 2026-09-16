@@ -9,10 +9,8 @@ Task 9.4.1 correction-only hardening pass complete. Task 9.4.2 partial payment c
 ## Commit SHA
 
 ```
-d5edf3c5 — Task 9.4.1: Cancellation Hardening & Final Closure
+b8a5872 — Task 9.4.2: Partial Payment Cancellation Fix & SQL Server Concurrency Hardening
 ```
-
-(Task 9.4.2 changes not yet committed — pending user confirmation)
 
 ## Scope
 
