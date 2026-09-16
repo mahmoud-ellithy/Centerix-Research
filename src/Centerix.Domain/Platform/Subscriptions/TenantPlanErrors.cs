@@ -62,6 +62,10 @@ public static class TenantPlanErrors
         Error.Validation("TenantPlan.CancellationDateBeforeStart",
             "Cancellation date cannot be before the subscription start date.");
 
+    public static Error CancellationDateInFuture =>
+        Error.Validation("TenantPlan.CancellationDateInFuture",
+            "Cancellation date cannot be in the future. Immediate cancellation only.");
+
     public static Error CannotRenewCancelled =>
         Error.Conflict("TenantPlan.CannotRenewCancelled", "Cannot renew a cancelled subscription");
 

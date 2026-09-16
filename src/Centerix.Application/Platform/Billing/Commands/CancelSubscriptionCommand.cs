@@ -73,6 +73,11 @@ public class CancelSubscriptionHandler(
 
         for (int attempt = 0; attempt <= MaxDeadlockRetries; attempt++)
         {
+            if (dbContext is DbContext dbc)
+            {
+                dbc.ChangeTracker.Clear();
+            }
+
             var result = await TryHandleAsync(request, cancellationToken);
 
             if (result.IsSuccess || !IsRetryableError(result))
@@ -147,6 +152,18 @@ public class CancelSubscriptionHandler(
         }
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
+
+        if (request.CancellationDateUtc > now)
+        {
+            return Error.Validation("Cancellation.FutureDate",
+                "Cancellation date cannot be in the future. Immediate cancellation only.");
+        }
+
+        if (request.CancellationDateUtc < subscription.StartsAtUtc)
+        {
+            return TenantPlanErrors.CancellationDateBeforeSubscriptionStart;
+        }
+
         var oldValue = AuditPayload.Serialize(new
         {
             Status = subscription.Status.ToString(),
@@ -173,45 +190,55 @@ public class CancelSubscriptionHandler(
 
         if (contract is not null)
         {
-            var payments = await dbContext.Payments
-                .Include(p => p.Allocations)
-                    .ThenInclude(a => a.Invoice)
-                .Where(p => p.TenantId == contract.TenantId
-                    && p.Status == PaymentStatus.Completed
-                    && p.Allocations.Any(a => a.Status == PaymentAllocationStatus.Active
-                        && a.Invoice.ContractId == contract.Id))
-                .ToListAsync(cancellationToken);
+            var existingRefund = await dbContext.Refunds
+                .FirstOrDefaultAsync(r => r.SubscriptionId == subscription.Id, cancellationToken);
 
-            calculation = calculationService.Calculate(
-                contract,
-                request.CancellationDateUtc,
-                payments,
-                contract.Benefits);
-
-            if (calculation.IsRefundDue)
+            if (existingRefund is not null)
             {
-                var refundNumber = $"REF-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..8]}";
+                refundId = existingRefund.Id;
+            }
+            else
+            {
+                var payments = await dbContext.Payments
+                    .Include(p => p.Allocations)
+                        .ThenInclude(a => a.Invoice)
+                    .Where(p => p.TenantId == contract.TenantId
+                        && p.Status == PaymentStatus.Completed
+                        && p.Allocations.Any(a => a.Status == PaymentAllocationStatus.Active
+                            && a.Invoice.ContractId == contract.Id))
+                    .ToListAsync(cancellationToken);
 
-                var refundResult = Refund.Create(
-                    Guid.NewGuid(),
-                    refundNumber,
-                    contract.Id,
-                    subscription.Id,
-                    null,
-                    calculation.RefundAmount,
-                    contract.CurrencyCode,
-                    $"Early cancellation: {request.Reason}",
-                    currentUserService.UserId!,
-                    request.CancellationDateUtc);
+                calculation = calculationService.Calculate(
+                    contract,
+                    request.CancellationDateUtc,
+                    payments,
+                    contract.Benefits);
 
-                if (!refundResult.IsSuccess)
+                if (calculation.IsRefundDue)
                 {
-                    return refundResult.Errors!;
-                }
+                    var refundNumber = $"REF-{now:yyyyMMdd}-{Guid.NewGuid().ToString()[..8]}";
 
-                var refund = refundResult.Value;
-                dbContext.Refunds.Add(refund);
-                refundId = refund.Id;
+                    var refundResult = Refund.Create(
+                        Guid.NewGuid(),
+                        refundNumber,
+                        contract.Id,
+                        subscription.Id,
+                        null,
+                        calculation.RefundAmount,
+                        contract.CurrencyCode,
+                        $"Early cancellation: {request.Reason}",
+                        currentUserService.UserId!,
+                        request.CancellationDateUtc);
+
+                    if (!refundResult.IsSuccess)
+                    {
+                        return refundResult.Errors!;
+                    }
+
+                    var refund = refundResult.Value;
+                    dbContext.Refunds.Add(refund);
+                    refundId = refund.Id;
+                }
             }
         }
 

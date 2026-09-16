@@ -5,6 +5,7 @@ using Centerix.Application.Platform.Billing.Commands;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Billing.Installments;
 using Centerix.Domain.Platform.Billing.Invoicing;
+using Centerix.Domain.Platform.Billing.Invoicing.Enums;
 using Centerix.Domain.Platform.Billing.Payments;
 using Centerix.Domain.Platform.Billing.Payments.Enums;
 using Centerix.Domain.Platform.Billing.Refunds;
@@ -13,6 +14,7 @@ using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Contracts.Enums;
 using Centerix.Domain.Platform.Subscriptions;
 using Centerix.Domain.Platform.Subscriptions.Enums;
+using Centerix.Domain.Platform.Tenants;
 using Centerix.Infrastructure.Data;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -477,6 +479,348 @@ public class Phase9_4CancellationTests
         Assert.True(r.IsSuccess, ErrMsg(r));
         Assert.Null(r.Value.RefundId);
         Assert.Equal(0, r.Value.RefundAmount);
+    }
+
+    // ── Hardening: Cancellation Date Validation ──
+
+    [Fact]
+    public async Task Cancel_FutureDate_Rejected()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1");
+        var s = CreateSub(db, "tenant-1", c.Id);
+        CreatePay(db, "tenant-1", c.Id, 12000m);
+        var futureDate = DateTime.UtcNow.AddDays(30);
+        var r = await h.Handle(new CancelSubscriptionCommand(s.Id, futureDate, "test"), CancellationToken.None);
+        Assert.False(r.IsSuccess);
+        Assert.Contains(r.Errors!, e => e.Code == "Cancellation.FutureDate");
+        Assert.Equal(SubscriptionStatus.Active, db.TenantPlans.Find(s.Id)!.Status);
+        Assert.Empty(db.Refunds.Where(x => x.SubscriptionId == s.Id).ToList());
+    }
+
+    [Fact]
+    public async Task Cancel_BeforeSubscriptionStart_Rejected()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1");
+        var s = CreateSub(db, "tenant-1", c.Id);
+        CreatePay(db, "tenant-1", c.Id, 12000m);
+        var beforeStart = s.StartsAtUtc.AddDays(-1);
+        var r = await h.Handle(new CancelSubscriptionCommand(s.Id, beforeStart, "test"), CancellationToken.None);
+        Assert.False(r.IsSuccess);
+        Assert.Contains(r.Errors!, e => e.Code == "TenantPlan.CancellationDateBeforeStart");
+        Assert.Equal(SubscriptionStatus.Active, db.TenantPlans.Find(s.Id)!.Status);
+    }
+
+    [Fact]
+    public async Task Cancel_ExactlyNow_Accepted()
+    {
+        using var db = CreateDbContext();
+        var now = DateTime.UtcNow;
+        var tp = Substitute.For<TimeProvider>();
+        tp.GetUtcNow().Returns(new DateTimeOffset(now, TimeSpan.Zero));
+        var guard = Substitute.For<IPlatformAdminGuard>();
+        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        var sync = Substitute.For<ITenantRegistrySync>();
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns("admin-1");
+        var audit = Substitute.For<IAuditWriter>();
+        var calc = new RefundCalculationService();
+        var h = new CancelSubscriptionHandler(db, calc, guard, sync, user, audit, tp);
+        var c = CreateContract(db, "tenant-1");
+        var s = CreateSub(db, "tenant-1", c.Id);
+        CreatePay(db, "tenant-1", c.Id, 12000m);
+        var r = await h.Handle(new CancelSubscriptionCommand(s.Id, now, "test"), CancellationToken.None);
+        Assert.True(r.IsSuccess, ErrMsg(r));
+        Assert.True(r.Value.IsCancelled);
+    }
+
+    [Fact]
+    public async Task Cancel_SlightlyBeforeStart_Rejected()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1");
+        var subStart = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+        var r = TenantPlan.Create(Guid.NewGuid(), "tenant-1", 1, 1000m, "EGP", 12, 0, subStart, false, SubscriptionStatus.Active);
+        Assert.True(r.IsSuccess);
+        var s = r.Value;
+        s.LinkToContract(c.Id);
+        db.TenantPlans.Add(s);
+        db.StampAddedTenantIds("tenant-1");
+        db.SaveChanges();
+        var beforeStart = subStart.AddSeconds(-1);
+        var cancelResult = await h.Handle(new CancelSubscriptionCommand(s.Id, beforeStart, "test"), CancellationToken.None);
+        Assert.False(cancelResult.IsSuccess);
+    }
+
+    [Fact]
+    public async Task Cancel_FutureDate_DoesNotMutateSubscription()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1");
+        var s = CreateSub(db, "tenant-1", c.Id);
+        CreatePay(db, "tenant-1", c.Id, 12000m);
+        var originalStatus = s.Status;
+        var originalEndsAt = s.EffectiveEndsAtUtc;
+        await h.Handle(new CancelSubscriptionCommand(s.Id, DateTime.UtcNow.AddDays(60), "test"), CancellationToken.None);
+        var sAfter = db.TenantPlans.Find(s.Id);
+        Assert.Equal(originalStatus, sAfter!.Status);
+        Assert.Equal(originalEndsAt, sAfter.EffectiveEndsAtUtc);
+        Assert.Empty(db.Refunds.Where(x => x.SubscriptionId == s.Id).ToList());
+    }
+
+    // ── Hardening: Refund Idempotency ──
+
+    [Fact]
+    public async Task Cancel_SequentialDuplicate_SingleRefund()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1");
+        var s = CreateSub(db, "tenant-1", c.Id);
+        CreatePay(db, "tenant-1", c.Id, 12000m);
+        var cmd = new CancelSubscriptionCommand(s.Id, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "first");
+        var r1 = await h.Handle(cmd, CancellationToken.None);
+        Assert.True(r1.IsSuccess, ErrMsg(r1));
+        Assert.True(r1.Value.IsCancelled);
+        Assert.NotNull(r1.Value.RefundId);
+        var cmd2 = new CancelSubscriptionCommand(s.Id, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "second");
+        var r2 = await h.Handle(cmd2, CancellationToken.None);
+        Assert.True(r2.IsSuccess, ErrMsg(r2));
+        Assert.False(r2.Value.IsCancelled);
+        Assert.Null(r2.Value.RefundId);
+        var refunds = db.Refunds.Where(x => x.SubscriptionId == s.Id).ToList();
+        Assert.Single(refunds);
+    }
+
+    [Fact]
+    public async Task Cancel_DuplicateWithZeroRefund_SingleEffect()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1", 1000m);
+        var s = CreateSub(db, "tenant-1", c.Id);
+        CreatePay(db, "tenant-1", c.Id, 3000m);
+        var cmd = new CancelSubscriptionCommand(s.Id, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "x");
+        var r1 = await h.Handle(cmd, CancellationToken.None);
+        Assert.True(r1.IsSuccess, ErrMsg(r1));
+        Assert.Null(r1.Value.RefundId);
+        var r2 = await h.Handle(cmd, CancellationToken.None);
+        Assert.True(r2.IsSuccess, ErrMsg(r2));
+        Assert.False(r2.Value.IsCancelled);
+        Assert.Empty(db.Refunds.Where(x => x.SubscriptionId == s.Id).ToList());
+    }
+
+    [Fact]
+    public async Task Cancel_DuplicateWithOutstanding_SingleEffect()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1", 1000m);
+        var s = CreateSub(db, "tenant-1", c.Id);
+        CreatePay(db, "tenant-1", c.Id, 4000m);
+        var cmd = new CancelSubscriptionCommand(s.Id, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "x");
+        var r1 = await h.Handle(cmd, CancellationToken.None);
+        Assert.True(r1.IsSuccess, ErrMsg(r1));
+        Assert.True(r1.Value.CustomerOutstandingAmount > 0);
+        var r2 = await h.Handle(cmd, CancellationToken.None);
+        Assert.True(r2.IsSuccess, ErrMsg(r2));
+        Assert.False(r2.Value.IsCancelled);
+        Assert.Empty(db.Refunds.Where(x => x.SubscriptionId == s.Id).ToList());
+    }
+
+    // ── Hardening: Refund Calculation Date Consistency ──
+
+    [Fact]
+    public async Task Cancel_CalculationUsesExactCancellationDate()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1", 1000m);
+        var s = CreateSub(db, "tenant-1", c.Id);
+        CreatePay(db, "tenant-1", c.Id, 12000m);
+        var cancelDate = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc);
+        var r = await h.Handle(new CancelSubscriptionCommand(s.Id, cancelDate, "x"), CancellationToken.None);
+        Assert.True(r.IsSuccess, ErrMsg(r));
+        Assert.Equal(3, r.Value.Calculation!.ElapsedMonths);
+        Assert.Equal(3000m, r.Value.Calculation.UsedSubscriptionAmount);
+    }
+
+    // ── Hardening: Installment Preservation ──
+
+    [Fact]
+    public async Task Cancel_PaidInstallment_NotCancelled()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1");
+        var s = CreateSub(db, "tenant-1", c.Id);
+        var inv = CreateInv(db, "tenant-1", c.Id, 1000m);
+        var pr = Payment.Create(Guid.NewGuid(), "PAY-" + Guid.NewGuid().ToString("N")[..8], 1000m, "EGP", PaymentMethod.Cash);
+        Assert.True(pr.IsSuccess);
+        var p = pr.Value;
+        p.Complete(DateTime.UtcNow);
+        var alloc = PaymentAllocation.Create(Guid.NewGuid(), p.Id, inv.Id, 1000m, DateTime.UtcNow).Value;
+        db.Payments.Add(p);
+        db.PaymentAllocations.Add(alloc);
+        db.StampAddedTenantIds("tenant-1");
+        db.SaveChanges();
+        var paidInst = CreateInst(db, "tenant-1", c.Id, s.Id, 1, 1000m, DateTime.UtcNow.AddMonths(-1));
+        var payResult = paidInst.ApplyAllocation(alloc, DateTime.UtcNow);
+        Assert.True(payResult.IsSuccess);
+        db.SaveChanges();
+        Assert.Equal(InstallmentStatus.Paid, paidInst.Status);
+        var unpaidInst = CreateInst(db, "tenant-1", c.Id, s.Id, 2, 1000m, DateTime.UtcNow.AddMonths(7));
+        await h.Handle(new CancelSubscriptionCommand(s.Id, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "x"), CancellationToken.None);
+        var paidAfter = db.Installments.Find(paidInst.Id);
+        Assert.Equal(InstallmentStatus.Paid, paidAfter!.Status);
+        var unpaidAfter = db.Installments.Find(unpaidInst.Id);
+        Assert.Equal(InstallmentStatus.Cancelled, unpaidAfter!.Status);
+    }
+
+    [Fact]
+    public async Task Cancel_AllocationsPreserved()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1");
+        var s = CreateSub(db, "tenant-1", c.Id);
+        var inv = CreateInv(db, "tenant-1", c.Id, 5000m);
+        var pr = Payment.Create(Guid.NewGuid(), "PAY-" + Guid.NewGuid().ToString("N")[..8], 5000m, "EGP", PaymentMethod.Cash);
+        Assert.True(pr.IsSuccess);
+        var p = pr.Value;
+        p.Complete(DateTime.UtcNow);
+        var alloc = PaymentAllocation.Create(Guid.NewGuid(), p.Id, inv.Id, 5000m, DateTime.UtcNow).Value;
+        db.Payments.Add(p);
+        db.PaymentAllocations.Add(alloc);
+        db.StampAddedTenantIds("tenant-1");
+        db.SaveChanges();
+        var allocId = alloc.Id;
+        await h.Handle(new CancelSubscriptionCommand(s.Id, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "x"), CancellationToken.None);
+        var allocAfter = db.PaymentAllocations.Find(allocId);
+        Assert.NotNull(allocAfter);
+        Assert.Equal(PaymentAllocationStatus.Active, allocAfter.Status);
+        Assert.Equal(5000m, allocAfter.AllocatedAmount);
+    }
+
+    // ── Hardening: Legacy Path Bypass Prevention ──
+
+    [Fact]
+    public async Task LegacyPath_ContractLinked_Rejected()
+    {
+        using var db = CreateDbContext();
+        var guard = Substitute.For<IPlatformAdminGuard>();
+        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        var sync = Substitute.For<ITenantRegistrySync>();
+        var audit = Substitute.For<IAuditWriter>();
+        var tp = Substitute.For<TimeProvider>();
+        tp.GetUtcNow().Returns(DateTimeOffset.UtcNow);
+        var legacyHandler = new Centerix.Application.Platform.Commands.CancelSubscriptionHandler(
+            db, guard, sync, audit, tp);
+        var tenantGuid = Guid.NewGuid();
+        var tenant = Centerix.Domain.Platform.Tenants.Tenant.Create(
+            tenantGuid, "slug-" + tenantGuid.ToString("N")[..8],
+            "sub-" + tenantGuid.ToString("N")[..8],
+            "Test Tenant", "EG", "EGP", "UTC",
+            "John", "Doe", "owner@test.com",
+            Centerix.Domain.Platform.Tenants.Enums.IsolationMode.Shared).Value;
+        db.Tenants.Add(tenant);
+        db.SaveChanges();
+        var c = CreateContract(db, tenantGuid.ToString());
+        var s = CreateSub(db, tenantGuid.ToString(), c.Id);
+        var cmd = new Centerix.Application.Platform.Commands.CancelSubscriptionCommand(
+            tenantGuid, "test");
+        var r = await legacyHandler.Handle(cmd, CancellationToken.None);
+        Assert.False(r.IsSuccess);
+        Assert.Contains(r.Errors!, e => e.Code == "Cancellation.ContractLinked");
+        Assert.Equal(SubscriptionStatus.Active, db.TenantPlans.Find(s.Id)!.Status);
+    }
+
+    // ── Hardening: Authorization ──
+
+    [Fact]
+    public async Task Cancel_Unauthorized_Denied()
+    {
+        using var db = CreateDbContext();
+        var h = CreateForbiddenHandler(db);
+        var c = CreateContract(db, "tenant-1");
+        var s = CreateSub(db, "tenant-1", c.Id);
+        var r = await h.Handle(new CancelSubscriptionCommand(s.Id, DateTime.UtcNow, "x"), CancellationToken.None);
+        Assert.False(r.IsSuccess);
+        Assert.Contains(r.Errors!, e => e.Code == "Platform.AdminRequired");
+        Assert.Equal(SubscriptionStatus.Active, db.TenantPlans.Find(s.Id)!.Status);
+    }
+
+    // ── Hardening: Payment/Invoice/Contract Immutability ──
+
+    [Fact]
+    public async Task Cancel_PaymentAmountImmutability()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1");
+        var s = CreateSub(db, "tenant-1", c.Id);
+        var (pay, inv) = CreatePay(db, "tenant-1", c.Id, 12000m);
+        var payId = pay.Id;
+        var invId = inv.Id;
+        await h.Handle(new CancelSubscriptionCommand(s.Id, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "x"), CancellationToken.None);
+        var payAfter = db.Payments.Find(payId);
+        Assert.Equal(12000m, payAfter!.Amount);
+        Assert.Equal(PaymentStatus.Completed, payAfter.Status);
+        var invAfter = db.Invoices.Find(invId);
+        Assert.Equal(12000m, invAfter!.TotalAmount);
+        var cAfter = db.Contracts.Find(c.Id);
+        Assert.Equal(ContractStatus.Active, cAfter!.Status);
+    }
+
+    [Fact]
+    public async Task Cancel_InvoiceHistoricalIntegrity()
+    {
+        using var db = CreateDbContext();
+        var h = CreateHandler(db);
+        var c = CreateContract(db, "tenant-1");
+        var s = CreateSub(db, "tenant-1", c.Id);
+        var (_, inv) = CreatePay(db, "tenant-1", c.Id, 12000m);
+        var invId = inv.Id;
+        var origTotal = inv.TotalAmount;
+        await h.Handle(new CancelSubscriptionCommand(s.Id, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "x"), CancellationToken.None);
+        var invAfter = db.Invoices.Find(invId);
+        Assert.Equal(origTotal, invAfter!.TotalAmount);
+        Assert.Equal(InvoiceStatus.Issued, invAfter.Status);
+    }
+
+    // ── Hardening: Tenant Lifecycle Sync ──
+
+    [Fact]
+    public async Task Cancel_TenantRegistrySync_Called()
+    {
+        var tenantGuid = Guid.NewGuid();
+        var tid = tenantGuid.ToString();
+        using var db = CreateDbContext(tid);
+        var sync = Substitute.For<ITenantRegistrySync>();
+        var guard = Substitute.For<IPlatformAdminGuard>();
+        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns("admin-1");
+        var audit = Substitute.For<IAuditWriter>();
+        var tp = Substitute.For<TimeProvider>();
+        tp.GetUtcNow().Returns(DateTimeOffset.UtcNow);
+        var h = new CancelSubscriptionHandler(db, new RefundCalculationService(), guard, sync, user, audit, tp);
+        var tenant = Centerix.Domain.Platform.Tenants.Tenant.Create(
+            tenantGuid, "slug-sync", "sub-sync",
+            "Test Tenant", "EG", "EGP", "UTC",
+            "John", "Doe", "owner@test.com",
+            Centerix.Domain.Platform.Tenants.Enums.IsolationMode.Shared).Value;
+        db.Tenants.Add(tenant);
+        db.SaveChanges();
+        var c = CreateContract(db, tid);
+        var s = CreateSub(db, tid, c.Id);
+        await h.Handle(new CancelSubscriptionCommand(s.Id, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "x"), CancellationToken.None);
+        await sync.Received(1).SyncLifecycleAsync(Arg.Any<Tenant>(), Arg.Any<CancellationToken>());
     }
 }
 
