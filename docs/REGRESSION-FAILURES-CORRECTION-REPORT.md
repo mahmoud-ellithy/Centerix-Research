@@ -81,41 +81,46 @@ The financial invariant IS preserved: total allocated = 7,000 ≤ 10,000. The ha
 
 **Rationale:** When `IgnoreQueryFilters()` bypasses the tenant global query filter, the `.Single()` call must explicitly scope by `TenantId` to isolate to the test's seeded tenant. This is semantically correct — we are querying for records belonging to a specific tenant, and the `TenantId` filter preserves the uniqueness invariant.
 
-### Phase 9 — Updated test assertion to accept idempotent outcomes
+### Phase 9 — Capacity test now uses distinct allocation identities
 
 **File:** `tests/Centerix.SecurityTests/Phase9FinancialConcurrencySqlServerTests.cs`
 
-**Change (lines 460-467):**
+**Previous (insufficient) correction:** Changed assertion to `successCount >= 1` to accept idempotent outcomes. This was insufficient because the test should prove the **capacity** invariant, not idempotency (which is already covered by `Concurrent_IdenticalRetry_DoesNotCreateDuplicateFinancialEffects`).
+
+**Final correction:** Create two separate invoices (`invoiceA`, `invoiceB`) per iteration so each allocation targets a different `InvoiceId`. Since the handler's idempotency key is `(PaymentId, InvoiceId, InstallmentId, AllocatedAmount)`, different `InvoiceId` values make the allocations **distinct** — the second cannot be treated as an idempotent retry. The capacity guard is the only mechanism preventing over-allocation.
+
+**Key change in test setup:**
 ```diff
-- // Assert: Exactly one succeeds, one fails
-+ // Assert: At least one operation succeeds. Two valid outcomes:
-+ // 1. Exactly one succeeds and one fails (capacity guard wins)
-+ // 2. Both succeed via idempotency — the second is treated as an identical
-+ //    retry of the first allocation (same payment+invoice+amount), so no
-+ //    duplicate is created and the financial invariant is preserved.
-  var successCount = (result1.IsSuccess ? 1 : 0) + (result2.IsSuccess ? 1 : 0);
-  var failCount = 2 - successCount;
-- if (successCount == 1 && failCount == 1)
-+ if (successCount >= 1)
-  {
-      iterationsWithExpectedOutcome++;
-  }
+- Guid invoiceId;
++ Guid invoiceAId;
++ Guid invoiceBId;
+  ...
+- var invoice = CreateInvoice(db, tenantId, 10000m, $"INV-{tenantId}-{i}");
+- invoiceId = invoice.Id;
++ var invoiceA = CreateInvoice(db, tenantId, 10000m, $"INV-A-{tenantId}-{i}");
++ invoiceAId = invoiceA.Id;
++ var invoiceB = CreateInvoice(db, tenantId, 10000m, $"INV-B-{tenantId}-{i}");
++ invoiceBId = invoiceB.Id;
 ```
 
-**Change (lines 496-500):**
+**Key change in concurrent operations:**
 ```diff
-- Assert.True(iterationsWithExpectedOutcome >= 1,
--     $"Expected at least 1 iteration with deterministic outcome (1 success, 1 failure), " +
--     $"got {iterationsWithExpectedOutcome} out of {RaceIterations} iterations");
-+ Assert.True(iterationsWithExpectedOutcome >= 1,
-+     $"Expected at least 1 iteration with valid concurrent outcome (1 success + 1 failure, " +
-+     $"or both succeed via idempotency with preserved financial invariant), " +
-+     $"got {iterationsWithExpectedOutcome} out of {RaceIterations} iterations");
+- new AllocatePaymentCommand(paymentId, invoiceId, 7000m)
++ new AllocatePaymentCommand(paymentId, invoiceAId, 7000m)
+  ...
+- new AllocatePaymentCommand(paymentId, invoiceId, 7000m)
++ new AllocatePaymentCommand(paymentId, invoiceBId, 7000m)
 ```
 
-**Rationale:** The handler's idempotency check (`AllocatePaymentCommand.cs:173-198`) correctly deduplicates identical concurrent allocations. Two requests with the same `(PaymentId, InvoiceId, InstallmentId, AllocatedAmount)` are treated as the same logical operation. The second succeeds without creating a duplicate. This is the correct technical behavior. The financial invariant (`totalAllocated ≤ paymentAmount`) is verified by per-iteration assertions at lines 479-492. The outer assertion needed to accept both valid outcomes.
+**Assertion restored to strict:**
+```diff
+- if (successCount >= 1)
++ if (successCount == 1 && failCount == 1)
+```
 
-**No business logic was changed.** The handler (`AllocatePaymentHandler`) was not modified. The correction is purely in the test assertions.
+**Rationale:** Two distinct allocations (different `InvoiceId`) against the same payment cannot be treated as idempotent. The handler's capacity check (`currentAllocated + request.AllocatedAmount > payment.Amount`) must prevent over-allocation. Under Serializable isolation, one transaction commits (7,000 allocated) and the other either gets a serialization conflict (retry → capacity check fails) or deadlock (retry → capacity check fails). The test now proves: **two legitimate concurrent allocations that together exceed capacity cannot both succeed**.
+
+**No production logic was changed.** The handler (`AllocatePaymentHandler`) was not modified. The correction is in the test data setup (two invoices instead of one).
 
 ---
 
@@ -136,7 +141,12 @@ The financial invariant IS preserved: total allocated = 7,000 ≤ 10,000. The ha
 
 | Test | Run 1 | Run 2 |
 |------|-------|-------|
-| `Concurrent_PaymentAllocations_CannotExceedPaymentAmount` | **Passed** (16s) | **Passed** (13s) |
+| `Concurrent_PaymentAllocations_CannotExceedPaymentAmount` (capacity) | **Passed** (16s) | **Passed** (12s) |
+| `Concurrent_IdenticalRetry_DoesNotCreateDuplicateFinancialEffects` (idempotency) | **Passed** (3s) | — |
+
+| Suite | Result |
+|-------|--------|
+| `Phase9FinancialConcurrencySqlServerTests` (16 tests) | **16/16 Passed** (24s) |
 
 ### Full Regression Suite
 
@@ -169,18 +179,15 @@ All of the following test categories remain green:
 
 No regressions were introduced. The corrections are limited to:
 1. Two scoped `.Single()` queries in test assertions (Phase 3)
-2. One test assertion updated to accept valid idempotent outcomes (Phase 9)
+2. Capacity test uses distinct InvoiceIds to bypass idempotency and prove the capacity invariant (Phase 9)
+3. Idempotency test remains strict and separate
+
+**Idempotency and capacity are separate concurrency concerns.** The idempotency test (`Concurrent_IdenticalRetry_DoesNotCreateDuplicateFinancialEffects`) proves that identical retries do not create duplicates. The capacity test (`Concurrent_PaymentAllocations_CannotExceedPaymentAmount`) proves that two distinct allocations that together exceed payment capacity cannot both succeed.
 
 ---
 
 ## 6. Commit SHA
 
-**Pending commit.** The changes are uncommitted. The parent commit is:
-
 ```
-860dc4d docs: set final SHA in report to implementation commit
+f9c331c fix: restore strict capacity test with distinct allocation identities
 ```
-
-Changes in working tree:
-- `tests/Centerix.SecurityTests/Phase3AuthorizationHttpTests.cs` — 3 lines changed (tenant-scoped `.Single()`)
-- `tests/Centerix.SecurityTests/Phase9FinancialConcurrencySqlServerTests.cs` — assertion update (idempotency-aware)

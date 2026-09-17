@@ -395,8 +395,9 @@ public class Phase9FinancialConcurrencySqlServerTests
     /// <summary>
     /// STRENGTHENED: Payment allocation race test with Barrier synchronization.
     /// Repeats multiple iterations with FRESH data per iteration to catch timing-dependent race conditions.
+    /// Uses two DIFFERENT invoices so the allocations are distinct (not idempotent),
+    /// proving the capacity guard prevents over-allocation of the shared payment.
     /// Expected: 1 success, 1 failure when allocations exceed payment amount.
-    /// Each iteration creates fresh Payment and Invoice to independently prove: 7,000 + 7,000 > 10,000
     /// </summary>
     [Fact]
     [Trait("Category", "SqlServer")]
@@ -416,9 +417,12 @@ public class Phase9FinancialConcurrencySqlServerTests
         // Repeat race test multiple iterations with FRESH data per iteration
         for (int i = 0; i < RaceIterations; i++)
         {
-            // Create fresh Payment and Invoice for each iteration
+            // Create fresh Payment and two separate Invoices for each iteration.
+            // Two different invoices ensure the allocations are distinct (not idempotent),
+            // so the capacity guard is the only thing preventing over-allocation.
             Guid paymentId;
-            Guid invoiceId;
+            Guid invoiceAId;
+            Guid invoiceBId;
 
             using (var scope = _env.Factory.Services.CreateScope())
             {
@@ -427,13 +431,17 @@ public class Phase9FinancialConcurrencySqlServerTests
                 var payment = CreatePayment(db, tenantId, 10000m, $"PAY-{tenantId}-{i}");
                 payment.Complete(DateTime.UtcNow);
                 paymentId = payment.Id;
-                var invoice = CreateInvoice(db, tenantId, 10000m, $"INV-{tenantId}-{i}");
-                invoiceId = invoice.Id;
+                var invoiceA = CreateInvoice(db, tenantId, 10000m, $"INV-A-{tenantId}-{i}");
+                invoiceAId = invoiceA.Id;
+                var invoiceB = CreateInvoice(db, tenantId, 10000m, $"INV-B-{tenantId}-{i}");
+                invoiceBId = invoiceB.Id;
                 await db.SaveChangesAsync();
             }
 
-            // Act: Two concurrent allocations of 7,000 each (total would be 14,000 > 10,000)
-            // Each operation uses its own independent DbContext instance
+            // Act: Two concurrent allocations of 7,000 each to DIFFERENT invoices
+            // against the SAME 10,000 payment. Combined = 14,000 > 10,000.
+            // Because InvoiceIds differ, the handler's idempotency check does NOT match,
+            // so the capacity guard must prevent over-allocation.
             using var cts = new CancellationTokenSource(TestTimeout);
 
             var (result1, result2) = await ExecuteConcurrentWithBarrier(
@@ -444,7 +452,7 @@ public class Phase9FinancialConcurrencySqlServerTests
                     AuthorizeTenant(scope.ServiceProvider, tenantId);
                     var handler = await CreateHandler(db);
                     return await handler.Handle(
-                        new AllocatePaymentCommand(paymentId, invoiceId, 7000m), ct);
+                        new AllocatePaymentCommand(paymentId, invoiceAId, 7000m), ct);
                 },
                 async ct =>
                 {
@@ -453,19 +461,16 @@ public class Phase9FinancialConcurrencySqlServerTests
                     AuthorizeTenant(scope.ServiceProvider, tenantId);
                     var handler = await CreateHandler(db);
                     return await handler.Handle(
-                        new AllocatePaymentCommand(paymentId, invoiceId, 7000m), ct);
+                        new AllocatePaymentCommand(paymentId, invoiceBId, 7000m), ct);
                 },
                 cts.Token);
 
-            // Assert: At least one operation succeeds. Two valid outcomes:
-            // 1. Exactly one succeeds and one fails (capacity guard wins)
-            // 2. Both succeed via idempotency — the second is treated as an identical
-            //    retry of the first allocation (same payment+invoice+amount), so no
-            //    duplicate is created and the financial invariant is preserved.
+            // Assert: Exactly one succeeds, one fails (capacity guard enforces the invariant).
+            // Both allocations are distinct (different InvoiceId), so idempotency does not apply.
             var successCount = (result1.IsSuccess ? 1 : 0) + (result2.IsSuccess ? 1 : 0);
             var failCount = 2 - successCount;
 
-            if (successCount >= 1)
+            if (successCount == 1 && failCount == 1)
             {
                 iterationsWithExpectedOutcome++;
             }
@@ -497,12 +502,10 @@ public class Phase9FinancialConcurrencySqlServerTests
             }
         }
 
-        // Assert that at least one iteration produced a valid concurrent outcome
-        // (1 success + 1 failure, or both succeed via idempotency with preserved invariants).
-        // With fresh data per iteration and Barrier synchronization, we expect multiple iterations to show the race.
+        // Assert that at least one iteration produced the deterministic 1+1 outcome.
+        // With distinct InvoiceIds, idempotency cannot mask the capacity violation.
         Assert.True(iterationsWithExpectedOutcome >= 1,
-            $"Expected at least 1 iteration with valid concurrent outcome (1 success + 1 failure, " +
-            $"or both succeed via idempotency with preserved financial invariant), " +
+            $"Expected at least 1 iteration with deterministic outcome (1 success, 1 failure), " +
             $"got {iterationsWithExpectedOutcome} out of {RaceIterations} iterations");
     }
 
