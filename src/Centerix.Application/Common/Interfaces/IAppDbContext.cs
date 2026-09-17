@@ -113,6 +113,7 @@ public interface IAppDbContext
 
     // Billing: Credits
     DbSet<TenantCredit> TenantCredits { get; }
+    DbSet<CreditApplication> CreditApplications { get; }
 
     // Platform Staff (ERD v3)
     DbSet<PlatformUser> PlatformUsers { get; }

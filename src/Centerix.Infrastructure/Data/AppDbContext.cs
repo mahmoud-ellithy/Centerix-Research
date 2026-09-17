@@ -74,6 +74,7 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     public DbSet<CustomerLedgerEntry> CustomerLedgerEntries { get; set; } = default!;
     public DbSet<Refund> Refunds { get; set; } = default!;
     public DbSet<TenantCredit> TenantCredits { get; set; } = default!;
+    public DbSet<CreditApplication> CreditApplications { get; set; } = default!;
     public DbSet<Installment> Installments { get; set; } = default!;
     public DbSet<PlatformAuditLog> PlatformAuditLogs { get; set; } = default!;
     public DbSet<TenantCRMLead> TenantCRMLeads { get; set; } = default!;

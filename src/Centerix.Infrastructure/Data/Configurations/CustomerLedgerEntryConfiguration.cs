@@ -50,6 +50,9 @@ public class CustomerLedgerEntryConfiguration : IEntityTypeConfiguration<Custome
         builder.Property(e => e.CreditId)
             .HasColumnType("uniqueidentifier");
 
+        builder.Property(e => e.CreditApplicationId)
+            .HasColumnType("uniqueidentifier");
+
         builder.Property(e => e.Description)
             .HasMaxLength(500)
             .IsRequired();
@@ -77,6 +80,9 @@ public class CustomerLedgerEntryConfiguration : IEntityTypeConfiguration<Custome
         builder.HasIndex(e => new { e.TenantId, e.PaymentId });
         builder.HasIndex(e => new { e.TenantId, e.PaymentAllocationId });
 
+        // Index for credit usage entries linked to credit applications
+        builder.HasIndex(e => new { e.TenantId, e.CreditApplicationId });
+
         // Critical: prevent duplicate settlement entries for the same allocation.
         // A PaymentSettlement ledger entry must correspond to exactly one active PaymentAllocation.
         // Filtered unique index guarantees no two active settlement rows reference the same allocation.
@@ -92,5 +98,13 @@ public class CustomerLedgerEntryConfiguration : IEntityTypeConfiguration<Custome
             .HasFilter("[EntryType] = 'RefundSettlement' AND [RefundId] IS NOT NULL")
             .IsUnique()
             .HasDatabaseName("UX_CustomerLedgerEntries_SettlementByRefund");
+
+        // Prevent duplicate credit usage entries: each CreditUsage ledger entry must
+        // correspond to exactly one credit application. Filtered unique index on
+        // CreditApplicationId guarantees no two usage rows reference the same application.
+        builder.HasIndex(e => new { e.TenantId, e.CreditApplicationId, e.EntryType })
+            .HasFilter("[EntryType] = 'CreditUsage' AND [CreditApplicationId] IS NOT NULL")
+            .IsUnique()
+            .HasDatabaseName("UX_CustomerLedgerEntries_UsageByCreditApplication");
     }
 }

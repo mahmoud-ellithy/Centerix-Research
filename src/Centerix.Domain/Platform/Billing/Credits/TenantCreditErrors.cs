@@ -13,6 +13,12 @@ public static class TenantCreditErrors
     public static Error NotAvailable =>
         Error.Conflict("TenantCredit.NotAvailable", "Credit is not available for this operation");
 
+    public static Error InsufficientRemaining =>
+        Error.Validation("TenantCredit.InsufficientRemaining", "Credit remaining amount is insufficient for this application.");
+
     public static Error NotFound =>
         Error.NotFound("TenantCredit.NotFound", "Tenant credit was not found");
+
+    public static Error CrossTenant =>
+        Error.Forbidden("TenantCredit.CrossTenant", "Cannot apply a credit from a different tenant to this invoice.");
 }

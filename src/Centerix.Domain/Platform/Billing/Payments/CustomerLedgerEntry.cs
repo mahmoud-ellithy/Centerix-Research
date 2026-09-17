@@ -43,6 +43,12 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
     public Guid? PaymentAllocationId { get; private set; }
     public Guid? RefundId { get; private set; }
     public Guid? CreditId { get; private set; }
+
+    /// <summary>
+    /// The credit application that caused this usage entry. Only populated for
+    /// <see cref="LedgerEntryType.CreditUsage"/> entries.
+    /// </summary>
+    public Guid? CreditApplicationId { get; private set; }
     public string Description { get; private set; } = default!;
     public DateTime RecordedAtUtc { get; private set; }
 
@@ -62,6 +68,7 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
         Guid? paymentAllocationId,
         Guid? refundId,
         Guid? creditId,
+        Guid? creditApplicationId,
         string description,
         DateTime recordedAtUtc)
         : base(id)
@@ -75,6 +82,7 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
         PaymentAllocationId = paymentAllocationId;
         RefundId = refundId;
         CreditId = creditId;
+        CreditApplicationId = creditApplicationId;
         Description = description;
         RecordedAtUtc = recordedAtUtc;
     }
@@ -103,6 +111,7 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
             currencyCode,
             newBalance,
             invoiceId,
+            null,
             null,
             null,
             null,
@@ -142,6 +151,7 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
             paymentAllocationId,
             null,
             null,
+            null,
             description ?? $"Payment settlement: {allocatedAmount} {currencyCode}",
             recordedAtUtc);
     }
@@ -174,7 +184,44 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
             null,
             null,
             creditId,
+            null,
             description ?? $"Credit creation: {creditAmount} {currencyCode}",
+            recordedAtUtc);
+    }
+
+    /// <summary>
+    /// Creates a ledger entry for credit usage (applying credit to an invoice).
+    /// This decreases the customer balance and is distinct from CreditCreation.
+    /// </summary>
+    public static Result<CustomerLedgerEntry> CreateCreditUsage(
+        Guid id,
+        Guid creditId,
+        Guid creditApplicationId,
+        Guid invoiceId,
+        decimal usedAmount,
+        string currencyCode,
+        decimal previousBalance,
+        DateTime recordedAtUtc,
+        string? description = null)
+    {
+        if (usedAmount <= 0)
+            return PaymentErrors.AmountMustBePositive;
+
+        var newBalance = previousBalance - usedAmount;
+
+        return new CustomerLedgerEntry(
+            id,
+            LedgerEntryType.CreditUsage,
+            usedAmount,
+            currencyCode,
+            newBalance,
+            invoiceId,
+            null,
+            null,
+            null,
+            creditId,
+            creditApplicationId,
+            description ?? $"Credit applied to invoice: {usedAmount} {currencyCode}",
             recordedAtUtc);
     }
 
@@ -209,6 +256,7 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
             null,
             refundId,
             null,
+            null,
             description ?? $"Refund settlement: {refundAmount} {currencyCode}",
             recordedAtUtc);
     }
@@ -229,6 +277,7 @@ public class CustomerLedgerEntry : AuditableEntity<Guid>
     {
         LedgerEntryType.PaymentSettlement => true,
         LedgerEntryType.CreditCreation => true,
+        LedgerEntryType.CreditUsage => true,
         LedgerEntryType.RefundSettlement => true,
         _ => false
     };

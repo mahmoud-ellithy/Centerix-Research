@@ -7,11 +7,10 @@ using Centerix.Domain.Platform.Billing.Credits.Enums;
 public class TenantCredit : AuditableEntity<Guid>
 {
     public decimal Amount { get; private set; }
+    public decimal RemainingAmount { get; private set; }
     public CreditSourceType SourceType { get; private set; }
     public Guid? SourceId { get; private set; }
     public CreditStatus Status { get; private set; }
-    public Guid? AppliedToInvoiceId { get; private set; }
-    public Guid? AppliedToInvoiceLineId { get; private set; }
     public Guid? ReversalOfCreditId { get; private set; }
 
     // Optimistic-concurrency token (SQL Server rowversion, store-generated)
@@ -28,6 +27,7 @@ public class TenantCredit : AuditableEntity<Guid>
         : base(id)
     {
         Amount = amount;
+        RemainingAmount = amount;
         SourceType = sourceType;
         SourceId = sourceId;
         Status = status;
@@ -54,7 +54,7 @@ public class TenantCredit : AuditableEntity<Guid>
             return TenantCreditErrors.NotAvailable;
 
         Status = CreditStatus.Applied;
-        AppliedToInvoiceLineId = invoiceLineId;
+        RemainingAmount = 0;
 
         return Result.Updated;
     }
@@ -65,7 +65,31 @@ public class TenantCredit : AuditableEntity<Guid>
             return TenantCreditErrors.NotAvailable;
 
         Status = CreditStatus.Applied;
-        AppliedToInvoiceId = invoiceId;
+        RemainingAmount = 0;
+
+        return Result.Updated;
+    }
+
+    /// <summary>
+    /// Consumes a portion of the credit. If the entire remaining amount is consumed,
+    /// transitions to Applied. If partial, transitions to PartiallyApplied.
+    /// </summary>
+    public Result<Updated> ConsumeAmount(decimal amount)
+    {
+        if (Status != CreditStatus.Available && Status != CreditStatus.PartiallyApplied)
+            return TenantCreditErrors.NotAvailable;
+
+        if (amount <= 0)
+            return TenantCreditErrors.InvalidAmount;
+
+        if (amount > RemainingAmount)
+            return TenantCreditErrors.InsufficientRemaining;
+
+        RemainingAmount -= amount;
+
+        Status = RemainingAmount == 0
+            ? CreditStatus.Applied
+            : CreditStatus.PartiallyApplied;
 
         return Result.Updated;
     }

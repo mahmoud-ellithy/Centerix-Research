@@ -2,6 +2,7 @@ namespace Centerix.Domain.Platform.Billing.Invoicing;
 
 using Centerix.Domain.Common;
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Billing.Credits;
 using Centerix.Domain.Platform.Billing.Invoicing.Enums;
 using Centerix.Domain.Platform.Billing.Invoicing.Events;
 using Centerix.Domain.Platform.Billing.Payments;
@@ -35,6 +36,9 @@ public class Invoice : AuditableEntity<Guid>
 
     private readonly List<PaymentAllocation> _paymentAllocations = [];
     public IReadOnlyList<PaymentAllocation> PaymentAllocations => _paymentAllocations.AsReadOnly();
+
+    private readonly List<CreditApplication> _creditApplications = [];
+    public IReadOnlyList<CreditApplication> CreditApplications => _creditApplications.AsReadOnly();
 
     private Invoice() { }
 
@@ -109,22 +113,22 @@ public class Invoice : AuditableEntity<Guid>
     }
 
     /// <summary>
-    /// Updates the invoice status based on current allocations.
-    /// Called after payment allocations change.
+    /// Updates the invoice status based on current payment allocations and credit applications.
+    /// Called after payment allocations or credit applications change.
     /// </summary>
     public Result<Updated> UpdatePaymentStatus()
     {
         if (Status != InvoiceStatus.Issued && Status != InvoiceStatus.Sent && Status != InvoiceStatus.PartiallyPaid)
             return InvoiceErrors.CannotPayNotIssued;
 
-        var paidAmount = GetPaidAmount();
+        var totalSettled = GetPaidAmount() + GetAppliedCreditAmount();
 
-        if (paidAmount >= TotalAmount)
+        if (totalSettled >= TotalAmount)
         {
             Status = InvoiceStatus.Paid;
             AddDomainEvent(new InvoicePaidEvent(Id));
         }
-        else if (paidAmount > 0)
+        else if (totalSettled > 0)
         {
             Status = InvoiceStatus.PartiallyPaid;
         }
@@ -134,7 +138,7 @@ public class Invoice : AuditableEntity<Guid>
 
     /// <summary>
     /// Gets the total amount paid through completed payment allocations.
-    /// This is the source of truth for paid amount.
+    /// This is the source of truth for payment-based settlement.
     /// </summary>
     public decimal GetPaidAmount()
     {
@@ -144,12 +148,21 @@ public class Invoice : AuditableEntity<Guid>
     }
 
     /// <summary>
-    /// Gets the remaining amount to be paid.
-    /// Calculated as TotalAmount - PaidAmount.
+    /// Gets the total amount settled through credit applications.
+    /// </summary>
+    public decimal GetAppliedCreditAmount()
+    {
+        return _creditApplications
+            .Sum(a => a.Amount);
+    }
+
+    /// <summary>
+    /// Gets the remaining amount to be settled.
+    /// Calculated as TotalAmount - PaidAmount - AppliedCreditAmount.
     /// </summary>
     public decimal GetRemainingAmount()
     {
-        return TotalAmount - GetPaidAmount();
+        return TotalAmount - GetPaidAmount() - GetAppliedCreditAmount();
     }
 
     public Result<Updated> Cancel()

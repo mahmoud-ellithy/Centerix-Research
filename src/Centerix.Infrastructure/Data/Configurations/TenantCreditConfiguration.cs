@@ -21,6 +21,9 @@ public class TenantCreditConfiguration : IEntityTypeConfiguration<TenantCredit>
         builder.Property(tc => tc.Amount)
             .HasPrecision(10, 2);
 
+        builder.Property(tc => tc.RemainingAmount)
+            .HasPrecision(10, 2);
+
         builder.Property(tc => tc.SourceType)
             .HasConversion<string>()
             .HasMaxLength(20)
@@ -33,12 +36,6 @@ public class TenantCreditConfiguration : IEntityTypeConfiguration<TenantCredit>
             .HasConversion<string>()
             .HasMaxLength(20)
             .IsRequired();
-
-        builder.Property(tc => tc.AppliedToInvoiceLineId)
-            .HasColumnType("uniqueidentifier");
-
-        builder.Property(tc => tc.AppliedToInvoiceId)
-            .HasColumnType("uniqueidentifier");
 
         builder.Property(tc => tc.ReversalOfCreditId)
             .HasColumnType("uniqueidentifier");

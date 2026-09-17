@@ -461,7 +461,7 @@ public class Phase10InvoiceFinancialIntegrityTests
         var updatedCredit = await db.TenantCredits.FindAsync(credit.Id);
         Assert.NotNull(updatedCredit);
         Assert.Equal(CreditStatus.Applied, updatedCredit.Status);
-        Assert.Equal(invoice.Id, updatedCredit.AppliedToInvoiceId);
+        Assert.Equal(0m, updatedCredit.RemainingAmount);
     }
 
     [Fact]
