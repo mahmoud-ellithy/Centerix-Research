@@ -1,12 +1,12 @@
-# Task 9.5 — Subscription Natural Expiration & Lifecycle Completion
+# Task 9.5 / 9.5.1 — Subscription Natural Expiration & Lifecycle Completion
 
 ## Task 9.5 Status: COMPLETE
+## Task 9.5.1 Status: COMPLETE
 
 ### Commit SHA:
 ```
-100b5633b9dc0f99a0cb3d7669b6ab3f276aa429
+efee5700fed5b848ac34b56918b2961b2b93bde6
 ```
-(Working tree — uncommitted changes at time of report)
 
 ### Build:
 **PASS** — 0 errors, only pre-existing StyleCop warnings.
@@ -26,12 +26,13 @@
 | File | Purpose |
 |------|---------|
 | `src/Centerix.Domain/Platform/Subscriptions/Events/TenantPlanExpiredEvent.cs` | Domain event emitted on natural expiration |
-| `tests/Centerix.SecurityTests/Phase9_5SubscriptionNaturalExpirationTests.cs` | 40 tests covering all Task 9.5 requirements |
+| `tests/Centerix.SecurityTests/Phase9_5SubscriptionNaturalExpirationTests.cs` | 40 InMemory tests covering all Task 9.5 requirements |
+| `tests/Centerix.SecurityTests/Phase9_5_1NaturalExpirationConcurrencySqlServerTests.cs` | 11 SQL Server concurrency tests for Task 9.5.1 |
 
 ---
 
-### Task 9.5 Tests:
-**40/40 PASS** (InMemory)
+### Task 9.5 Tests (InMemory):
+**40/40 PASS**
 
 | # | Test | Result |
 |---|------|--------|
@@ -78,18 +79,37 @@
 
 ---
 
+### Task 9.5.1 SQL Server Concurrency Tests:
+**11/11 PASS** (REAL SQL Server via Testcontainers)
+
+| # | Test | Result |
+|---|------|--------|
+| 1 | `ConcurrentExpiration_Active_EndReached_BecomesExpired` | PASS |
+| 2 | `ConcurrentExpiration_PastDue_EndReached_BecomesExpired` | PASS |
+| 3 | `ConcurrentExpiration_Suspended_EndReached_BecomesExpired` | PASS |
+| 4 | `ConcurrentExpiration_FinancialIntegrity_NoSideEffects` | PASS |
+| 5 | `ConcurrentExpiration_DomainEvent_ExactlyOneExpirationTransition` | PASS |
+| 6 | `SequentialReconciliation_Idempotent_ActiveToExpired` | PASS |
+| 7 | `ConcurrentExpiration_FinalStateMatchesSequential` | PASS |
+| 8 | `ConcurrentExpiration_IndependentDbContexts_NoStaleTracker` | PASS |
+| 9 | `ConcurrentExpiration_Cancelled_RemainsCancelled` | PASS |
+| 10 | `ConcurrentExpiration_Active_NotYetEnded_RemainsActive` | PASS |
+| 11 | `ConcurrentExpiration_TenantIsolation_ADoesNotAffectB` | PASS |
+
+---
+
 ### Subscription Tests (Phase 9.1 / 9.1.1 / 9.1.2 / 9.2):
 **All PASS** — No regressions in existing state machine, reconciliation, installment ownership, or finalization tests.
 
 ---
 
 ### Renewal Tests (Phase 9.3 / 9.3.1 / 9.3.3):
-**All PASS** — Renewal creates new subscription; old subscription lifecycle unaffected by renewal. SQL Server concurrency tests pass.
+**All PASS** — Renewal creates new subscription; old subscription lifecycle unaffected by renewal.
 
 ---
 
 ### Cancellation Tests (Phase 9.4 / 9.4.2):
-**All PASS** — Cancellation refund engine unaffected. SQL Server concurrency tests pass.
+**All PASS** — Cancellation refund engine unaffected.
 
 ---
 
@@ -98,8 +118,32 @@
 
 ---
 
-### SQL Server Tests:
-**All PASS** — SQL Server renewal and cancellation concurrency tests pass. No new SQL Server tests required for Task 9.5 since the core change is a domain guard condition extension, not a new schema or query pattern.
+### SQL Server Concurrency Evidence:
+
+```
+SQL Server Natural Expiration Concurrency: PASS
+Testcontainers: PASS (local SQL Server)
+Concurrent Active: PASS
+Concurrent PastDue: PASS
+Concurrent Suspended: PASS
+```
+
+**Concurrency Strategy:**
+- Both concurrent reconciliation operations create independent `AppDbContext` instances via separate DI scopes
+- Both load the same `TenantPlan` row (with identical `RowVersion`) via `IgnoreQueryFilters()`
+- Both call `MarkExpired(now)` → set `Status = Expired` and emit `TenantPlanExpiredEvent`
+- `TenantPlan` has `RowVersion` (SQL Server `rowversion`) optimistic concurrency configured
+- First `SaveChangesAsync` succeeds (1 row affected, RowVersion incremented)
+- Second `SaveChangesAsync` encounters `DbUpdateConcurrencyException` (RowVersion mismatch)
+- Second operation catches the exception gracefully — no retry loop is added
+- Final state: `Expired` with no duplicate side effects
+- This matches the established repository pattern (same as cancellation concurrency tests)
+
+**ChangeTracker Safety:**
+- Each concurrent operation creates its own `AppDbContext` via `_env.Factory.Services.CreateScope()`
+- No shared `ChangeTracker` between operations
+- No `ChangeTracker.Clear()` is needed because each scope creates a fresh context
+- The `SubscriptionReconciliationService.DetachEntity()` helper detaches the entity after saving, preventing stale tracked state within a single scope
 
 ---
 
@@ -118,9 +162,8 @@ EffectiveEndsAtUtc <= CurrentUtc
 
 ### Refund Behavior:
 **No refund is created by natural expiration.** The `MarkExpired` method does NOT invoke `IRefundCalculationService`, `RefundCalculationService`, `Refund.Create`, or any refund workflow. This is verified by:
-- `Expiration_DoesNotCreateRefund`
-- `PastDue_Expiration_DoesNotCreateRefund`
-- `Expiration_PaidInstallments_RemainPaid` (no financial side effects)
+- InMemory: `Expiration_DoesNotCreateRefund`, `PastDue_Expiration_DoesNotCreateRefund`, `Expiration_PaidInstallments_RemainPaid`
+- SQL Server: `ConcurrentExpiration_FinancialIntegrity_NoSideEffects` — Refund count, Payment count, PaymentAllocation count, Installment count, CustomerLedgerEntry count all unchanged after concurrent expiration
 
 ---
 
@@ -137,23 +180,15 @@ EffectiveEndsAtUtc <= CurrentUtc
 - Tenant lifecycle is independent from subscription lifecycle
 - `Tenant.ValidUpTo` is NOT modified by natural expiration (only cancellation sets it)
 - Multiple subscriptions per tenant: old expires independently; new retains its own lifecycle
-- Cross-tenant isolation verified: reconciling tenant A does not affect tenant B
-
----
-
-### Concurrency:
-- **InMemory**: Repeated sequential reconciliation (5 iterations) converges to `Expired` with no duplicate side effects, no duplicate refunds, and single `TenantPlan` row
-- **Idempotency**: `MarkExpired(Expired)` returns success without creating duplicate domain events
-- True concurrent reconciliation on InMemory shares the same in-memory store; domain-level idempotency guards prevent duplicate transitions
+- Cross-tenant isolation verified: reconciling tenant A does not affect tenant B (InMemory + SQL Server)
 
 ---
 
 ### Migration:
-**None** — No schema changes required. The change extends an existing guard condition and adds a domain event; no new columns, tables, or indexes.
+**None required** — No schema changes required. The change extends an existing guard condition and adds a domain event; no new columns, tables, or indexes.
 
 ---
 
 ### Known Limitations:
-1. **SQL Server concurrency test for expiration**: Not added because the core change is a domain guard condition extension. The existing `Sql05` rowversion-based concurrency pattern already protects against concurrent status mutations.
-2. **Domain event handler**: `TenantPlanExpiredEvent` is emitted but no handler is registered yet. This is consistent with existing pattern — `TenantPlanRenewedEvent` and `TenantPlanCancelledEvent` were added in earlier tasks without handlers.
-3. **`SubscriptionStateService` simplified**: Removed the redundant inline `MarkExpired` call that existed before (the reconciliation service now handles all states). This is safe because `GetCurrentAsync` always triggers `ReconcileAsync` first, which handles expiration for Active/PastDue/Suspended.
+1. **Domain event handler**: `TenantPlanExpiredEvent` is emitted but no handler is registered yet. This is consistent with existing pattern — `TenantPlanRenewedEvent` and `TenantPlanCancelledEvent` were added in earlier tasks without handlers.
+2. **`SubscriptionStateService` simplified**: Removed the redundant inline `MarkExpired` call that existed before (the reconciliation service now handles all states). This is safe because `GetCurrentAsync` always triggers `ReconcileAsync` first, which handles expiration for Active/PastDue/Suspended.
