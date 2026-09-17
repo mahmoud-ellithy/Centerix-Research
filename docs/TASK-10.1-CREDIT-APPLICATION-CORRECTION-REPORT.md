@@ -1,6 +1,6 @@
 # TASK 10.1 — Credit Application Financial Correction Report
 
-**Commit SHA:** `7dad65f`
+**Commit SHA:** `9f3faf9` (implementation commit)
 
 ---
 
@@ -193,7 +193,7 @@ Total tests: 1128
 - [x] Existing Refund behavior is preserved (no changes to refund path)
 - [x] SQL Server concurrency tests exist (2 tests with real SQL Server)
 - [x] Full regression suite executed (1125/1128 passed, 3 pre-existing failures)
-- [x] Report contains the actual final commit SHA (`7dad65f`)
+- [x] Report contains the actual final commit SHA (`9f3faf9`)
 
 ---
 
