@@ -17,6 +17,7 @@ using Microsoft.Extensions.Logging;
 public class SubscriptionStateService(
     IAppDbContext dbContext,
     ISubscriptionReconciliationService reconciliationService,
+    TimeProvider timeProvider,
     ILogger<SubscriptionStateService> logger) : ISubscriptionStateService
 {
     public async Task<SubscriptionStateInfo> GetCurrentAsync(string tenantId, CancellationToken cancellationToken = default)
@@ -24,7 +25,8 @@ public class SubscriptionStateService(
         if (string.IsNullOrWhiteSpace(tenantId))
             return new SubscriptionStateInfo(null, null, null, false);
 
-        // Trigger reconciliation for lazy convergence of financial state (PastDue/Suspended).
+        // Trigger reconciliation for lazy convergence of financial state (PastDue/Suspended)
+        // and natural expiration (Active/PastDue/Suspended → Expired).
         // This is idempotent — running it multiple times produces the same result.
         await reconciliationService.ReconcileAsync(tenantId, cancellationToken);
 
@@ -40,30 +42,9 @@ public class SubscriptionStateService(
         if (subscription is null)
             return new SubscriptionStateInfo(null, null, null, false);
 
-        var now = DateTime.UtcNow;
+        var now = timeProvider.GetUtcNow().UtcDateTime;
         var isActiveNow =
             subscription.Status == SubscriptionStatus.Active && now < subscription.EffectiveEndsAtUtc;
-
-        if (subscription.Status == SubscriptionStatus.Active && !isActiveNow)
-        {
-            try
-            {
-                subscription.MarkExpired(now);
-                await dbContext.SaveChangesAsync(cancellationToken);
-                // Detach the expired entity so subsequent SaveChanges calls in the same scope
-                // (e.g. the handler persisting its own aggregate) don't attempt a redundant
-                // update against the already-persisted row on the InMemory test provider.
-                if (dbContext is Microsoft.EntityFrameworkCore.DbContext concrete)
-                    concrete.Entry(subscription).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex,
-                    "Failed to persist lazy expiration for subscription {SubscriptionId}: " +
-                    "denial was already decided by date comparison, but persistence failure is now observable",
-                    subscription.Id);
-            }
-        }
 
         return new SubscriptionStateInfo(
             subscription.Id,

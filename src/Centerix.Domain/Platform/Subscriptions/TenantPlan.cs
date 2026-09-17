@@ -277,19 +277,25 @@ public class TenantPlan : AuditableEntity<Guid>
     /// <summary>
     /// Persists lazy expiration. Access decisions compare <see cref="EffectiveEndsAtUtc"/>
     /// directly and never depend on this having been called.
+    /// Supports natural expiration from Active, PastDue, and Suspended states.
+    /// Cancelled and Pending subscriptions are never expired — they are terminal or
+    /// not-yet-activated states respectively.
     /// </summary>
     public Result<Updated> MarkExpired(DateTime utcNow)
     {
         if (Status == SubscriptionStatus.Expired)
             return Result.Updated;
 
-        if (Status != SubscriptionStatus.Active)
-            return TenantPlanErrors.NotActive;
+        if (Status is not (SubscriptionStatus.Active or SubscriptionStatus.PastDue or SubscriptionStatus.Suspended))
+            return TenantPlanErrors.InvalidStateTransition(Status, "expire");
 
         if (utcNow < EffectiveEndsAtUtc)
             return TenantPlanErrors.NotYetExpired;
 
         Status = SubscriptionStatus.Expired;
+
+        AddDomainEvent(new TenantPlanExpiredEvent(Id, PlanId));
+
         return Result.Updated;
     }
 

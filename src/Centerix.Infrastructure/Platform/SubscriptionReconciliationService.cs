@@ -41,8 +41,12 @@ public class SubscriptionReconciliationService(
         if (subscription.Status == SubscriptionStatus.Pending)
             return;
 
-        // Lazy expiration: Active subscription past its effective end date
-        if (subscription.Status == SubscriptionStatus.Active && now >= subscription.EffectiveEndsAtUtc)
+        // Natural expiration: any non-terminal, non-pending subscription past its effective end date
+        // This covers Active, PastDue, and Suspended → Expired.
+        // Cancelled is already terminal; Pending is not yet activated.
+        // Expiration is a lifecycle transition — NO refund calculation is invoked.
+        if (subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.PastDue or SubscriptionStatus.Suspended
+            && now >= subscription.EffectiveEndsAtUtc)
         {
             var expiryResult = subscription.MarkExpired(now);
             if (!expiryResult.IsSuccess)
