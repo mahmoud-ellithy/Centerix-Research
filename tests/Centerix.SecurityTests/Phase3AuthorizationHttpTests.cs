@@ -625,7 +625,7 @@ public class Phase3AuthorizationHttpTests : IClassFixture<TestWebApplicationFact
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var soft = await db.Students.IgnoreQueryFilters().SingleAsync();
+            var soft = await db.Students.IgnoreQueryFilters().SingleAsync(x => x.TenantId == s.TenantId.ToString());
             Assert.True(soft.IsDeleted());
             Assert.Equal(StudentStatus.Inactive, soft.Status); // status flipped to Inactive
         }
@@ -664,7 +664,7 @@ public class Phase3AuthorizationHttpTests : IClassFixture<TestWebApplicationFact
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            branchAId = db.Branches.IgnoreQueryFilters().Single(b => b.Name == "A-Branch").Id;
+            branchAId = db.Branches.IgnoreQueryFilters().Single(b => b.Name == "A-Branch" && b.TenantId == sA.TenantId.ToString()).Id;
         }
 
         // Tenant B also has its own stage/year so only the branch is the cross-tenant ref.
@@ -1203,7 +1203,7 @@ public class Phase3AuthorizationHttpTests : IClassFixture<TestWebApplicationFact
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            branchAId = db.Branches.IgnoreQueryFilters().Single(b => b.Name == "A-Branch").Id;
+            branchAId = db.Branches.IgnoreQueryFilters().Single(b => b.Name == "A-Branch" && b.TenantId == sA.TenantId.ToString()).Id;
         }
 
         // Tenant B creates its own branch, stage, and year.
