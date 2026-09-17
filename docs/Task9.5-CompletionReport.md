@@ -1,11 +1,12 @@
-# Task 9.5 / 9.5.1 — Subscription Natural Expiration & Lifecycle Completion
+# Task 9.5 / 9.5.1 / 9.5.2 — Subscription Natural Expiration & Lifecycle Completion
 
 ## Task 9.5 Status: COMPLETE
 ## Task 9.5.1 Status: COMPLETE
+## Task 9.5.2 Status: COMPLETE
 
-### Commit SHA:
+### Commit SHA (Task 9.5.2):
 ```
-92a2404f30730001489fe5ac4257b3352cdd29da
+eb8b3b5
 ```
 
 ### Build:
@@ -79,7 +80,7 @@
 
 ---
 
-### Task 9.5.1 SQL Server Concurrency Tests:
+### Task 9.5.1 SQL Server Concurrency Tests (Hardened in Task 9.5.2):
 **11/11 PASS** (REAL SQL Server via Testcontainers)
 
 | # | Test | Result |
@@ -90,11 +91,34 @@
 | 4 | `ConcurrentExpiration_FinancialIntegrity_NoSideEffects` | PASS |
 | 5 | `ConcurrentExpiration_DomainEvent_ExactlyOneExpirationTransition` | PASS |
 | 6 | `SequentialReconciliation_Idempotent_ActiveToExpired` | PASS |
-| 7 | `ConcurrentExpiration_FinalStateMatchesSequential` | PASS |
+| 7 | `ConcurrentExpiration_ConvergenceAfterRace` | PASS |
 | 8 | `ConcurrentExpiration_IndependentDbContexts_NoStaleTracker` | PASS |
 | 9 | `ConcurrentExpiration_Cancelled_RemainsCancelled` | PASS |
 | 10 | `ConcurrentExpiration_Active_NotYetEnded_RemainsActive` | PASS |
 | 11 | `ConcurrentExpiration_TenantIsolation_ADoesNotAffectB` | PASS |
+
+---
+
+### Task 9.5.2 — Concurrency Assertion Hardening
+
+**Changes:** Tests only (no production code changes).
+
+**Problem fixed:** Task 9.5.1 tests caught `DbUpdateConcurrencyException` AND `InvalidOperationException` and silently returned, treating any exception as success. This was too permissive.
+
+**Solution:**
+- Added `ConcurrencyOperationOutcome` enum: `Succeeded`, `ConcurrencyConflict`, `UnexpectedFailure`
+- Added `ConcurrencyOperationResult` class capturing outcome and exception
+- Changed `ExecuteConcurrentReconciliations` to return structured results instead of swallowing exceptions
+- Added `AssertConcurrentExpirationOutcome` helper asserting: exactly 1 success + exactly 1 concurrency conflict + 0 unexpected failures
+- Replaced `ConcurrentExpiration_FinalStateMatchesSequential` with `ConcurrentExpiration_ConvergenceAfterRace` which also runs a post-race reconciliation to prove convergence
+
+**Concurrency assertion pattern for every concurrent expiration test:**
+```
+SuccessCount == 1
+ConcurrencyConflictCount == 1
+UnexpectedFailureCount == 0
+FinalStatus == Expired
+```
 
 ---
 

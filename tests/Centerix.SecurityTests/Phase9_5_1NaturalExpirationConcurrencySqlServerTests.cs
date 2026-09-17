@@ -16,15 +16,14 @@ using Xunit;
 namespace Centerix.SecurityTests;
 
 /// <summary>
-/// Task 9.5.1 — SQL Server concurrency tests for natural subscription expiration.
+/// Task 9.5.1 / 9.5.2 — SQL Server concurrency tests for natural subscription expiration.
 /// Runs against REAL SQL Server (Testcontainers/local) to verify:
-/// 1. Concurrent reconciliation of Active subscription past end date → exactly one expiration
-/// 2. Concurrent reconciliation of PastDue subscription past end date → exactly one expiration
-/// 3. Concurrent reconciliation of Suspended subscription past end date → exactly one expiration
+/// 1. Concurrent reconciliation produces exactly one success and one expected concurrency conflict
+/// 2. No unexpected exceptions during concurrent expiration
+/// 3. Final persisted state is Expired
 /// 4. No duplicate financial side effects under concurrency
-/// 5. No duplicate refunds created
-/// 6. Sequential idempotency remains valid on SQL Server
-/// 7. Domain event (TenantPlanExpiredEvent) produced exactly once
+/// 5. Sequential and concurrent idempotency
+/// 6. Tenant isolation under concurrent operations
 ///
 /// Concurrency Strategy:
 /// - Uses System.Threading.Barrier to ensure both reconciliation operations reach the
@@ -34,8 +33,8 @@ namespace Centerix.SecurityTests;
 /// - Under SQL Server, the second SaveChangesAsync will throw DbUpdateConcurrencyException
 ///   because the RowVersion has changed after the first save.
 /// - The reconciliation service does NOT retry on concurrency failure — the exception
-///   propagates to the caller. This is the established pattern.
-/// - Final state must be Expired with no duplicate side effects.
+///   propagates to the caller.
+/// - The test asserts exactly ONE success and ONE expected concurrency conflict.
 /// </summary>
 [Collection("SqlServerIntegration")]
 public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
@@ -45,6 +44,34 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
     private static readonly TimeSpan BarrierTimeout = TimeSpan.FromSeconds(15);
 
     public Phase9_5_1NaturalExpirationConcurrencySqlServerTests(SqlServerIntegrationFactory env) => _env = env;
+
+    // ==================================================================
+    // Concurrency result model
+    // ==================================================================
+
+    /// <summary>
+    /// Captures the actual outcome of a concurrent reconciliation operation.
+    /// </summary>
+    private enum ConcurrencyOperationOutcome
+    {
+        /// <summary>Reconciliation completed and persisted successfully.</summary>
+        Succeeded,
+
+        /// <summary>
+        /// SaveChangesAsync threw DbUpdateConcurrencyException due to RowVersion mismatch.
+        /// This is the EXPECTED concurrency conflict for concurrent expiration.
+        /// </summary>
+        ConcurrencyConflict,
+
+        /// <summary>An unexpected exception occurred — test must fail.</summary>
+        UnexpectedFailure
+    }
+
+    private sealed class ConcurrencyOperationResult
+    {
+        public ConcurrencyOperationOutcome Outcome { get; init; }
+        public Exception? Exception { get; init; }
+    }
 
     // ==================================================================
     // Helpers
@@ -117,51 +144,52 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
     }
 
     /// <summary>
-    /// Executes two concurrent reconciliation operations against the same tenant/subscription
-    /// using Barrier synchronization and independent DbContext instances.
+    /// Executes a single reconciliation operation and captures its outcome.
+    /// Does NOT swallow exceptions — returns a structured result indicating
+    /// whether the operation succeeded, hit an expected concurrency conflict,
+    /// or experienced an unexpected failure.
     /// </summary>
-    private static async Task ExecuteConcurrentReconciliations(
+    private static async Task<ConcurrencyOperationResult> RunSingleReconciliation(
         SqlServerIntegrationFactory env,
         string tenantId,
-        Func<Task, Task, Task> assertFn)
+        Barrier barrier)
+    {
+        using var scope = env.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        AuthorizeTenant(scope.ServiceProvider, tenantId);
+        var service = CreateReconciliationService(db);
+
+        barrier.SignalAndWait(BarrierTimeout);
+
+        try
+        {
+            await service.ReconcileAsync(tenantId, CancellationToken.None);
+            return new ConcurrencyOperationResult { Outcome = ConcurrencyOperationOutcome.Succeeded };
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            // Expected: RowVersion mismatch — the other operation saved first.
+            return new ConcurrencyOperationResult { Outcome = ConcurrencyOperationOutcome.ConcurrencyConflict, Exception = ex };
+        }
+        catch (Exception ex)
+        {
+            // Any other exception is unexpected — the test must fail.
+            return new ConcurrencyOperationResult { Outcome = ConcurrencyOperationOutcome.UnexpectedFailure, Exception = ex };
+        }
+    }
+
+    /// <summary>
+    /// Executes two concurrent reconciliation operations against the same tenant
+    /// and returns both results for strict assertion.
+    /// </summary>
+    private static async Task<(ConcurrencyOperationResult Result1, ConcurrencyOperationResult Result2)> ExecuteConcurrentReconciliations(
+        SqlServerIntegrationFactory env,
+        string tenantId)
     {
         using var barrier = new Barrier(2);
-        var tcs1 = new TaskCompletionSource<bool>();
-        var tcs2 = new TaskCompletionSource<bool>();
 
-        async Task ExecuteReconciliation()
-        {
-            using var scope = env.Factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            AuthorizeTenant(scope.ServiceProvider, tenantId);
-            var service = CreateReconciliationService(db);
-
-            barrier.SignalAndWait(BarrierTimeout);
-            try
-            {
-                await service.ReconcileAsync(tenantId, CancellationToken.None);
-                return;
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                return;
-            }
-            catch (InvalidOperationException)
-            {
-                return;
-            }
-        }
-
-        var task1 = Task.Run(async () =>
-        {
-            try { await ExecuteReconciliation(); tcs1.TrySetResult(true); }
-            catch (Exception ex) { tcs1.TrySetException(ex); }
-        });
-        var task2 = Task.Run(async () =>
-        {
-            try { await ExecuteReconciliation(); tcs2.TrySetResult(true); }
-            catch (Exception ex) { tcs2.TrySetException(ex); }
-        });
+        var task1 = Task.Run(() => RunSingleReconciliation(env, tenantId, barrier));
+        var task2 = Task.Run(() => RunSingleReconciliation(env, tenantId, barrier));
 
         using var cts = new CancellationTokenSource(TestTimeout);
         try
@@ -173,7 +201,67 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
             throw new TimeoutException($"Concurrent reconciliations did not complete within {TestTimeout.TotalSeconds}s");
         }
 
-        await assertFn(tcs1.Task, tcs2.Task);
+        return (await task1, await task2);
+    }
+
+    /// <summary>
+    /// Asserts the standard concurrent expiration pattern:
+    /// exactly ONE success, exactly ONE expected concurrency conflict, ZERO unexpected failures.
+    /// </summary>
+    private static void AssertConcurrentExpirationOutcome(
+        ConcurrencyOperationResult result1,
+        ConcurrencyOperationResult result2,
+        string scenario)
+    {
+        var successCount = (result1.Outcome == ConcurrencyOperationOutcome.Succeeded ? 1 : 0)
+                         + (result2.Outcome == ConcurrencyOperationOutcome.Succeeded ? 1 : 0);
+        var conflictCount = (result1.Outcome == ConcurrencyOperationOutcome.ConcurrencyConflict ? 1 : 0)
+                          + (result2.Outcome == ConcurrencyOperationOutcome.ConcurrencyConflict ? 1 : 0);
+        var unexpectedCount = (result1.Outcome == ConcurrencyOperationOutcome.UnexpectedFailure ? 1 : 0)
+                            + (result2.Outcome == ConcurrencyOperationOutcome.UnexpectedFailure ? 1 : 0);
+
+        Assert.Equal(0, unexpectedCount);
+
+        if (unexpectedCount > 0)
+        {
+            var unexpected = result1.Outcome == ConcurrencyOperationOutcome.UnexpectedFailure ? result1 : result2;
+            Assert.Fail(
+                $"{scenario}: Unexpected exception {unexpected.Exception!.GetType().Name}: {unexpected.Exception.Message}");
+        }
+
+        Assert.True(successCount == 1,
+            $"{scenario}: Expected exactly 1 success, got {successCount}. " +
+            $"Result1={result1.Outcome}, Result2={result2.Outcome}");
+
+        Assert.True(conflictCount == 1,
+            $"{scenario}: Expected exactly 1 concurrency conflict, got {conflictCount}. " +
+            $"Result1={result1.Outcome}, Result2={result2.Outcome}");
+    }
+
+    /// <summary>
+    /// Verifies final subscription state is Expired and no financial records were mutated.
+    /// </summary>
+    private static async Task VerifyFinalStateAsync(
+        SqlServerIntegrationFactory env,
+        string tenantId,
+        Guid subscriptionId,
+        int expectedRefundsBefore,
+        int expectedPaymentsBefore,
+        int expectedAllocationsBefore,
+        int expectedInstallmentsBefore)
+    {
+        using var verifyScope = env.Factory.Services.CreateScope();
+        var db = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+
+        var sub = await db.TenantPlans.IgnoreQueryFilters()
+            .FirstAsync(s => s.Id == subscriptionId);
+        Assert.Equal(SubscriptionStatus.Expired, sub.Status);
+
+        Assert.Equal(expectedRefundsBefore, await db.Refunds.CountAsync());
+        Assert.Equal(expectedPaymentsBefore, await db.Payments.CountAsync());
+        Assert.Equal(expectedAllocationsBefore, await db.PaymentAllocations.CountAsync());
+        Assert.Equal(expectedInstallmentsBefore, await db.Installments.CountAsync());
     }
 
     // ==================================================================
@@ -182,7 +270,7 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
 
     [Fact]
     [Trait("Category", "SqlServer")]
-    [Trait("Category", "Phase9_5_1")]
+    [Trait("Category", "Phase9_5_2")]
     public async Task ConcurrentExpiration_Active_EndReached_BecomesExpired()
     {
         var tenantId = $"exp-{Guid.NewGuid():N}"[..20];
@@ -196,7 +284,6 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
             var planId = await SeedPlanAsync(db);
             await SeedGracePeriodPolicyAsync(db);
 
-            // Create Active subscription that already ended (EffectiveEndsAtUtc in the past)
             subscriptionId = await SeedSubscriptionAsync(
                 db, tenantId, planId, SubscriptionStatus.Active,
                 startsAtUtc: new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -204,41 +291,23 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
                 bonusMonths: 0);
         }
 
-        // Capture financial state before concurrent expiration
-        int refundCountBefore;
-        int paymentCountBefore;
-        int allocationCountBefore;
-        int installmentCountBefore;
-
+        int refundsBefore, paymentsBefore, allocationsBefore, installmentsBefore;
         using (var scope = _env.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             AuthorizeTenant(scope.ServiceProvider, tenantId);
-            refundCountBefore = await db.Refunds.CountAsync();
-            paymentCountBefore = await db.Payments.CountAsync();
-            allocationCountBefore = await db.PaymentAllocations.CountAsync();
-            installmentCountBefore = await db.Installments.CountAsync();
+            refundsBefore = await db.Refunds.CountAsync();
+            paymentsBefore = await db.Payments.CountAsync();
+            allocationsBefore = await db.PaymentAllocations.CountAsync();
+            installmentsBefore = await db.Installments.CountAsync();
         }
 
-        await ExecuteConcurrentReconciliations(
-            _env, tenantId,
-            async (t1, t2) =>
-            {
-                // Verify final state
-                using var verifyScope = _env.Factory.Services.CreateScope();
-                var db = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
-                AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+        var (result1, result2) = await ExecuteConcurrentReconciliations(_env, tenantId);
 
-                var sub = await db.TenantPlans.IgnoreQueryFilters()
-                    .FirstAsync(s => s.Id == subscriptionId);
-                Assert.Equal(SubscriptionStatus.Expired, sub.Status);
+        AssertConcurrentExpirationOutcome(result1, result2, "Active concurrent expiration");
 
-                // No duplicate financial side effects
-                Assert.Equal(refundCountBefore, await db.Refunds.CountAsync());
-                Assert.Equal(paymentCountBefore, await db.Payments.CountAsync());
-                Assert.Equal(allocationCountBefore, await db.PaymentAllocations.CountAsync());
-                Assert.Equal(installmentCountBefore, await db.Installments.CountAsync());
-            });
+        await VerifyFinalStateAsync(_env, tenantId, subscriptionId,
+            refundsBefore, paymentsBefore, allocationsBefore, installmentsBefore);
     }
 
     // ==================================================================
@@ -247,7 +316,7 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
 
     [Fact]
     [Trait("Category", "SqlServer")]
-    [Trait("Category", "Phase9_5_1")]
+    [Trait("Category", "Phase9_5_2")]
     public async Task ConcurrentExpiration_PastDue_EndReached_BecomesExpired()
     {
         var tenantId = $"exp-{Guid.NewGuid():N}"[..20];
@@ -261,7 +330,6 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
             var planId = await SeedPlanAsync(db);
             await SeedGracePeriodPolicyAsync(db);
 
-            // Create PastDue subscription that already ended
             subscriptionId = await SeedSubscriptionAsync(
                 db, tenantId, planId, SubscriptionStatus.PastDue,
                 startsAtUtc: new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -269,21 +337,20 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
                 bonusMonths: 0);
         }
 
-        await ExecuteConcurrentReconciliations(
-            _env, tenantId,
-            async (t1, t2) =>
-            {
-                using var verifyScope = _env.Factory.Services.CreateScope();
-                var db = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
-                AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+        var (result1, result2) = await ExecuteConcurrentReconciliations(_env, tenantId);
 
-                var sub = await db.TenantPlans.IgnoreQueryFilters()
-                    .FirstAsync(s => s.Id == subscriptionId);
-                Assert.Equal(SubscriptionStatus.Expired, sub.Status);
+        AssertConcurrentExpirationOutcome(result1, result2, "PastDue concurrent expiration");
 
-                // No refunds created
-                Assert.Empty(await db.Refunds.ToListAsync());
-            });
+        using (var verifyScope = _env.Factory.Services.CreateScope())
+        {
+            var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+
+            var sub = await verifyDb.TenantPlans.IgnoreQueryFilters()
+                .FirstAsync(s => s.Id == subscriptionId);
+            Assert.Equal(SubscriptionStatus.Expired, sub.Status);
+            Assert.Empty(await verifyDb.Refunds.ToListAsync());
+        }
     }
 
     // ==================================================================
@@ -292,7 +359,7 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
 
     [Fact]
     [Trait("Category", "SqlServer")]
-    [Trait("Category", "Phase9_5_1")]
+    [Trait("Category", "Phase9_5_2")]
     public async Task ConcurrentExpiration_Suspended_EndReached_BecomesExpired()
     {
         var tenantId = $"exp-{Guid.NewGuid():N}"[..20];
@@ -306,7 +373,6 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
             var planId = await SeedPlanAsync(db);
             await SeedGracePeriodPolicyAsync(db);
 
-            // Create Suspended subscription that already ended
             subscriptionId = await SeedSubscriptionAsync(
                 db, tenantId, planId, SubscriptionStatus.Suspended,
                 startsAtUtc: new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -314,20 +380,20 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
                 bonusMonths: 0);
         }
 
-        await ExecuteConcurrentReconciliations(
-            _env, tenantId,
-            async (t1, t2) =>
-            {
-                using var verifyScope = _env.Factory.Services.CreateScope();
-                var db = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
-                AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+        var (result1, result2) = await ExecuteConcurrentReconciliations(_env, tenantId);
 
-                var sub = await db.TenantPlans.IgnoreQueryFilters()
-                    .FirstAsync(s => s.Id == subscriptionId);
-                Assert.Equal(SubscriptionStatus.Expired, sub.Status);
+        AssertConcurrentExpirationOutcome(result1, result2, "Suspended concurrent expiration");
 
-                Assert.Empty(await db.Refunds.ToListAsync());
-            });
+        using (var verifyScope = _env.Factory.Services.CreateScope())
+        {
+            var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+
+            var sub = await verifyDb.TenantPlans.IgnoreQueryFilters()
+                .FirstAsync(s => s.Id == subscriptionId);
+            Assert.Equal(SubscriptionStatus.Expired, sub.Status);
+            Assert.Empty(await verifyDb.Refunds.ToListAsync());
+        }
     }
 
     // ==================================================================
@@ -336,7 +402,7 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
 
     [Fact]
     [Trait("Category", "SqlServer")]
-    [Trait("Category", "Phase9_5_1")]
+    [Trait("Category", "Phase9_5_2")]
     public async Task ConcurrentExpiration_FinancialIntegrity_NoSideEffects()
     {
         var tenantId = $"exp-{Guid.NewGuid():N}"[..20];
@@ -357,40 +423,37 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
                 bonusMonths: 0);
         }
 
-        // Capture all financial state before concurrent expiration
         int refundsBefore, paymentsBefore, allocationsBefore, installmentsBefore, ledgerBefore;
-
-        using (var scope = _env.Factory.Services.CreateScope())
+        using (var seedScope = _env.Factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            AuthorizeTenant(scope.ServiceProvider, tenantId);
-
-            refundsBefore = await db.Refunds.CountAsync();
-            paymentsBefore = await db.Payments.CountAsync();
-            allocationsBefore = await db.PaymentAllocations.CountAsync();
-            installmentsBefore = await db.Installments.CountAsync();
-            ledgerBefore = await db.CustomerLedgerEntries.CountAsync();
+            var seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            AuthorizeTenant(seedScope.ServiceProvider, tenantId);
+            refundsBefore = await seedDb.Refunds.CountAsync();
+            paymentsBefore = await seedDb.Payments.CountAsync();
+            allocationsBefore = await seedDb.PaymentAllocations.CountAsync();
+            installmentsBefore = await seedDb.Installments.CountAsync();
+            ledgerBefore = await seedDb.CustomerLedgerEntries.CountAsync();
         }
 
-        await ExecuteConcurrentReconciliations(
-            _env, tenantId,
-            async (t1, t2) =>
-            {
-                using var verifyScope = _env.Factory.Services.CreateScope();
-                var db = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
-                AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+        var (result1, result2) = await ExecuteConcurrentReconciliations(_env, tenantId);
 
-                var sub = await db.TenantPlans.IgnoreQueryFilters()
-                    .FirstAsync(s => s.Id == subscriptionId);
-                Assert.Equal(SubscriptionStatus.Expired, sub.Status);
+        AssertConcurrentExpirationOutcome(result1, result2, "Financial integrity concurrent expiration");
 
-                // Financial integrity: no records created or mutated
-                Assert.Equal(refundsBefore, await db.Refunds.CountAsync());
-                Assert.Equal(paymentsBefore, await db.Payments.CountAsync());
-                Assert.Equal(allocationsBefore, await db.PaymentAllocations.CountAsync());
-                Assert.Equal(installmentsBefore, await db.Installments.CountAsync());
-                Assert.Equal(ledgerBefore, await db.CustomerLedgerEntries.CountAsync());
-            });
+        using (var verifyScope = _env.Factory.Services.CreateScope())
+        {
+            var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+
+            var sub = await verifyDb.TenantPlans.IgnoreQueryFilters()
+                .FirstAsync(s => s.Id == subscriptionId);
+            Assert.Equal(SubscriptionStatus.Expired, sub.Status);
+
+            Assert.Equal(refundsBefore, await verifyDb.Refunds.CountAsync());
+            Assert.Equal(paymentsBefore, await verifyDb.Payments.CountAsync());
+            Assert.Equal(allocationsBefore, await verifyDb.PaymentAllocations.CountAsync());
+            Assert.Equal(installmentsBefore, await verifyDb.Installments.CountAsync());
+            Assert.Equal(ledgerBefore, await verifyDb.CustomerLedgerEntries.CountAsync());
+        }
     }
 
     // ==================================================================
@@ -399,7 +462,7 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
 
     [Fact]
     [Trait("Category", "SqlServer")]
-    [Trait("Category", "Phase9_5_1")]
+    [Trait("Category", "Phase9_5_2")]
     public async Task ConcurrentExpiration_DomainEvent_ExactlyOneExpirationTransition()
     {
         var tenantId = $"exp-{Guid.NewGuid():N}"[..20];
@@ -420,23 +483,23 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
                 bonusMonths: 0);
         }
 
-        await ExecuteConcurrentReconciliations(
-            _env, tenantId,
-            async (t1, t2) =>
-            {
-                using var verifyScope = _env.Factory.Services.CreateScope();
-                var db = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
-                AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+        var (result1, result2) = await ExecuteConcurrentReconciliations(_env, tenantId);
 
-                // Exactly one TenantPlan row with Expired status — proves exactly one transition
-                var expiredCount = await db.TenantPlans.IgnoreQueryFilters()
-                    .Where(s => s.TenantId == tenantId && s.Status == SubscriptionStatus.Expired)
-                    .CountAsync();
-                Assert.Equal(1, expiredCount);
+        AssertConcurrentExpirationOutcome(result1, result2, "Domain event concurrent expiration");
 
-                // No refunds created
-                Assert.Empty(await db.Refunds.ToListAsync());
-            });
+        using (var verifyScope = _env.Factory.Services.CreateScope())
+        {
+            var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+
+            // Exactly one TenantPlan row with Expired status — proves exactly one transition
+            var expiredCount = await verifyDb.TenantPlans.IgnoreQueryFilters()
+                .Where(s => s.TenantId == tenantId && s.Status == SubscriptionStatus.Expired)
+                .CountAsync();
+            Assert.Equal(1, expiredCount);
+
+            Assert.Empty(await verifyDb.Refunds.ToListAsync());
+        }
     }
 
     // ==================================================================
@@ -445,7 +508,7 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
 
     [Fact]
     [Trait("Category", "SqlServer")]
-    [Trait("Category", "Phase9_5_1")]
+    [Trait("Category", "Phase9_5_2")]
     public async Task SequentialReconciliation_Idempotent_ActiveToExpired()
     {
         var tenantId = $"exp-{Guid.NewGuid():N}"[..20];
@@ -466,7 +529,7 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
                 bonusMonths: 0);
         }
 
-        // First reconciliation — should succeed
+        // First reconciliation — Active → Expired
         using (var scope = _env.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -484,7 +547,7 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
             Assert.Equal(SubscriptionStatus.Expired, sub.Status);
         }
 
-        // Second reconciliation — idempotent, should not fail
+        // Second reconciliation — Expired → no state transition (idempotent)
         using (var scope = _env.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -512,10 +575,8 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
                 .FirstAsync(s => s.Id == subscriptionId);
             Assert.Equal(SubscriptionStatus.Expired, sub.Status);
 
-            // No refunds created by expiration
             Assert.Empty(await db.Refunds.ToListAsync());
 
-            // Exactly one TenantPlan row (no duplicates)
             var tenantSubCount = await db.TenantPlans.IgnoreQueryFilters()
                 .Where(s => s.TenantId == tenantId)
                 .CountAsync();
@@ -524,13 +585,13 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
     }
 
     // ==================================================================
-    // Concurrent Idempotency — Final state same as sequential
+    // Concurrent Idempotency — Post-race convergence with fresh context
     // ==================================================================
 
     [Fact]
     [Trait("Category", "SqlServer")]
-    [Trait("Category", "Phase9_5_1")]
-    public async Task ConcurrentExpiration_FinalStateMatchesSequential()
+    [Trait("Category", "Phase9_5_2")]
+    public async Task ConcurrentExpiration_ConvergenceAfterRace()
     {
         var tenantId = $"exp-{Guid.NewGuid():N}"[..20];
         Guid subscriptionId;
@@ -550,29 +611,50 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
                 bonusMonths: 0);
         }
 
-        await ExecuteConcurrentReconciliations(
-            _env, tenantId,
-            async (t1, t2) =>
-            {
-                using var verifyScope = _env.Factory.Services.CreateScope();
-                var db = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
-                AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+        // Phase 1: Concurrent race
+        var (result1, result2) = await ExecuteConcurrentReconciliations(_env, tenantId);
 
-                // Final state must be Expired — same as sequential idempotency
-                var sub = await db.TenantPlans.IgnoreQueryFilters()
-                    .FirstAsync(s => s.Id == subscriptionId);
-                Assert.Equal(SubscriptionStatus.Expired, sub.Status);
+        AssertConcurrentExpirationOutcome(result1, result2, "Convergence after race");
 
-                // Exactly one subscription row
-                var count = await db.TenantPlans.IgnoreQueryFilters()
-                    .Where(s => s.TenantId == tenantId)
-                    .CountAsync();
-                Assert.Equal(1, count);
+        // Phase 2: Verify post-race state is Expired
+        using (var verifyScope = _env.Factory.Services.CreateScope())
+        {
+            var db = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
 
-                // No financial side effects
-                Assert.Empty(await db.Refunds.ToListAsync());
-                Assert.Empty(await db.Installments.ToListAsync());
-            });
+            var sub = await db.TenantPlans.IgnoreQueryFilters()
+                .FirstAsync(s => s.Id == subscriptionId);
+            Assert.Equal(SubscriptionStatus.Expired, sub.Status);
+        }
+
+        // Phase 3: Run ANOTHER reconciliation with a fresh DbContext — must be idempotent
+        using (var postRaceScope = _env.Factory.Services.CreateScope())
+        {
+            var db = postRaceScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            AuthorizeTenant(postRaceScope.ServiceProvider, tenantId);
+            var service = CreateReconciliationService(db);
+
+            // Must NOT throw — Expired is terminal, reconciliation returns early
+            await service.ReconcileAsync(tenantId, CancellationToken.None);
+        }
+
+        // Phase 4: Final verification — no additional state change, no side effects
+        using (var finalScope = _env.Factory.Services.CreateScope())
+        {
+            var db = finalScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            AuthorizeTenant(finalScope.ServiceProvider, tenantId);
+
+            var sub = await db.TenantPlans.IgnoreQueryFilters()
+                .FirstAsync(s => s.Id == subscriptionId);
+            Assert.Equal(SubscriptionStatus.Expired, sub.Status);
+
+            var count = await db.TenantPlans.IgnoreQueryFilters()
+                .Where(s => s.TenantId == tenantId)
+                .CountAsync();
+            Assert.Equal(1, count);
+
+            Assert.Empty(await db.Refunds.ToListAsync());
+        }
     }
 
     // ==================================================================
@@ -581,7 +663,7 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
 
     [Fact]
     [Trait("Category", "SqlServer")]
-    [Trait("Category", "Phase9_5_1")]
+    [Trait("Category", "Phase9_5_2")]
     public async Task ConcurrentExpiration_IndependentDbContexts_NoStaleTracker()
     {
         var tenantId = $"exp-{Guid.NewGuid():N}"[..20];
@@ -602,34 +684,9 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
                 bonusMonths: 0);
         }
 
-        // Execute two reconciliations using truly independent scopes (and DbContexts)
-        using var barrier = new Barrier(2);
-        var tcs1 = new TaskCompletionSource<bool>();
-        var tcs2 = new TaskCompletionSource<bool>();
+        var (result1, result2) = await ExecuteConcurrentReconciliations(_env, tenantId);
 
-        async Task RunReconciliation(TaskCompletionSource<bool> tcs)
-        {
-            // Each invocation creates a fully independent scope with its own DbContext
-            using var scope = _env.Factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            AuthorizeTenant(scope.ServiceProvider, tenantId);
-            var service = CreateReconciliationService(db);
-
-            barrier.SignalAndWait(BarrierTimeout);
-            try
-            {
-                await service.ReconcileAsync(tenantId, CancellationToken.None);
-            }
-            catch (DbUpdateConcurrencyException) { }
-            catch (InvalidOperationException) { }
-            tcs.TrySetResult(true);
-        }
-
-        var task1 = Task.Run(() => RunReconciliation(tcs1));
-        var task2 = Task.Run(() => RunReconciliation(tcs2));
-
-        using var cts = new CancellationTokenSource(TestTimeout);
-        await Task.WhenAll(task1, task2).WaitAsync(cts.Token);
+        AssertConcurrentExpirationOutcome(result1, result2, "Independent DbContexts");
 
         // Verify: each scope used independent DbContext — no shared ChangeTracker state
         using var verifyScope = _env.Factory.Services.CreateScope();
@@ -653,7 +710,7 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
 
     [Fact]
     [Trait("Category", "SqlServer")]
-    [Trait("Category", "Phase9_5_1")]
+    [Trait("Category", "Phase9_5_2")]
     public async Task ConcurrentExpiration_Cancelled_RemainsCancelled()
     {
         var tenantId = $"exp-{Guid.NewGuid():N}"[..20];
@@ -667,7 +724,6 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
             var planId = await SeedPlanAsync(db);
             await SeedGracePeriodPolicyAsync(db);
 
-            // Create Cancelled subscription — must NOT be expired
             subscriptionId = await SeedSubscriptionAsync(
                 db, tenantId, planId, SubscriptionStatus.Cancelled,
                 startsAtUtc: new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -675,20 +731,24 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
                 bonusMonths: 0);
         }
 
-        await ExecuteConcurrentReconciliations(
-            _env, tenantId,
-            async (t1, t2) =>
-            {
-                using var verifyScope = _env.Factory.Services.CreateScope();
-                var db = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
-                AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+        // Cancelled is terminal — both reconciliations should return without error,
+        // and neither should produce a concurrency conflict (no state change).
+        var (result1, result2) = await ExecuteConcurrentReconciliations(_env, tenantId);
 
-                var sub = await db.TenantPlans.IgnoreQueryFilters()
-                    .FirstAsync(s => s.Id == subscriptionId);
-                // Cancelled is terminal — reconciliation must NOT change it to Expired
-                Assert.Equal(SubscriptionStatus.Cancelled, sub.Status);
-                Assert.Empty(await db.Refunds.ToListAsync());
-            });
+        // Both must succeed — no expiration transition occurs, no RowVersion conflict
+        Assert.Equal(ConcurrencyOperationOutcome.Succeeded, result1.Outcome);
+        Assert.Equal(ConcurrencyOperationOutcome.Succeeded, result2.Outcome);
+
+        using (var verifyScope = _env.Factory.Services.CreateScope())
+        {
+            var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+
+            var sub = await verifyDb.TenantPlans.IgnoreQueryFilters()
+                .FirstAsync(s => s.Id == subscriptionId);
+            Assert.Equal(SubscriptionStatus.Cancelled, sub.Status);
+            Assert.Empty(await verifyDb.Refunds.ToListAsync());
+        }
     }
 
     // ==================================================================
@@ -697,7 +757,7 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
 
     [Fact]
     [Trait("Category", "SqlServer")]
-    [Trait("Category", "Phase9_5_1")]
+    [Trait("Category", "Phase9_5_2")]
     public async Task ConcurrentExpiration_Active_NotYetEnded_RemainsActive()
     {
         var tenantId = $"exp-{Guid.NewGuid():N}"[..20];
@@ -711,7 +771,6 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
             var planId = await SeedPlanAsync(db);
             await SeedGracePeriodPolicyAsync(db);
 
-            // Create Active subscription with end date far in the future
             subscriptionId = await SeedSubscriptionAsync(
                 db, tenantId, planId, SubscriptionStatus.Active,
                 startsAtUtc: DateTime.UtcNow,
@@ -719,18 +778,22 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
                 bonusMonths: 0);
         }
 
-        await ExecuteConcurrentReconciliations(
-            _env, tenantId,
-            async (t1, t2) =>
-            {
-                using var verifyScope = _env.Factory.Services.CreateScope();
-                var db = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
-                AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+        // Not yet expired — both reconciliations should return without error,
+        // no state change, no RowVersion conflict.
+        var (result1, result2) = await ExecuteConcurrentReconciliations(_env, tenantId);
 
-                var sub = await db.TenantPlans.IgnoreQueryFilters()
-                    .FirstAsync(s => s.Id == subscriptionId);
-                Assert.Equal(SubscriptionStatus.Active, sub.Status);
-            });
+        Assert.Equal(ConcurrencyOperationOutcome.Succeeded, result1.Outcome);
+        Assert.Equal(ConcurrencyOperationOutcome.Succeeded, result2.Outcome);
+
+        using (var verifyScope = _env.Factory.Services.CreateScope())
+        {
+            var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+
+            var sub = await verifyDb.TenantPlans.IgnoreQueryFilters()
+                .FirstAsync(s => s.Id == subscriptionId);
+            Assert.Equal(SubscriptionStatus.Active, sub.Status);
+        }
     }
 
     // ==================================================================
@@ -739,7 +802,7 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
 
     [Fact]
     [Trait("Category", "SqlServer")]
-    [Trait("Category", "Phase9_5_1")]
+    [Trait("Category", "Phase9_5_2")]
     public async Task ConcurrentExpiration_TenantIsolation_ADoesNotAffectB()
     {
         var tenantA = $"expA-{Guid.NewGuid():N}"[..20];
@@ -769,25 +832,23 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
         }
 
         // Reconcile tenant A concurrently — should expire A's subscription
-        await ExecuteConcurrentReconciliations(
-            _env, tenantA,
-            async (t1, t2) =>
-            {
-                // Tenant A should be expired
-                using var verifyScope = _env.Factory.Services.CreateScope();
-                var db = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
-                AuthorizeTenant(verifyScope.ServiceProvider, tenantA);
-                var subA = await db.TenantPlans.IgnoreQueryFilters()
-                    .FirstAsync(s => s.Id == subAId);
-                Assert.Equal(SubscriptionStatus.Expired, subA.Status);
-            });
+        var (result1, result2) = await ExecuteConcurrentReconciliations(_env, tenantA);
 
-        // Tenant B must remain Active — tenant isolation
+        AssertConcurrentExpirationOutcome(result1, result2, "Tenant isolation - tenant A");
+
         using (var verifyScope = _env.Factory.Services.CreateScope())
         {
-            var db = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            // Tenant A should be expired
+            AuthorizeTenant(verifyScope.ServiceProvider, tenantA);
+            var subA = await verifyDb.TenantPlans.IgnoreQueryFilters()
+                .FirstAsync(s => s.Id == subAId);
+            Assert.Equal(SubscriptionStatus.Expired, subA.Status);
+
+            // Tenant B must remain Active — tenant isolation
             AuthorizeTenant(verifyScope.ServiceProvider, tenantB);
-            var subB = await db.TenantPlans.IgnoreQueryFilters()
+            var subB = await verifyDb.TenantPlans.IgnoreQueryFilters()
                 .FirstAsync(s => s.Id == subBId);
             Assert.Equal(SubscriptionStatus.Active, subB.Status);
         }
