@@ -5,5 +5,6 @@ public enum CreditSourceType
     ReferralReward = 0,
     Promotional = 1,
     Compensation = 2,
-    Manual = 3
+    Manual = 3,
+    Overpayment = 4
 }

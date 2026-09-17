@@ -37,8 +37,14 @@ public class TenantCreditConfiguration : IEntityTypeConfiguration<TenantCredit>
         builder.Property(tc => tc.AppliedToInvoiceLineId)
             .HasColumnType("uniqueidentifier");
 
+        builder.Property(tc => tc.AppliedToInvoiceId)
+            .HasColumnType("uniqueidentifier");
+
         builder.Property(tc => tc.ReversalOfCreditId)
             .HasColumnType("uniqueidentifier");
+
+        builder.Property(tc => tc.RowVersion)
+            .IsRowVersion();
 
         builder.Property(tc => tc.TenantId)
             .HasMaxLength(450)

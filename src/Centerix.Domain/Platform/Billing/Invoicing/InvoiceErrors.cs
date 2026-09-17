@@ -30,4 +30,13 @@ public static class InvoiceErrors
 
     public static Error CannotCancelNonDraft =>
         Error.Conflict("Invoice.CannotCancelNonDraft", "Only draft invoices can be cancelled");
+
+    public static Error CannotModifyAfterIssuance =>
+        Error.Conflict("Invoice.CannotModifyAfterIssuance", "Invoice lines cannot be modified after the invoice has been issued");
+
+    public static Error CannotAddLineNonDraft =>
+        Error.Conflict("Invoice.CannotAddLineNonDraft", "Invoice lines can only be added to draft invoices");
+
+    public static Error CannotRemoveLineNonDraft =>
+        Error.Conflict("Invoice.CannotRemoveLineNonDraft", "Invoice lines can only be removed from draft invoices");
 }

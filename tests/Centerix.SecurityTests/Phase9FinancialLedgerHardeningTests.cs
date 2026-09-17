@@ -3,6 +3,7 @@ namespace Centerix.SecurityTests;
 using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform.Billing.Commands;
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Billing.Credits.Enums;
 using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Billing.Invoicing.Enums;
 using Centerix.Domain.Platform.Billing.Payments;
@@ -193,14 +194,27 @@ public class Phase9FinancialLedgerHardeningTests
 
         var handler = await CreateHandler(db);
 
-        // Act
+        // Act: Allocate 5000 to a 3000 invoice — overpayment is capped, excess becomes TenantCredit
         var result = await handler.Handle(
             new AllocatePaymentCommand(payment.Id, invoice.Id, 5000m),
             CancellationToken.None);
 
-        // Assert
-        Assert.False(result.IsSuccess);
-        Assert.Equal("PaymentAllocation.ExceedsInvoiceRemaining", result.Errors![0].Code);
+        // Assert: Succeeds with 3000 allocated to invoice, 2000 as overpayment credit
+        Assert.True(result.IsSuccess);
+
+        var dbInvoice = await db.Invoices.FirstAsync(i => i.Id == invoice.Id);
+        Assert.Equal(3000m, dbInvoice.GetPaidAmount());
+        Assert.Equal(0m, dbInvoice.GetRemainingAmount());
+        Assert.Equal(InvoiceStatus.Paid, dbInvoice.Status);
+
+        var dbPayment = await db.Payments.FirstAsync(p => p.Id == payment.Id);
+        Assert.Equal(3000m, dbPayment.GetAllocatedAmount());
+        Assert.Equal(7000m, dbPayment.GetUnallocatedAmount());
+
+        var overpaymentCredit = await db.TenantCredits
+            .FirstOrDefaultAsync(c => c.SourceType == CreditSourceType.Overpayment && c.SourceId == payment.Id);
+        Assert.NotNull(overpaymentCredit);
+        Assert.Equal(2000m, overpaymentCredit.Amount);
     }
 
     [Fact]
@@ -604,20 +618,28 @@ public class Phase9FinancialLedgerHardeningTests
 
         var handler = await CreateHandler(db);
 
-        // Act: First allocation pays the invoice
+        // Act: First allocation pays the invoice fully
         var result1 = await handler.Handle(
             new AllocatePaymentCommand(payment.Id, invoice.Id, 5000m),
             CancellationToken.None);
 
-        // Second allocation would exceed invoice remaining (now 0)
+        // Second allocation exceeds invoice remaining (now 0) — overpayment creates credit
         var result2 = await handler.Handle(
             new AllocatePaymentCommand(payment.Id, invoice.Id, 1000m),
             CancellationToken.None);
 
-        // Assert
+        // Assert: Both succeed. Second allocation creates overpayment credit for 1000
         Assert.True(result1.IsSuccess);
-        Assert.False(result2.IsSuccess);
-        Assert.Equal("PaymentAllocation.ExceedsInvoiceRemaining", result2.Errors![0].Code);
+        Assert.True(result2.IsSuccess);
+
+        var dbInvoice = await db.Invoices.FirstAsync(i => i.Id == invoice.Id);
+        Assert.Equal(5000m, dbInvoice.GetPaidAmount());
+        Assert.Equal(InvoiceStatus.Paid, dbInvoice.Status);
+
+        var overpaymentCredit = await db.TenantCredits
+            .FirstOrDefaultAsync(c => c.SourceType == CreditSourceType.Overpayment && c.SourceId == payment.Id);
+        Assert.NotNull(overpaymentCredit);
+        Assert.Equal(1000m, overpaymentCredit.Amount);
     }
 
     // ------------------------------------------------------------------
@@ -834,25 +856,27 @@ public class Phase9FinancialLedgerHardeningTests
 
         var handler = await CreateHandler(db);
 
-        // Act
+        // Act: First allocates 4000 (remaining = 1000), second allocates 4000 (overpayment: 1000 to invoice + 3000 credit)
         var result1 = await handler.Handle(
             new AllocatePaymentCommand(payment1.Id, invoice.Id, 4000m),
             CancellationToken.None);
         var result2 = await handler.Handle(
             new AllocatePaymentCommand(payment2.Id, invoice.Id, 4000m),
             CancellationToken.None);
-        var result3 = await handler.Handle(
-            new AllocatePaymentCommand(payment2.Id, invoice.Id, 1000m),
-            CancellationToken.None);
 
-        // Assert
+        // Assert: Both succeed — second caps at 1000 for invoice, 3000 becomes overpayment credit
         Assert.True(result1.IsSuccess);
-        Assert.False(result2.IsSuccess); // Would exceed invoice remaining (1000)
-        Assert.True(result3.IsSuccess); // Uses remaining 1000
+        Assert.True(result2.IsSuccess);
 
         var dbInvoice = await db.Invoices.FirstAsync(i => i.Id == invoice.Id);
         Assert.Equal(5000m, dbInvoice.GetPaidAmount());
+        Assert.Equal(0m, dbInvoice.GetRemainingAmount());
         Assert.Equal(InvoiceStatus.Paid, dbInvoice.Status);
+
+        var overpaymentCredit = await db.TenantCredits
+            .FirstOrDefaultAsync(c => c.SourceType == CreditSourceType.Overpayment && c.SourceId == payment2.Id);
+        Assert.NotNull(overpaymentCredit);
+        Assert.Equal(3000m, overpaymentCredit.Amount);
     }
 
     // ------------------------------------------------------------------

@@ -3,6 +3,7 @@ namespace Centerix.Application.Platform.Billing.Commands;
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Billing.Invoicing;
+using Centerix.Domain.Platform.Billing.Invoicing.Enums;
 
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -19,6 +20,11 @@ public class RemoveInvoiceLineHandler(
         if (invoice is null)
         {
             return Error.NotFound("Invoice.NotFound", $"Invoice with id '{request.InvoiceId}' was not found.");
+        }
+
+        if (invoice.Status != InvoiceStatus.Draft)
+        {
+            return InvoiceErrors.CannotRemoveLineNonDraft;
         }
 
         var line = await dbContext.InvoiceLines

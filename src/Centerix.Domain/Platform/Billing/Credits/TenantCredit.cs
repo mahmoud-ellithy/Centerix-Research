@@ -10,8 +10,12 @@ public class TenantCredit : AuditableEntity<Guid>
     public CreditSourceType SourceType { get; private set; }
     public Guid? SourceId { get; private set; }
     public CreditStatus Status { get; private set; }
+    public Guid? AppliedToInvoiceId { get; private set; }
     public Guid? AppliedToInvoiceLineId { get; private set; }
     public Guid? ReversalOfCreditId { get; private set; }
+
+    // Optimistic-concurrency token (SQL Server rowversion, store-generated)
+    public byte[] RowVersion { get; internal set; } = [];
 
     private TenantCredit() { }
 
@@ -51,6 +55,17 @@ public class TenantCredit : AuditableEntity<Guid>
 
         Status = CreditStatus.Applied;
         AppliedToInvoiceLineId = invoiceLineId;
+
+        return Result.Updated;
+    }
+
+    public Result<Updated> ApplyToInvoice(Guid invoiceId)
+    {
+        if (Status != CreditStatus.Available)
+            return TenantCreditErrors.NotAvailable;
+
+        Status = CreditStatus.Applied;
+        AppliedToInvoiceId = invoiceId;
 
         return Result.Updated;
     }

@@ -28,6 +28,11 @@ public class AddInvoiceLineHandler(
             return Error.NotFound("Invoice.NotFound", $"Invoice with id '{request.InvoiceId}' was not found.");
         }
 
+        if (invoice.Status != InvoiceStatus.Draft)
+        {
+            return InvoiceErrors.CannotAddLineNonDraft;
+        }
+
         var lineTotal = request.Quantity * request.UnitPrice;
 
         var line = InvoiceLine.Create(

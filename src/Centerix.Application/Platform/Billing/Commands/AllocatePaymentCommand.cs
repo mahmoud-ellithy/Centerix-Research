@@ -5,6 +5,8 @@ using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Billing.Installments;
+using Centerix.Domain.Platform.Billing.Credits;
+using Centerix.Domain.Platform.Billing.Credits.Enums;
 using Centerix.Domain.Platform.Billing.Payments;
 using Centerix.Domain.Platform.Billing.Payments.Enums;
 using Centerix.Domain.Platform.Subscriptions;
@@ -206,13 +208,17 @@ public class AllocatePaymentHandler(
             return PaymentErrors.AllocationExceedsPayment;
         }
 
-        // Check allocation doesn't exceed invoice remaining amount.
-        // Under Serializable isolation, concurrent transactions cannot read this Invoice's
-        // allocations until we commit, so this check is safe from race conditions.
+        // Check allocation against invoice remaining amount.
+        // If the requested allocation exceeds the invoice remaining, we cap it at the
+        // invoice remaining and create a TenantCredit for the excess (overpayment handling).
         var invoiceRemaining = invoice.GetRemainingAmount();
+        decimal actualAllocatedAmount = request.AllocatedAmount;
+        decimal overpaymentAmount = 0m;
+
         if (request.AllocatedAmount > invoiceRemaining)
         {
-            return PaymentErrors.AllocationExceedsInvoiceRemaining;
+            actualAllocatedAmount = invoiceRemaining;
+            overpaymentAmount = request.AllocatedAmount - invoiceRemaining;
         }
 
         // If an installment is specified, validate it exists and is valid for this tenant
@@ -243,56 +249,82 @@ public class AllocatePaymentHandler(
             .Where(e => e.TenantId == payment.TenantId)
             .SumAsync(e => e.EntryType == LedgerEntryType.InvoiceCharge ? e.Amount : -e.Amount, cancellationToken);
 
-        var allocationResult = PaymentAllocation.Create(
-            Guid.NewGuid(),
-            request.PaymentId,
-            request.InvoiceId,
-            request.AllocatedAmount,
-            DateTime.UtcNow,
-            request.InstallmentId);
-
-        if (!allocationResult.IsSuccess)
+        // If the requested amount exceeds the invoice remaining (or the invoice is already
+        // fully paid), the entire requested amount becomes overpayment credit.
+        // When actualAllocatedAmount > 0, create a PaymentAllocation for the capped amount
+        // and a TenantCredit for the excess. When actualAllocatedAmount == 0 (invoice already
+        // fully paid), skip the allocation entirely and create credit for the full amount.
+        TenantCredit? overpaymentCredit = null;
+        if (actualAllocatedAmount > 0)
         {
-            return allocationResult.Errors!;
+            var allocationResult = PaymentAllocation.Create(
+                Guid.NewGuid(),
+                request.PaymentId,
+                request.InvoiceId,
+                actualAllocatedAmount,
+                DateTime.UtcNow,
+                request.InstallmentId);
+
+            if (!allocationResult.IsSuccess)
+            {
+                return allocationResult.Errors!;
+            }
+
+            var allocation = allocationResult.Value;
+            dbContext.PaymentAllocations.Add(allocation);
+
+            // Update invoice payment status (sets PartiallyPaid / Paid based on allocations)
+            var updateResult = invoice.UpdatePaymentStatus();
+            if (!updateResult.IsSuccess)
+            {
+                return updateResult.Errors!;
+            }
+
+            // Create the corresponding PaymentSettlement ledger entry from the actual allocated
+            // amount — NOT the Payment.Amount. This guarantees Total PaymentSettlement = Total Active
+            // Allocations, and overpayments are never recorded as liability settlement.
+            var settlementEntry = CustomerLedgerEntry.CreatePaymentSettlement(
+                Guid.NewGuid(),
+                request.PaymentId,
+                allocation.Id,
+                actualAllocatedAmount,
+                payment.CurrencyCode,
+                previousBalance,
+                DateTime.UtcNow);
+
+            if (!settlementEntry.IsSuccess)
+            {
+                return settlementEntry.Errors!;
+            }
+
+            dbContext.CustomerLedgerEntries.Add(settlementEntry.Value);
+
+            // If an installment is specified, apply the allocation to settle it
+            if (installment is not null)
+            {
+                var installmentResult = installment.ApplyAllocation(allocation, DateTime.UtcNow);
+                if (!installmentResult.IsSuccess)
+                    return installmentResult.Errors!;
+            }
         }
 
-        var allocation = allocationResult.Value;
-
-        dbContext.PaymentAllocations.Add(allocation);
-
-        // Update invoice payment status (sets PartiallyPaid / Paid based on allocations)
-        var updateResult = invoice.UpdatePaymentStatus();
-        if (!updateResult.IsSuccess)
+        // If there's an overpayment (or the invoice was already fully paid), create a
+        // TenantCredit for the excess amount.
+        // This ensures overpayments are never lost and become available as customer credit.
+        if (overpaymentAmount > 0)
         {
-            return updateResult.Errors!;
+            var creditResult = TenantCredit.Create(
+                Guid.NewGuid(),
+                overpaymentAmount,
+                CreditSourceType.Overpayment,
+                request.PaymentId);
+
+            if (creditResult.IsSuccess)
+            {
+                overpaymentCredit = creditResult.Value;
+                dbContext.TenantCredits.Add(overpaymentCredit);
+            }
         }
-
-        // If an installment is specified, apply the allocation to settle it
-        if (installment is not null)
-        {
-            var installmentResult = installment.ApplyAllocation(allocation, DateTime.UtcNow);
-            if (!installmentResult.IsSuccess)
-                return installmentResult.Errors!;
-        }
-
-        // Create the corresponding PaymentSettlement ledger entry from the actual allocated
-        // amount — NOT the Payment.Amount. This guarantees Total PaymentSettlement = Total Active
-        // Allocations, and overpayments are never recorded as liability settlement.
-        var settlementEntry = CustomerLedgerEntry.CreatePaymentSettlement(
-            Guid.NewGuid(),
-            request.PaymentId,
-            allocation.Id,
-            request.AllocatedAmount,
-            payment.CurrencyCode,
-            previousBalance,
-            DateTime.UtcNow);
-
-        if (!settlementEntry.IsSuccess)
-        {
-            return settlementEntry.Errors!;
-        }
-
-        dbContext.CustomerLedgerEntries.Add(settlementEntry.Value);
 
         // Stamp the authorized tenant id on newly-added entities. On SQL Server this mirrors
         // what the SaveChanges interceptor does; on InMemory (used by fast unit tests) the
@@ -348,12 +380,14 @@ public class AllocatePaymentHandler(
         await auditWriter.WriteAsync(
             action: "Payment.Allocate",
             entityType: nameof(PaymentAllocation),
-            entityId: allocation.Id.ToString(),
+            entityId: overpaymentCredit?.Id.ToString() ?? request.PaymentId.ToString(),
             newValue: AuditPayload.Serialize(new
             {
-                allocation.PaymentId,
-                allocation.InvoiceId,
-                allocation.AllocatedAmount
+                request.PaymentId,
+                request.InvoiceId,
+                AllocatedAmount = actualAllocatedAmount,
+                OverpaymentAmount = overpaymentAmount,
+                OverpaymentCreditId = overpaymentCredit?.Id
             }),
             cancellationToken: cancellationToken);
 
