@@ -1,6 +1,7 @@
 # TASK 11.1 — Subscription Upgrade/Downgrade Financial & Historical Correction Report
 
-**Commit SHA:** `95da34633fd65dd69a016ac15f7ed1ee9899493c`
+**Commit SHA (code fix):** `c8151669b8290699eb975cab848e9cc11a3d0b45`
+**Commit SHA (report):** `a643718d6fce5c37e4c077f8181598a6142060ef`
 
 ---
 
