@@ -92,6 +92,35 @@ public class TenantPlansController(ILocalizer localizer, IMediator mediator) : A
             Problem);
     }
 
+    /// <summary>
+    /// PLATFORM: Changes a subscription to a different plan (upgrade or downgrade).
+    /// Creates a new Offer → Contract → Subscription chain using the target plan's current commercial terms.
+    /// The old subscription is ended (cancelled) at the effective date.
+    /// Old promotions/discounts/benefits are NOT inherited. The old subscription's snapshot is never modified.
+    /// No automatic early-cancellation refund is triggered.
+    /// </summary>
+    [HttpPost("{id}/change-plan")]
+    [HasPermission(Permissions.Subscriptions.Manage)]
+    public async Task<IActionResult> ChangePlan(
+        Guid id,
+        [FromBody] ChangePlanRequest request,
+        CancellationToken cancellationToken)
+    {
+        var command = new ChangeSubscriptionPlanCommand(
+            id,
+            request.NewPlanId);
+
+        var result = await mediator.Send(command, cancellationToken);
+
+        return result.Match(
+            contractId => Ok(new
+            {
+                ContractId = contractId,
+                Message = "Plan changed successfully. New Contract and Subscription created. Old subscription ended."
+            }),
+            Problem);
+    }
+
     /// <summary>PLATFORM: activates a Pending/Suspended subscription.</summary>
     [HttpPost("activate")]
     [HasPermission(Permissions.Subscriptions.Manage)]
@@ -166,4 +195,14 @@ public class CancelSubscriptionRequest
 
     /// <summary>Business reason for the cancellation.</summary>
     public string Reason { get; set; } = "Platform cancellation";
+}
+
+/// <summary>
+/// Request body for the change-plan endpoint.
+/// Only NewPlanId is accepted. All commercial values are server-derived from the Offer engine.
+/// </summary>
+public class ChangePlanRequest
+{
+    /// <summary>Required: the target plan ID to change to.</summary>
+    public int NewPlanId { get; set; }
 }
