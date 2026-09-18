@@ -372,6 +372,11 @@ namespace Centerix.Infrastructure.Data.Migrations
                     b.Property<Guid>("CreditId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
                     b.Property<Guid>("InvoiceId")
                         .HasColumnType("uniqueidentifier");
 
@@ -402,6 +407,10 @@ namespace Centerix.Infrastructure.Data.Migrations
                     b.HasIndex("TenantId");
 
                     b.HasIndex("TenantId", "CreditId");
+
+                    b.HasIndex("TenantId", "IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("[IdempotencyKey] <> ''");
 
                     b.HasIndex("TenantId", "InvoiceId");
 

@@ -454,7 +454,7 @@ public class Phase10InvoiceFinancialIntegrityTests
         await issueHandler.Handle(new IssueInvoiceCommand(invoice.Id, DateTime.UtcNow, null), CancellationToken.None);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
 
@@ -475,7 +475,7 @@ public class Phase10InvoiceFinancialIntegrityTests
         await issueHandler.Handle(new IssueInvoiceCommand(invoice.Id, DateTime.UtcNow, null), CancellationToken.None);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "TenantCredit.InvalidApplicationAmount");
@@ -492,7 +492,7 @@ public class Phase10InvoiceFinancialIntegrityTests
         await issueHandler.Handle(new IssueInvoiceCommand(invoice.Id, DateTime.UtcNow, null), CancellationToken.None);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 50000m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 50000m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "TenantCredit.ExceedsInvoiceRemaining");
@@ -506,7 +506,7 @@ public class Phase10InvoiceFinancialIntegrityTests
         var credit = await CreateAvailableCreditAsync(db, "tenant-imm", 1000m);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "Invoice.CannotApplyCreditToDraftOrCancelled");
@@ -523,9 +523,9 @@ public class Phase10InvoiceFinancialIntegrityTests
         await issueHandler.Handle(new IssueInvoiceCommand(invoice.Id, DateTime.UtcNow, null), CancellationToken.None);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, "idem-key-1"), CancellationToken.None);
 
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, "idem-key-1"), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "TenantCredit.NotAvailable");
@@ -542,7 +542,7 @@ public class Phase10InvoiceFinancialIntegrityTests
         await db.SaveChangesAsync();
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "Invoice.CannotApplyCreditToDraftOrCancelled");
@@ -751,7 +751,7 @@ public class Phase10InvoiceFinancialIntegrityTests
         var creditA = await CreateAvailableCreditAsync(dbA, "tenant-A", 1000m);
 
         var handler = new ApplyCreditToInvoiceHandler(dbA, Substitute.For<IAuditWriter>());
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(creditA.Id, invoiceB.Id, 1000m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(creditA.Id, invoiceB.Id, 1000m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "Invoice.NotFound");
@@ -810,7 +810,7 @@ public class Phase10InvoiceFinancialIntegrityTests
 
         var creditHandler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
         var result = await creditHandler.Handle(new ApplyCreditToInvoiceCommand(
-            overpaymentCredit.Id, invoice2.Id, 1000m), CancellationToken.None);
+            overpaymentCredit.Id, invoice2.Id, 1000m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
 

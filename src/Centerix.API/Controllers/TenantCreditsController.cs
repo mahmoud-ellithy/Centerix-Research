@@ -40,7 +40,8 @@ public class TenantCreditsController(ILocalizer localizer, IMediator mediator) :
         [FromBody] ApplyCreditToInvoiceRequest request,
         CancellationToken cancellationToken)
     {
-        var command = new ApplyCreditToInvoiceCommand(id, request.InvoiceId, request.Amount);
+        var idempotencyKey = request.IdempotencyKey ?? Guid.NewGuid().ToString("N");
+        var command = new ApplyCreditToInvoiceCommand(id, request.InvoiceId, request.Amount, idempotencyKey);
         var result = await mediator.Send(command, cancellationToken);
 
         return result.Match(
@@ -60,4 +61,4 @@ public class TenantCreditsController(ILocalizer localizer, IMediator mediator) :
     }
 }
 
-public record ApplyCreditToInvoiceRequest(Guid InvoiceId, decimal Amount);
+public record ApplyCreditToInvoiceRequest(Guid InvoiceId, decimal Amount, string? IdempotencyKey = null);

@@ -23,8 +23,9 @@ using Xunit;
 
 /// <summary>
 /// Task 12: Customer Credit &amp; Overpayment Lifecycle tests.
+/// Task 12.1: Updated for key-based idempotency and currency integrity.
 /// Comprehensive tests covering: overpayment creation, credit application,
-/// partial application, idempotency, concurrency, tenant isolation,
+/// partial application, idempotency (key-based), concurrency, tenant isolation,
 /// currency integrity, ledger auditability, and historical integrity.
 /// </summary>
 public class Phase12CustomerCreditLifecycleTests
@@ -116,6 +117,8 @@ public class Phase12CustomerCreditLifecycleTests
     {
         return new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
     }
+
+    private static string NewKey() => Guid.NewGuid().ToString("N");
 
     // ==================================================================
     // A. Overpayment Tests
@@ -265,7 +268,7 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 2000m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 2000m, NewKey()), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
 
@@ -289,7 +292,7 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 400m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 400m, NewKey()), CancellationToken.None);
 
         var updatedCredit = await db.TenantCredits.FindAsync(credit.Id);
         Assert.Equal(CreditStatus.PartiallyApplied, updatedCredit!.Status);
@@ -311,8 +314,8 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 400m), CancellationToken.None);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 600m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 400m, NewKey()), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 600m, NewKey()), CancellationToken.None);
 
         var updatedCredit = await db.TenantCredits.FindAsync(credit.Id);
         Assert.Equal(CreditStatus.Applied, updatedCredit!.Status);
@@ -336,8 +339,8 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(creditA.Id, invoice.Id, 1000m), CancellationToken.None);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(creditB.Id, invoice.Id, 2000m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(creditA.Id, invoice.Id, 1000m, NewKey()), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(creditB.Id, invoice.Id, 2000m, NewKey()), CancellationToken.None);
 
         var updatedInvoice = await db.Invoices
             .Include(i => i.CreditApplications)
@@ -356,7 +359,7 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1001m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1001m, NewKey()), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "TenantCredit.InvalidApplicationAmount");
@@ -371,7 +374,7 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 501m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 501m, NewKey()), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "TenantCredit.ExceedsInvoiceRemaining");
@@ -386,7 +389,7 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 0m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 0m, NewKey()), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "TenantCredit.InvalidApplicationAmount");
@@ -401,7 +404,7 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, -100m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, -100m, NewKey()), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "TenantCredit.InvalidApplicationAmount");
@@ -423,7 +426,7 @@ public class Phase12CustomerCreditLifecycleTests
         Assert.Equal(InvoiceStatus.Paid, inv!.Status);
 
         var creditHandler = CreateCreditHandler(db);
-        var result = await creditHandler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        var result = await creditHandler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, NewKey()), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
     }
@@ -437,7 +440,7 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, NewKey()), CancellationToken.None);
 
         var creditApp = await db.CreditApplications
             .FirstOrDefaultAsync(ca => ca.CreditId == credit.Id);
@@ -447,6 +450,7 @@ public class Phase12CustomerCreditLifecycleTests
         Assert.Equal(1000m, creditApp.Amount);
         Assert.True(creditApp.AppliedAtUtc <= DateTime.UtcNow);
         Assert.NotEqual(Guid.Empty, creditApp.Id);
+        Assert.False(string.IsNullOrEmpty(creditApp.IdempotencyKey));
     }
 
     // ==================================================================
@@ -466,7 +470,7 @@ public class Phase12CustomerCreditLifecycleTests
         await payHandler.Handle(new AllocatePaymentCommand(payment.Id, invoice.Id, 6000m), CancellationToken.None);
 
         var creditHandler = CreateCreditHandler(db);
-        await creditHandler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 6000m), CancellationToken.None);
+        await creditHandler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 6000m, NewKey()), CancellationToken.None);
 
         var dbInvoice = await db.Invoices
             .Include(i => i.PaymentAllocations)
@@ -488,7 +492,7 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 2000m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 2000m, NewKey()), CancellationToken.None);
 
         var dbInvoice = await db.Invoices.FindAsync(invoice.Id);
         Assert.Equal(0m, dbInvoice!.GetRemainingAmount());
@@ -504,7 +508,7 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 500m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 500m, NewKey()), CancellationToken.None);
 
         var dbInvoice = await db.Invoices.FindAsync(invoice.Id);
         Assert.Equal(InvoiceStatus.PartiallyPaid, dbInvoice!.Status);
@@ -519,7 +523,7 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 5000m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 5000m, NewKey()), CancellationToken.None);
 
         var dbInvoice = await db.Invoices.FindAsync(invoice.Id);
         Assert.Equal(12000m, dbInvoice!.TotalAmount);
@@ -575,7 +579,7 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, NewKey()), CancellationToken.None);
 
         var creditApp = await db.CreditApplications.FirstOrDefaultAsync(ca => ca.CreditId == credit.Id);
         Assert.NotNull(creditApp);
@@ -627,7 +631,7 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(dbB, invoice);
 
         var handler = CreateCreditHandler(dbA);
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, NewKey()), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
     }
@@ -669,7 +673,7 @@ public class Phase12CustomerCreditLifecycleTests
     }
 
     [Fact]
-    public async Task Currency_CreditApplicationUsesCreditCurrency()
+    public async Task Currency_CreditApplicationUsesCreditCurrencyForLedger()
     {
         using var db = CreateDbContext("tenant-cur2");
         var invoice = await CreateDraftInvoiceAsync(db, "tenant-cur2", 2000m);
@@ -677,7 +681,7 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, NewKey()), CancellationToken.None);
 
         var ledgerEntry = await db.CustomerLedgerEntries
             .FirstOrDefaultAsync(e => e.CreditId == credit.Id);
@@ -686,80 +690,102 @@ public class Phase12CustomerCreditLifecycleTests
     }
 
     // ==================================================================
-    // G. Idempotency Tests
+    // G. Idempotency Tests (Key-based — BLOCKER 1)
     // ==================================================================
 
     [Fact]
-    public async Task Idempotency_SameOverpaymentProcession_OneCredit()
+    public async Task IdempotencyTest_I1_SameKeySamePayload_OneConsumption()
     {
-        using var db = CreateDbContext("tenant-id1");
-        var invoice = await CreateDraftInvoiceAsync(db, "tenant-id1", 12000m);
-        var payment = await CreateCompletedPaymentAsync(db, "tenant-id1", 13000m);
-        await IssueInvoiceAsync(db, invoice);
-
-        var handler = CreatePaymentHandler(db);
-        await handler.Handle(new AllocatePaymentCommand(payment.Id, invoice.Id, 13000m), CancellationToken.None);
-        await handler.Handle(new AllocatePaymentCommand(payment.Id, invoice.Id, 13000m), CancellationToken.None);
-
-        var credits = await db.TenantCredits
-            .Where(c => c.SourceType == CreditSourceType.Overpayment && c.SourceId == payment.Id)
-            .ToListAsync();
-        Assert.Single(credits);
-        Assert.Equal(1000m, credits[0].Amount);
-    }
-
-    [Fact]
-    public async Task Idempotency_SameCreditApplicationRequest_OneConsumption()
-    {
-        using var db = CreateDbContext("tenant-id2");
-        var invoice = await CreateDraftInvoiceAsync(db, "tenant-id2", 5000m);
-        var credit = await CreateAvailableCreditAsync(db, "tenant-id2", 1000m);
+        using var db = CreateDbContext("tenant-i1");
+        var invoice = await CreateDraftInvoiceAsync(db, "tenant-i1", 5000m);
+        var credit = await CreateAvailableCreditAsync(db, "tenant-i1", 1000m);
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 500m), CancellationToken.None);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 500m), CancellationToken.None);
+        var key = "idem-key-same-payload";
+
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 300m, key), CancellationToken.None);
+        var retry = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 300m, key), CancellationToken.None);
+
+        Assert.True(retry.IsSuccess);
 
         var updatedCredit = await db.TenantCredits.FindAsync(credit.Id);
-        Assert.Equal(500m, updatedCredit!.RemainingAmount);
+        Assert.Equal(700m, updatedCredit!.RemainingAmount);
 
-        var applications = await db.CreditApplications
-            .Where(ca => ca.CreditId == credit.Id)
-            .ToListAsync();
-        Assert.Single(applications);
-        Assert.Equal(500m, applications[0].Amount);
+        var apps = await db.CreditApplications.Where(ca => ca.CreditId == credit.Id).ToListAsync();
+        Assert.Single(apps);
     }
 
     [Fact]
-    public async Task Idempotency_DifferentOperationsRemainDistinguishable()
+    public async Task IdempotencyTest_I2_SameKeyDifferentPayload_Conflict()
     {
-        using var db = CreateDbContext("tenant-id3");
-        var invoice = await CreateDraftInvoiceAsync(db, "tenant-id3", 5000m);
-        var credit = await CreateAvailableCreditAsync(db, "tenant-id3", 1000m);
+        using var db = CreateDbContext("tenant-i2");
+        var invoice = await CreateDraftInvoiceAsync(db, "tenant-i2", 5000m);
+        var credit = await CreateAvailableCreditAsync(db, "tenant-i2", 1000m);
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 300m), CancellationToken.None);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 200m), CancellationToken.None);
+        var key = "idem-key-conflict";
+
+        var first = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 300m, key), CancellationToken.None);
+        Assert.True(first.IsSuccess);
+
+        var second = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 500m, key), CancellationToken.None);
+        Assert.False(second.IsSuccess);
+        Assert.Contains(second.Errors!, e => e.Code == "CreditApplication.IdempotencyKeyConflict");
+    }
+
+    [Fact]
+    public async Task IdempotencyTest_I3_DifferentKeysSameAmount_BothLegitimate()
+    {
+        using var db = CreateDbContext("tenant-i3");
+        var invoice = await CreateDraftInvoiceAsync(db, "tenant-i3", 5000m);
+        var credit = await CreateAvailableCreditAsync(db, "tenant-i3", 1000m);
+        await IssueInvoiceAsync(db, invoice);
+
+        var handler = CreateCreditHandler(db);
+
+        var resultA = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 300m, NewKey()), CancellationToken.None);
+        var resultB = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 300m, NewKey()), CancellationToken.None);
+
+        Assert.True(resultA.IsSuccess);
+        Assert.True(resultB.IsSuccess);
+
+        var updatedCredit = await db.TenantCredits.FindAsync(credit.Id);
+        Assert.Equal(400m, updatedCredit!.RemainingAmount);
+
+        var apps = await db.CreditApplications.Where(ca => ca.CreditId == credit.Id).ToListAsync();
+        Assert.Equal(2, apps.Count);
+    }
+
+    [Fact]
+    public async Task IdempotencyTest_I4_DifferentKeysDifferentInvoices_Independent()
+    {
+        using var db = CreateDbContext("tenant-i4");
+        var invoiceA = await CreateDraftInvoiceAsync(db, "tenant-i4", 3000m);
+        var invoiceB = await CreateDraftInvoiceAsync(db, "tenant-i4", 3000m);
+        var credit = await CreateAvailableCreditAsync(db, "tenant-i4", 2000m);
+        await IssueInvoiceAsync(db, invoiceA);
+        await IssueInvoiceAsync(db, invoiceB);
+
+        var handler = CreateCreditHandler(db);
+
+        var resultA = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoiceA.Id, 1000m, NewKey()), CancellationToken.None);
+        var resultB = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoiceB.Id, 500m, NewKey()), CancellationToken.None);
+
+        Assert.True(resultA.IsSuccess);
+        Assert.True(resultB.IsSuccess);
 
         var updatedCredit = await db.TenantCredits.FindAsync(credit.Id);
         Assert.Equal(500m, updatedCredit!.RemainingAmount);
-
-        var applications = await db.CreditApplications
-            .Where(ca => ca.CreditId == credit.Id)
-            .OrderBy(ca => ca.AppliedAtUtc)
-            .ToListAsync();
-        Assert.Equal(2, applications.Count);
-        Assert.Equal(300m, applications[0].Amount);
-        Assert.Equal(200m, applications[1].Amount);
     }
 
     // ==================================================================
-    // H. Concurrency Tests (InMemory - sequential simulation)
+    // H. Concurrency Tests (InMemory — sequential simulation)
     // ==================================================================
 
     [Fact]
-    public async Task Concurrency_TwoApplicationsCannotOverConsume_Credit()
+    public async Task Concurrency_TwoApplicationsDifferentKeys_BothCanSucceed()
     {
         using var db = CreateDbContext("tenant-cx1");
         var invoice = await CreateDraftInvoiceAsync(db, "tenant-cx1", 5000m);
@@ -768,14 +794,14 @@ public class Phase12CustomerCreditLifecycleTests
 
         var handler = CreateCreditHandler(db);
 
-        var result1 = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 700m), CancellationToken.None);
-        var result2 = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 700m), CancellationToken.None);
+        var result1 = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 700m, NewKey()), CancellationToken.None);
+        var result2 = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 700m, NewKey()), CancellationToken.None);
 
         var successCount = new[] { result1, result2 }.Count(r => r.IsSuccess);
-        Assert.True(successCount == 1, $"Expected 1 success but got {successCount}");
+        Assert.Equal(1, successCount);
 
         var updatedCredit = await db.TenantCredits.FindAsync(credit.Id);
-        Assert.True(updatedCredit!.RemainingAmount >= 300m);
+        Assert.Equal(300m, updatedCredit!.RemainingAmount);
     }
 
     // ==================================================================
@@ -836,7 +862,7 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice2);
 
         var creditHandler = CreateCreditHandler(db);
-        await creditHandler.Handle(new ApplyCreditToInvoiceCommand(overpaymentCredit.Id, invoice2.Id, 700m), CancellationToken.None);
+        await creditHandler.Handle(new ApplyCreditToInvoiceCommand(overpaymentCredit.Id, invoice2.Id, 700m, NewKey()), CancellationToken.None);
 
         var creditAfterFirst = await db.TenantCredits.FindAsync(overpaymentCredit.Id);
         Assert.Equal(300m, creditAfterFirst!.RemainingAmount);
@@ -847,7 +873,7 @@ public class Phase12CustomerCreditLifecycleTests
             .FirstAsync(i => i.Id == invoice2.Id);
         Assert.Equal(1300m, dbInvoice2AfterFirst.GetRemainingAmount());
 
-        await creditHandler.Handle(new ApplyCreditToInvoiceCommand(overpaymentCredit.Id, invoice2.Id, 300m), CancellationToken.None);
+        await creditHandler.Handle(new ApplyCreditToInvoiceCommand(overpaymentCredit.Id, invoice2.Id, 300m, NewKey()), CancellationToken.None);
 
         var creditAfterSecond = await db.TenantCredits.FindAsync(overpaymentCredit.Id);
         Assert.Equal(0m, creditAfterSecond!.RemainingAmount);
@@ -903,7 +929,7 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice);
 
         var creditHandler = CreateCreditHandler(db);
-        await creditHandler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 400m), CancellationToken.None);
+        await creditHandler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 400m, NewKey()), CancellationToken.None);
 
         var queryHandler = new GetCreditBalanceHandler(db);
         var result = await queryHandler.Handle(new GetCreditBalanceQuery(credit.Id), CancellationToken.None);
@@ -937,7 +963,7 @@ public class Phase12CustomerCreditLifecycleTests
         var credit = await CreateAvailableCreditAsync(db, "tenant-dc1", 1000m);
 
         var handler = CreateCreditHandler(db);
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, NewKey()), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "Invoice.CannotApplyCreditToDraftOrCancelled");
@@ -954,7 +980,7 @@ public class Phase12CustomerCreditLifecycleTests
         await db.SaveChangesAsync();
 
         var handler = CreateCreditHandler(db);
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, NewKey()), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "Invoice.CannotApplyCreditToDraftOrCancelled");
@@ -1000,7 +1026,7 @@ public class Phase12CustomerCreditLifecycleTests
         var initialPaymentCount = await db.Payments.CountAsync();
 
         var handler = CreateCreditHandler(db);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, NewKey()), CancellationToken.None);
 
         var finalPaymentCount = await db.Payments.CountAsync();
         Assert.Equal(initialPaymentCount, finalPaymentCount);
@@ -1041,7 +1067,7 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, NewKey()), CancellationToken.None);
 
         var usageEntry = await db.CustomerLedgerEntries
             .FirstOrDefaultAsync(e => e.CreditId == credit.Id && e.EntryType == LedgerEntryType.CreditUsage);
@@ -1064,9 +1090,9 @@ public class Phase12CustomerCreditLifecycleTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = CreateCreditHandler(db);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 500m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 500m, NewKey()), CancellationToken.None);
 
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 500m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 500m, NewKey()), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
     }

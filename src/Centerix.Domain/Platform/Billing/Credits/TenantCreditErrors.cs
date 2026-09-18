@@ -25,6 +25,8 @@ public static class TenantCreditErrors
     public static Error CurrencyMismatch =>
         Error.Validation("TenantCredit.CurrencyMismatch", "Credit currency does not match the invoice currency.");
 
-    public static Error AlreadyAppliedToInvoice =>
-        Error.Conflict("TenantCredit.AlreadyAppliedToInvoice", "This credit application already exists (idempotent retry).");
+    public static Error IdempotencyKeyConflict =>
+        Error.Conflict("CreditApplication.IdempotencyKeyConflict",
+            "A credit application with this idempotency key already exists with different parameters. " +
+            "Reuse the same key with identical parameters for idempotent retry, or use a new key for a new operation.");
 }

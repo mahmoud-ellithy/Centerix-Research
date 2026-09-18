@@ -193,7 +193,7 @@ public class Phase10_1CreditConcurrencySqlServerTests
                     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                     AuthorizeTenant(scope.ServiceProvider, tenantId);
                     var handler = await CreateHandler(db);
-                    return await handler.Handle(new ApplyCreditToInvoiceCommand(creditId, invoiceId, 700m), ct);
+                    return await handler.Handle(new ApplyCreditToInvoiceCommand(creditId, invoiceId, 700m, Guid.NewGuid().ToString("N")), ct);
                 },
                 async ct =>
                 {
@@ -201,7 +201,7 @@ public class Phase10_1CreditConcurrencySqlServerTests
                     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                     AuthorizeTenant(scope.ServiceProvider, tenantId);
                     var handler = await CreateHandler(db);
-                    return await handler.Handle(new ApplyCreditToInvoiceCommand(creditId, invoiceId, 700m), ct);
+                    return await handler.Handle(new ApplyCreditToInvoiceCommand(creditId, invoiceId, 700m, Guid.NewGuid().ToString("N")), ct);
                 },
                 CancellationToken.None);
 
@@ -276,7 +276,7 @@ public class Phase10_1CreditConcurrencySqlServerTests
             var handler = await CreateHandler(db);
 
             var result = await handler.Handle(
-                new ApplyCreditToInvoiceCommand(creditId, invoiceId, 1000m),
+                new ApplyCreditToInvoiceCommand(creditId, invoiceId, 1000m, Guid.NewGuid().ToString("N")),
                 CancellationToken.None);
 
             Assert.False(result.IsSuccess);

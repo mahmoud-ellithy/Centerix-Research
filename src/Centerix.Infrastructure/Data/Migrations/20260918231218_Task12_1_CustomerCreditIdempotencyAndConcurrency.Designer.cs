@@ -12,8 +12,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Centerix.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260918222534_Task12_CustomerCreditLifecycle")]
-    partial class Task12_CustomerCreditLifecycle
+    [Migration("20260918231218_Task12_1_CustomerCreditIdempotencyAndConcurrency")]
+    partial class Task12_1_CustomerCreditIdempotencyAndConcurrency
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -375,6 +375,11 @@ namespace Centerix.Infrastructure.Data.Migrations
                     b.Property<Guid>("CreditId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
                     b.Property<Guid>("InvoiceId")
                         .HasColumnType("uniqueidentifier");
 
@@ -405,6 +410,10 @@ namespace Centerix.Infrastructure.Data.Migrations
                     b.HasIndex("TenantId");
 
                     b.HasIndex("TenantId", "CreditId");
+
+                    b.HasIndex("TenantId", "IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("[IdempotencyKey] <> ''");
 
                     b.HasIndex("TenantId", "InvoiceId");
 

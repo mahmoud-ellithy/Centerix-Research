@@ -64,7 +64,8 @@ public class CreateTenantCreditHandler(
 public record ApplyCreditToInvoiceCommand(
     Guid CreditId,
     Guid InvoiceId,
-    decimal Amount) : IRequest<Result<Updated>>;
+    decimal Amount,
+    string IdempotencyKey) : IRequest<Result<Updated>>;
 
 public class ApplyCreditToInvoiceHandler(
     IAppDbContext dbContext,
@@ -179,31 +180,49 @@ public class ApplyCreditToInvoiceHandler(
             return TenantCreditErrors.CrossTenant;
         }
 
-        // Currency integrity: credit and invoice must use the same currency
-        if (!string.Equals(credit.CurrencyCode, invoice.Subtotal > 0 ? "EGP" : credit.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+        // ── CURRENCY INTEGRITY ──────────────────────────────────────────
+        // Determine the authoritative currency for the invoice via its Contract.
+        // Invoices without a contract (legacy) pass currency validation; the system
+        // does not assume a hardcoded currency.
+        if (invoice.ContractId.HasValue)
         {
-            // Only validate if we can determine the invoice currency
-            // For now, invoices don't have a CurrencyCode field — validate against the credit's own currency
+            var contract = await dbContext.Contracts
+                .FirstOrDefaultAsync(c => c.Id == invoice.ContractId.Value, cancellationToken);
+
+            if (contract is not null &&
+                !string.Equals(credit.CurrencyCode, contract.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+            {
+                return TenantCreditErrors.CurrencyMismatch;
+            }
         }
 
-        // ── IDEMPOTENCY CHECK ──────────────────────────────────────────
-        // Check if an identical credit application already exists (same credit + invoice + amount).
-        // This prevents duplicate consumption on retry while still allowing multiple legitimate
-        // partial applications with different amounts.
+        // ── IDEMPOTENCY CHECK (key-based) ────────────────────────────────
+        // The IdempotencyKey identifies the logical client operation.
+        // Same key + same parameters → idempotent retry (return success).
+        // Same key + different parameters → conflict (reject).
+        // Different keys → legitimate separate operations.
         var existingApplication = await dbContext.CreditApplications
-            .Where(ca => ca.CreditId == credit.Id
-                && ca.InvoiceId == request.InvoiceId
-                && ca.Amount == request.Amount
-                && ca.TenantId == credit.TenantId)
+            .Where(ca => ca.TenantId == credit.TenantId
+                && ca.IdempotencyKey == request.IdempotencyKey)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (existingApplication is not null)
         {
-            if (transaction is not null)
+            // Existing application found — check if parameters match
+            if (existingApplication.CreditId == credit.Id
+                && existingApplication.InvoiceId == request.InvoiceId
+                && existingApplication.Amount == request.Amount)
             {
-                await transaction.CommitAsync(cancellationToken);
+                // Idempotent retry — same logical request. Return success.
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+                return Result.Updated;
             }
-            return Result.Updated;
+
+            // Idempotency key conflict — same key, different parameters.
+            return TenantCreditErrors.IdempotencyKeyConflict;
         }
 
         // Load invoice with credit applications to compute remaining
@@ -242,7 +261,8 @@ public class ApplyCreditToInvoiceHandler(
             credit.Id,
             invoice.Id,
             request.Amount,
-            DateTime.UtcNow);
+            DateTime.UtcNow,
+            request.IdempotencyKey);
 
         if (!creditApplicationResult.IsSuccess)
         {
@@ -294,6 +314,16 @@ public class ApplyCreditToInvoiceHandler(
             return Error.Conflict("CreditApplication.ConcurrencyConflict",
                 "This credit application conflicted with another concurrent request. Please retry.");
         }
+        catch (DbUpdateException ex) when (IsDuplicateKeyException(ex))
+        {
+            // Concurrent insert created an application with the same IdempotencyKey
+            // between our check and our insert. Treat as idempotent retry — return success.
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+            return Result.Updated;
+        }
         catch (Exception ex) when (IsDeadlockException(ex))
         {
             if (transaction is not null)
@@ -319,12 +349,22 @@ public class ApplyCreditToInvoiceHandler(
                 CreditApplicationId = creditApplication.Id,
                 InvoiceId = request.InvoiceId,
                 request.Amount,
+                request.IdempotencyKey,
                 CreditRemaining = credit.RemainingAmount,
                 CreditStatus = credit.Status.ToString()
             }),
             cancellationToken: cancellationToken);
 
         return Result.Updated;
+    }
+
+    private static bool IsDuplicateKeyException(DbUpdateException ex)
+    {
+        if (ex.InnerException is SqlException sqlEx)
+        {
+            return sqlEx.Number == 2601 || sqlEx.Number == 2627;
+        }
+        return false;
     }
 
     private static bool IsDeadlockException(Exception ex)

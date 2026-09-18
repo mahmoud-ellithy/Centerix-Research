@@ -34,6 +34,10 @@ public class CreditApplicationConfiguration : IEntityTypeConfiguration<CreditApp
             .HasColumnType("datetime2")
             .IsRequired();
 
+        builder.Property(ca => ca.IdempotencyKey)
+            .HasMaxLength(256)
+            .IsRequired();
+
         builder.Property(ca => ca.RowVersion)
             .IsRowVersion();
 
@@ -51,5 +55,12 @@ public class CreditApplicationConfiguration : IEntityTypeConfiguration<CreditApp
         builder.HasIndex(ca => new { ca.TenantId, ca.CreditId });
         builder.HasIndex(ca => new { ca.TenantId, ca.InvoiceId });
         builder.HasIndex(ca => new { ca.TenantId, ca.CreditId, ca.InvoiceId });
+
+        // Idempotency: unique constraint per tenant so that the same key cannot produce
+        // two different credit applications. Empty/null keys (legacy rows) are excluded
+        // via a filter so they do not collide.
+        builder.HasIndex(ca => new { ca.TenantId, ca.IdempotencyKey })
+            .IsUnique()
+            .HasFilter("[IdempotencyKey] <> ''");
     }
 }

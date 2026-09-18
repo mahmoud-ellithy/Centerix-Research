@@ -108,7 +108,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 400m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 400m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
 
@@ -133,9 +133,9 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 400m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 400m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
-        var result2 = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 600m), CancellationToken.None);
+        var result2 = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 600m, Guid.NewGuid().ToString("N")), CancellationToken.None);
         Assert.True(result2.IsSuccess);
 
         var updatedCredit = await db.TenantCredits.FindAsync(credit.Id);
@@ -160,7 +160,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 400m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 400m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         var updatedInvoice = await db.Invoices
             .Include(i => i.CreditApplications)
@@ -182,7 +182,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
 
@@ -212,8 +212,8 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoiceB);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        var result1 = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoiceA.Id, 400m), CancellationToken.None);
-        var result2 = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoiceB.Id, 600m), CancellationToken.None);
+        var result1 = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoiceA.Id, 400m, Guid.NewGuid().ToString("N")), CancellationToken.None);
+        var result2 = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoiceB.Id, 600m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.True(result1.IsSuccess);
         Assert.True(result2.IsSuccess);
@@ -254,7 +254,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1001m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1001m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "TenantCredit.InvalidApplicationAmount");
@@ -269,9 +269,9 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 600m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 600m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
-        var result2 = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 600m), CancellationToken.None);
+        var result2 = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 600m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.False(result2.IsSuccess);
         Assert.Contains(result2.Errors!, e => e.Code == "TenantCredit.InvalidApplicationAmount");
@@ -290,7 +290,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 501m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 501m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "TenantCredit.ExceedsInvoiceRemaining");
@@ -305,7 +305,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 500m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 500m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
 
@@ -333,7 +333,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await paymentHandler.Handle(new AllocatePaymentCommand(payment.Id, invoice.Id, 1000m), CancellationToken.None);
 
         var creditHandler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        await creditHandler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        await creditHandler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         var updatedInvoice = await db.Invoices
             .Include(i => i.PaymentAllocations)
@@ -357,7 +357,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await paymentHandler.Handle(new AllocatePaymentCommand(payment.Id, invoice.Id, 1000m), CancellationToken.None);
 
         var creditHandler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        await creditHandler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 500m), CancellationToken.None);
+        await creditHandler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 500m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         var updatedInvoice = await db.Invoices
             .Include(i => i.PaymentAllocations)
@@ -380,7 +380,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         var ledgerEntries = await db.CustomerLedgerEntries
             .Where(e => e.CreditId == credit.Id)
@@ -399,7 +399,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         var creditApplication = await db.CreditApplications
             .FirstOrDefaultAsync(ca => ca.CreditId == credit.Id);
@@ -425,7 +425,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         var creditApplication = await db.CreditApplications
             .FirstOrDefaultAsync(ca => ca.CreditId == credit.Id);
@@ -451,7 +451,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(dbB, invoiceB);
 
         var handler = new ApplyCreditToInvoiceHandler(dbA, Substitute.For<IAuditWriter>());
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(creditA.Id, invoiceB.Id, 1000m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(creditA.Id, invoiceB.Id, 1000m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         // Cross-tenant: either invoice is not visible (query filter blocks) or explicit cross-tenant check
@@ -473,7 +473,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         var credit = await CreateAvailableCreditAsync(db, "tenant-dc", 1000m);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "Invoice.CannotApplyCreditToDraftOrCancelled");
@@ -490,7 +490,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await db.SaveChangesAsync();
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "Invoice.CannotApplyCreditToDraftOrCancelled");
@@ -509,9 +509,9 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
-        var result2 = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m), CancellationToken.None);
+        var result2 = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.False(result2.IsSuccess);
         Assert.Contains(result2.Errors!, e => e.Code == "TenantCredit.NotAvailable");
@@ -535,7 +535,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await paymentHandler.Handle(new AllocatePaymentCommand(payment.Id, invoice.Id, 2000m), CancellationToken.None);
 
         var creditHandler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        await creditHandler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1500m), CancellationToken.None);
+        await creditHandler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1500m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         var updatedInvoice = await db.Invoices
             .Include(i => i.PaymentAllocations)
@@ -562,17 +562,17 @@ public class Phase10_1CreditApplicationCorrectionTests
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
 
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 300m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 300m, Guid.NewGuid().ToString("N")), CancellationToken.None);
         var creditAfterFirst = await db.TenantCredits.FindAsync(credit.Id);
         Assert.Equal(700m, creditAfterFirst!.RemainingAmount);
         Assert.Equal(CreditStatus.PartiallyApplied, creditAfterFirst.Status);
 
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 200m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 200m, Guid.NewGuid().ToString("N")), CancellationToken.None);
         var creditAfterSecond = await db.TenantCredits.FindAsync(credit.Id);
         Assert.Equal(500m, creditAfterSecond!.RemainingAmount);
         Assert.Equal(CreditStatus.PartiallyApplied, creditAfterSecond.Status);
 
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 500m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 500m, Guid.NewGuid().ToString("N")), CancellationToken.None);
         var creditAfterThird = await db.TenantCredits.FindAsync(credit.Id);
         Assert.Equal(0m, creditAfterThird!.RemainingAmount);
         Assert.Equal(CreditStatus.Applied, creditAfterThird.Status);
@@ -591,7 +591,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 0m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 0m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "TenantCredit.InvalidApplicationAmount");
@@ -606,7 +606,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoice);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, -100m), CancellationToken.None);
+        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, -100m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Errors!, e => e.Code == "TenantCredit.InvalidApplicationAmount");
@@ -629,9 +629,9 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoiceC);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoiceA.Id, 200m), CancellationToken.None);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoiceB.Id, 200m), CancellationToken.None);
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoiceC.Id, 100m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoiceA.Id, 200m, Guid.NewGuid().ToString("N")), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoiceB.Id, 200m, Guid.NewGuid().ToString("N")), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoiceC.Id, 100m, Guid.NewGuid().ToString("N")), CancellationToken.None);
 
         var applications = await db.CreditApplications
             .Where(ca => ca.CreditId == credit.Id)
