@@ -211,7 +211,7 @@ public class ChangeSubscriptionPlanHandler(
             var contractResult = Contract.Create(
                 id: Guid.NewGuid(),
                 tenantId: oldSubscription.TenantId,
-                contractNumber: GenerateContractNumber(),
+                contractNumber: GenerateContractNumber(now),
                 planId: plan.Id,
                 effectiveAtUtc: effectiveAt,
                 endsAtUtc: endsAt,
@@ -287,14 +287,17 @@ public class ChangeSubscriptionPlanHandler(
 
             var billingCycle = billingCycleResult.Value;
 
-            var cycleDurationMonths = durationMonths;
-            if (cycleDurationMonths <= 0)
-                cycleDurationMonths = 1;
-
-            var subtotal = calc.MonthlyListPrice * cycleDurationMonths;
+            // ── Invoice amounts MUST derive from the authoritative Offer/Contract ──
+            // The Offer engine (PromotionCalculationService) is the single source of truth:
+            //   - BaseAmount: tier price when PricingTier applies, else MonthlyPrice × Duration
+            //   - DiscountAmount: promotion discount applied to BaseAmount
+            //   - FinalAmount: BaseAmount - DiscountAmount
+            // The Contract.ContractedAmount is set to FinalAmount above.
+            // Invoice.TotalAmount MUST equal Contract.ContractedAmount (no independent reconstruction).
+            var subtotal = calc.BaseAmount;
             var discountAmount = calc.DiscountAmount;
             var taxAmount = 0m;
-            var totalAmount = subtotal - discountAmount + taxAmount;
+            var totalAmount = calc.FinalAmount;
 
             var invoiceNumber = $"INV-{now:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
 
@@ -402,8 +405,8 @@ public class ChangeSubscriptionPlanHandler(
         };
     }
 
-    private static string GenerateContractNumber()
+    private static string GenerateContractNumber(DateTime now)
     {
-        return $"CTR-CHANGE-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}";
+        return $"CTR-CHANGE-{now:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}";
     }
 }
