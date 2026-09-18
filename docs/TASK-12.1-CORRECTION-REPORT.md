@@ -1,10 +1,10 @@
-# Task 12.1: Customer Credit Correction & Concurrency Hardening — Completion Report
+# Task 12.1 / 12.1.1: Customer Credit Correction & Concurrency Hardening — Completion Report
 
 **Date:** 2026-09-19
 **Status:** ✅ COMPLETE
-**Base Commit:** `c0ed0cf` (Task 12)
+**Implementation SHA:** `9dc99fc` (12.1) + pending (12.1.1)
 **Build:** 0 errors
-**Tests:** 1133 InMemory passed, 5 SQL Server passed, 0 failures
+**Tests:** 1133 InMemory passed, 8 SQL Server passed, 0 failures
 
 ---
 
@@ -12,8 +12,12 @@
 
 Task 12.1 fixed three blockers identified during the Task 12 review:
 1. **CreditApplication Idempotency** — replaced content-based duplicate detection with explicit `IdempotencyKey`
-2. **Real SQL Server Concurrency** — added 5 Testcontainers-based concurrency tests proving safety under real database locking
+2. **Real SQL Server Concurrency** — added 6 Testcontainers-based concurrency tests proving safety under real database locking
 3. **Currency Integrity** — replaced the no-op currency check with authoritative validation via `Contract.CurrencyCode`
+
+Task 12.1.1 fixed one remaining race condition:
+4. **Duplicate-Key Race** — on SQL 2601/2627, re-read persisted application and compare full payload instead of blindly returning success
+5. **Idempotency Check Ordering** — moved idempotency check BEFORE financial validations so retries survive partial credit consumption by winner
 
 All existing Task 12 behavior is preserved. Full regression passes with zero failures.
 

@@ -143,6 +143,42 @@ public class ApplyCreditToInvoiceHandler(
             return TenantCreditErrors.NotFound;
         }
 
+        // ── IDEMPOTENCY CHECK (key-based, BEFORE financial validations) ─
+        // This MUST happen before any amount/capacity checks so that a retry
+        // after the credit has been partially consumed by the winning request
+        // still returns the correct idempotent result instead of failing with
+        // InvalidApplicationAmount.
+        //
+        // The IdempotencyKey identifies the logical client operation.
+        // Same key + same parameters → idempotent retry (return success).
+        // Same key + different parameters → conflict (reject).
+        // Different keys → legitimate separate operations.
+        var existingApplication = await dbContext.CreditApplications
+            .Where(ca => ca.TenantId == credit.TenantId
+                && ca.IdempotencyKey == request.IdempotencyKey)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (existingApplication is not null)
+        {
+            // Existing application found — check if parameters match
+            if (existingApplication.CreditId == credit.Id
+                && existingApplication.InvoiceId == request.InvoiceId
+                && existingApplication.Amount == request.Amount)
+            {
+                // Idempotent retry — same logical request. Return success.
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+                return Result.Updated;
+            }
+
+            // Idempotency key conflict — same key, different parameters.
+            return TenantCreditErrors.IdempotencyKeyConflict;
+        }
+
+        // ── FINANCIAL VALIDATIONS (only when no idempotent match exists) ──
+
         if (credit.Status != CreditStatus.Available && credit.Status != CreditStatus.PartiallyApplied)
         {
             return TenantCreditErrors.NotAvailable;
@@ -194,35 +230,6 @@ public class ApplyCreditToInvoiceHandler(
             {
                 return TenantCreditErrors.CurrencyMismatch;
             }
-        }
-
-        // ── IDEMPOTENCY CHECK (key-based) ────────────────────────────────
-        // The IdempotencyKey identifies the logical client operation.
-        // Same key + same parameters → idempotent retry (return success).
-        // Same key + different parameters → conflict (reject).
-        // Different keys → legitimate separate operations.
-        var existingApplication = await dbContext.CreditApplications
-            .Where(ca => ca.TenantId == credit.TenantId
-                && ca.IdempotencyKey == request.IdempotencyKey)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (existingApplication is not null)
-        {
-            // Existing application found — check if parameters match
-            if (existingApplication.CreditId == credit.Id
-                && existingApplication.InvoiceId == request.InvoiceId
-                && existingApplication.Amount == request.Amount)
-            {
-                // Idempotent retry — same logical request. Return success.
-                if (transaction is not null)
-                {
-                    await transaction.CommitAsync(cancellationToken);
-                }
-                return Result.Updated;
-            }
-
-            // Idempotency key conflict — same key, different parameters.
-            return TenantCreditErrors.IdempotencyKeyConflict;
         }
 
         // Load invoice with credit applications to compute remaining
@@ -317,12 +324,49 @@ public class ApplyCreditToInvoiceHandler(
         catch (DbUpdateException ex) when (IsDuplicateKeyException(ex))
         {
             // Concurrent insert created an application with the same IdempotencyKey
-            // between our check and our insert. Treat as idempotent retry — return success.
+            // between our check and our insert. Re-read the persisted application
+            // and compare the complete payload to distinguish:
+            //   - Same key + same payload → idempotent retry (return success)
+            //   - Same key + different payload → conflict (reject)
             if (transaction is not null)
             {
                 await transaction.RollbackAsync(cancellationToken);
             }
-            return Result.Updated;
+
+            // Clear ChangeTracker to discard stale tracked state from the rolled-back
+            // transaction. Without this, the re-read may return the locally-tracked
+            // (uncommitted) entity instead of the persisted one.
+            if (dbContext is DbContext dbc)
+            {
+                dbc.ChangeTracker.Clear();
+            }
+
+            // Re-read the persisted CreditApplication using the unique constraint
+            // (TenantId, IdempotencyKey).
+            var persistedApp = await dbContext.CreditApplications
+                .Where(ca => ca.TenantId == credit.TenantId
+                    && ca.IdempotencyKey == request.IdempotencyKey)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (persistedApp is null)
+            {
+                // Defensive: should not happen since we got a duplicate key error.
+                return Error.Conflict("CreditApplication.ConcurrencyConflict",
+                    "Credit application could not be verified after concurrent insert.");
+            }
+
+            // Compare the complete logical request payload.
+            if (persistedApp.CreditId == credit.Id
+                && persistedApp.InvoiceId == request.InvoiceId
+                && persistedApp.Amount == request.Amount)
+            {
+                // Idempotent retry — same logical request. Return success without
+                // consuming additional credit or creating another application.
+                return Result.Updated;
+            }
+
+            // Same IdempotencyKey but different payload — deterministic conflict.
+            return TenantCreditErrors.IdempotencyKeyConflict;
         }
         catch (Exception ex) when (IsDeadlockException(ex))
         {

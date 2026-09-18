@@ -513,7 +513,7 @@ public class Phase10InvoiceFinancialIntegrityTests
     }
 
     [Fact]
-    public async Task ApplyCredit_AlreadyApplied_IsRejected()
+    public async Task ApplyCredit_AlreadyApplied_IsIdempotent()
     {
         using var db = CreateDbContext("tenant-imm");
         var invoice = await CreateDraftInvoiceAsync(db, "tenant-imm", 12000m);
@@ -523,12 +523,17 @@ public class Phase10InvoiceFinancialIntegrityTests
         await issueHandler.Handle(new IssueInvoiceCommand(invoice.Id, DateTime.UtcNow, null), CancellationToken.None);
 
         var handler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, "idem-key-1"), CancellationToken.None);
+        var first = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, "idem-key-1"), CancellationToken.None);
+        Assert.True(first.IsSuccess);
 
-        var result = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, "idem-key-1"), CancellationToken.None);
+        // Same key + same payload → idempotent success (no double consumption)
+        var second = await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 1000m, "idem-key-1"), CancellationToken.None);
+        Assert.True(second.IsSuccess);
 
-        Assert.False(result.IsSuccess);
-        Assert.Contains(result.Errors!, e => e.Code == "TenantCredit.NotAvailable");
+        // Only one application persisted
+        var apps = await db.CreditApplications.Where(ca => ca.CreditId == credit.Id).ToListAsync();
+        Assert.Single(apps);
+        Assert.Equal(1000m, apps[0].Amount);
     }
 
     [Fact]

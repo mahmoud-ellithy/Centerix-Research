@@ -571,4 +571,113 @@ public class Phase12_1CreditConcurrencySqlServerTests
                 $"Expected cross-tenant rejection. Got: {string.Join(", ", result.Errors!.Select(e => e.Code))}");
         }
     }
+
+    // ==================================================================
+    // SCENARIO 6 — Concurrent same key, different payload
+    // Same IdempotencyKey but different Amounts (700 vs 500).
+    // Exactly one persists; the loser must return IdempotencyKeyConflict.
+    // ==================================================================
+
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    [Trait("Category", "Phase12_1Concurrency")]
+    public async Task ConcurrentCreditApplications_SameKeyDifferentPayload_ConflictOnLoser()
+    {
+        var tenantId = $"tenant-{Guid.NewGuid():N}"[..20];
+        Guid creditId;
+        Guid invoiceId;
+        var sharedKey = $"idem-diff-{Guid.NewGuid():N}";
+
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await EnsureTenantExists(scope.ServiceProvider, tenantId);
+
+            var invoice = Invoice.Create(
+                Guid.NewGuid(), $"INV-{tenantId}",
+                new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31),
+                5000m, 0, 0, 5000m).Value;
+            invoice.Issue(DateTime.UtcNow);
+            db.Invoices.Add(invoice);
+
+            var credit = TenantCredit.Create(Guid.NewGuid(), 1000m, CreditSourceType.Manual).Value;
+            db.TenantCredits.Add(credit);
+
+            db.StampAddedTenantIds(tenantId);
+            await db.SaveChangesAsync();
+
+            creditId = credit.Id;
+            invoiceId = invoice.Id;
+        }
+
+        var (result1, result2) = await ExecuteConcurrentWithBarrier(
+            async ct =>
+            {
+                using var scope = _env.Factory.Services.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                AuthorizeTenant(scope.ServiceProvider, tenantId);
+                var handler = await CreateHandler(db);
+                return await handler.Handle(new ApplyCreditToInvoiceCommand(creditId, invoiceId, 700m, sharedKey), ct);
+            },
+            async ct =>
+            {
+                using var scope = _env.Factory.Services.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                AuthorizeTenant(scope.ServiceProvider, tenantId);
+                var handler = await CreateHandler(db);
+                return await handler.Handle(new ApplyCreditToInvoiceCommand(creditId, invoiceId, 500m, sharedKey), ct);
+            },
+            CancellationToken.None);
+
+        // Exactly one must succeed. The loser can return either:
+        //   - IdempotencyKeyConflict: duplicate-key caught, re-read confirmed different payload
+        //   - ConcurrencyConflict: deadlock victim (SQL 1205) before duplicate-key path
+        // Both are correct — the important invariant is exactly one persists.
+        var successCount = new[] { result1, result2 }.Count(r => r.IsSuccess);
+        var expectedLoseCodes = new HashSet<string>
+        {
+            "CreditApplication.IdempotencyKeyConflict",
+            "CreditApplication.ConcurrencyConflict"
+        };
+        var loserCount = new[] { result1, result2 }
+            .Count(r => r.Errors?.Any(e => expectedLoseCodes.Contains(e.Code)) ?? false);
+
+        Assert.True(successCount == 1,
+            $"Expected exactly 1 success but got {successCount}. " +
+            $"R1: {result1.IsSuccess} ({string.Join(", ", result1.Errors?.Select(e => e.Code) ?? [])}), " +
+            $"R2: {result2.IsSuccess} ({string.Join(", ", result2.Errors?.Select(e => e.Code) ?? [])})");
+
+        Assert.Equal(1, loserCount);
+
+        // Verify final database state
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            AuthorizeTenant(scope.ServiceProvider, tenantId);
+
+            var credit = await db.TenantCredits.FindAsync(creditId);
+            Assert.NotNull(credit);
+            Assert.True(credit.RemainingAmount >= 0m,
+                $"Credit remaining ({credit.RemainingAmount}) must not be negative");
+
+            // Exactly one application with this key
+            var appsForKey = await db.CreditApplications
+                .Where(ca => ca.CreditId == creditId && ca.IdempotencyKey == sharedKey)
+                .ToListAsync();
+            Assert.Single(appsForKey);
+
+            // The persisted amount must be either 700 or 500 (the winning amount)
+            Assert.True(appsForKey[0].Amount == 700m || appsForKey[0].Amount == 500m,
+                $"Persisted amount ({appsForKey[0].Amount}) should be either 700 or 500");
+
+            // Total consumed equals exactly the winning amount
+            var totalApplied = await db.CreditApplications
+                .Where(ca => ca.CreditId == creditId)
+                .SumAsync(ca => ca.Amount);
+            Assert.Equal(appsForKey[0].Amount, totalApplied);
+
+            // Remaining credit matches
+            Assert.Equal(1000m - totalApplied, credit.RemainingAmount);
+        }
+    }
 }
