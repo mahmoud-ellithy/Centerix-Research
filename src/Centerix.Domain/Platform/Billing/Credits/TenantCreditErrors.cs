@@ -21,4 +21,10 @@ public static class TenantCreditErrors
 
     public static Error CrossTenant =>
         Error.Forbidden("TenantCredit.CrossTenant", "Cannot apply a credit from a different tenant to this invoice.");
+
+    public static Error CurrencyMismatch =>
+        Error.Validation("TenantCredit.CurrencyMismatch", "Credit currency does not match the invoice currency.");
+
+    public static Error AlreadyAppliedToInvoice =>
+        Error.Conflict("TenantCredit.AlreadyAppliedToInvoice", "This credit application already exists (idempotent retry).");
 }

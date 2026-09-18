@@ -1,4 +1,5 @@
 using Centerix.Application.Common.Interfaces;
+using Centerix.Application.Platform.Billing;
 using Centerix.Application.Platform.Billing.Commands;
 using Centerix.Application.Platform.Billing.Queries;
 using Centerix.Infrastructure.Auth;
@@ -31,4 +32,32 @@ public class TenantCreditsController(ILocalizer localizer, IMediator mediator) :
             _ => StatusCode(StatusCodes.Status201Created),
             Problem);
     }
+
+    [HttpPost("{id:guid}/apply")]
+    [HasPermission(Permissions.TenantCredits.Apply)]
+    public async Task<IActionResult> ApplyCreditToInvoice(
+        Guid id,
+        [FromBody] ApplyCreditToInvoiceRequest request,
+        CancellationToken cancellationToken)
+    {
+        var command = new ApplyCreditToInvoiceCommand(id, request.InvoiceId, request.Amount);
+        var result = await mediator.Send(command, cancellationToken);
+
+        return result.Match(
+            _ => Ok(new { message = "Credit applied successfully" }),
+            Problem);
+    }
+
+    [HttpGet("{id:guid}/balance")]
+    [HasPermission(Permissions.TenantCredits.Read)]
+    public async Task<IActionResult> GetCreditBalance(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(new GetCreditBalanceQuery(id), cancellationToken);
+
+        return result.Match(
+            balance => Ok(balance),
+            Problem);
+    }
 }
+
+public record ApplyCreditToInvoiceRequest(Guid InvoiceId, decimal Amount);

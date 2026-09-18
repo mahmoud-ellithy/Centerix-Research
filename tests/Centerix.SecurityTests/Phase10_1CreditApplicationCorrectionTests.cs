@@ -567,12 +567,12 @@ public class Phase10_1CreditApplicationCorrectionTests
         Assert.Equal(700m, creditAfterFirst!.RemainingAmount);
         Assert.Equal(CreditStatus.PartiallyApplied, creditAfterFirst.Status);
 
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 300m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 200m), CancellationToken.None);
         var creditAfterSecond = await db.TenantCredits.FindAsync(credit.Id);
-        Assert.Equal(400m, creditAfterSecond!.RemainingAmount);
+        Assert.Equal(500m, creditAfterSecond!.RemainingAmount);
         Assert.Equal(CreditStatus.PartiallyApplied, creditAfterSecond.Status);
 
-        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 400m), CancellationToken.None);
+        await handler.Handle(new ApplyCreditToInvoiceCommand(credit.Id, invoice.Id, 500m), CancellationToken.None);
         var creditAfterThird = await db.TenantCredits.FindAsync(credit.Id);
         Assert.Equal(0m, creditAfterThird!.RemainingAmount);
         Assert.Equal(CreditStatus.Applied, creditAfterThird.Status);

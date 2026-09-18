@@ -37,6 +37,11 @@ public class TenantCreditConfiguration : IEntityTypeConfiguration<TenantCredit>
             .HasMaxLength(20)
             .IsRequired();
 
+        builder.Property(tc => tc.CurrencyCode)
+            .HasMaxLength(3)
+            .IsRequired()
+            .HasDefaultValue("EGP");
+
         builder.Property(tc => tc.ReversalOfCreditId)
             .HasColumnType("uniqueidentifier");
 

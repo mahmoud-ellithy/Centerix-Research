@@ -317,12 +317,31 @@ public class AllocatePaymentHandler(
                 Guid.NewGuid(),
                 overpaymentAmount,
                 CreditSourceType.Overpayment,
-                request.PaymentId);
+                request.PaymentId,
+                payment.CurrencyCode);
 
             if (creditResult.IsSuccess)
             {
                 overpaymentCredit = creditResult.Value;
                 dbContext.TenantCredits.Add(overpaymentCredit);
+
+                var creditCreationBalance = await dbContext.CustomerLedgerEntries
+                    .Where(e => e.TenantId == payment.TenantId)
+                    .SumAsync(e => e.EntryType == LedgerEntryType.InvoiceCharge ? e.Amount : -e.Amount, cancellationToken);
+
+                var creditCreationEntry = CustomerLedgerEntry.CreateCreditCreation(
+                    Guid.NewGuid(),
+                    overpaymentCredit.Id,
+                    overpaymentAmount,
+                    payment.CurrencyCode,
+                    creditCreationBalance,
+                    DateTime.UtcNow,
+                    $"Overpayment credit from Payment {request.PaymentId}");
+
+                if (creditCreationEntry.IsSuccess)
+                {
+                    dbContext.CustomerLedgerEntries.Add(creditCreationEntry.Value);
+                }
             }
         }
 

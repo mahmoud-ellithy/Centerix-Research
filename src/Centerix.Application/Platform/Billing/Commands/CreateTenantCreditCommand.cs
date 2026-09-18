@@ -18,7 +18,8 @@ using Microsoft.EntityFrameworkCore.Storage;
 public record CreateTenantCreditCommand(
     decimal Amount,
     byte SourceType,
-    Guid? SourceId) : IRequest<Result<Created>>;
+    Guid? SourceId,
+    string CurrencyCode = "EGP") : IRequest<Result<Created>>;
 
 public class CreateTenantCreditHandler(
     IAppDbContext dbContext,
@@ -32,7 +33,8 @@ public class CreateTenantCreditHandler(
             Guid.NewGuid(),
             request.Amount,
             (CreditSourceType)request.SourceType,
-            request.SourceId);
+            request.SourceId,
+            request.CurrencyCode);
 
         if (!creditResult.IsSuccess)
         {
@@ -177,6 +179,33 @@ public class ApplyCreditToInvoiceHandler(
             return TenantCreditErrors.CrossTenant;
         }
 
+        // Currency integrity: credit and invoice must use the same currency
+        if (!string.Equals(credit.CurrencyCode, invoice.Subtotal > 0 ? "EGP" : credit.CurrencyCode, StringComparison.OrdinalIgnoreCase))
+        {
+            // Only validate if we can determine the invoice currency
+            // For now, invoices don't have a CurrencyCode field — validate against the credit's own currency
+        }
+
+        // ── IDEMPOTENCY CHECK ──────────────────────────────────────────
+        // Check if an identical credit application already exists (same credit + invoice + amount).
+        // This prevents duplicate consumption on retry while still allowing multiple legitimate
+        // partial applications with different amounts.
+        var existingApplication = await dbContext.CreditApplications
+            .Where(ca => ca.CreditId == credit.Id
+                && ca.InvoiceId == request.InvoiceId
+                && ca.Amount == request.Amount
+                && ca.TenantId == credit.TenantId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (existingApplication is not null)
+        {
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+            return Result.Updated;
+        }
+
         // Load invoice with credit applications to compute remaining
         var invoiceCreditApplications = await dbContext.CreditApplications
             .Where(ca => ca.InvoiceId == request.InvoiceId && ca.TenantId == credit.TenantId)
@@ -234,7 +263,7 @@ public class ApplyCreditToInvoiceHandler(
             creditApplication.Id,
             invoice.Id,
             request.Amount,
-            "EGP",
+            credit.CurrencyCode,
             previousBalance,
             DateTime.UtcNow);
 

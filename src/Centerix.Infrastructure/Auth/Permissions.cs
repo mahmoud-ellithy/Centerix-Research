@@ -240,6 +240,7 @@ public static class Permissions
     {
         public const string Create = "TenantCredits.Create";
         public const string Read = "TenantCredits.Read";
+        public const string Apply = "TenantCredits.Apply";
     }
 
     public static class Invitations
