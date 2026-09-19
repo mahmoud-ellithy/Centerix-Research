@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform.Billing.Commands;
 using Centerix.Domain.Common.Results;
@@ -22,18 +22,18 @@ using Xunit;
 namespace Centerix.SecurityTests;
 
 /// <summary>
-/// Task 13 — SQL Server concurrency tests for Refund Allocation & Settlement.
-/// Tests against REAL SQL Server (Testcontainers or local) to verify:
-/// 1. Concurrent refund execution from same payment
-/// 2. Concurrent refund execution for same refund (idempotent)
-/// 3. Same idempotency key with different payload
-/// 4. Multiple payment refund allocation
+/// Task 13.1 — SQL Server concurrency tests for Refund Settlement and Payment Source Integrity.
+/// Tests against REAL SQL Server to verify deterministic financial outcomes:
+/// 1. Competing refunds on same payment: exactly 1 success + 1 InsufficientPaymentSource
+/// 2. Same refund + same idempotency key: exactly 1 financial execution
+/// 3. Same idempotency key + different payload: exactly 1 success + 1 IdempotencyKeyConflict
+/// 4. Multiple payment allocation sums correctly
+/// 5. Post-concurrency financial invariants enforced
 /// </summary>
 [Collection("SqlServerIntegration")]
 public class Phase13RefundAllocationSqlServerTests
 {
     private readonly SqlServerIntegrationFactory _env;
-
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(120);
     private static readonly TimeSpan BarrierTimeout = TimeSpan.FromSeconds(15);
 
@@ -111,38 +111,6 @@ public class Phase13RefundAllocationSqlServerTests
         return (contract, invoice, payment);
     }
 
-    private static async Task<Refund> CreateRefundForExecution(
-        AppDbContext db, Guid contractId, decimal amount, string tenantId, string idempotencyKey)
-    {
-        var refundResult = Refund.Create(
-            Guid.NewGuid(),
-            "REF-" + Guid.NewGuid().ToString("N")[..8],
-            contractId,
-            null, null,
-            amount,
-            "EGP",
-            "Test refund",
-            "user-1",
-            DateTime.UtcNow);
-        Assert.True(refundResult.IsSuccess);
-        var refund = refundResult.Value;
-        db.Refunds.Add(refund);
-
-        var allocation = RefundAllocation.Create(
-            Guid.NewGuid(),
-            refund.Id,
-            Guid.NewGuid(),
-            amount,
-            PaymentMethod.Cash,
-            "EGP",
-            "PAY-001");
-        Assert.True(allocation.IsSuccess);
-
-        db.StampAddedTenantIds(tenantId);
-        await db.SaveChangesAsync();
-        return refund;
-    }
-
     private async Task<(Result<Updated> Result1, Result<Updated> Result2)> ExecuteConcurrentWithBarrier(
         Func<CancellationToken, Task<Result<Updated>>> op1,
         Func<CancellationToken, Task<Result<Updated>>> op2,
@@ -183,36 +151,40 @@ public class Phase13RefundAllocationSqlServerTests
 
     [Fact]
     [Trait("Category", "SqlServer")]
-    [Trait("Category", "Phase13")]
-    public async Task ConcurrentRefundExecution_SamePayment_OnlyOneSucceeds()
+    [Trait("Category", "Phase13_1")]
+    public async Task CompetingRefunds_SamePayment_ExactOneSuccessOneInsufficient()
     {
         var tenantId = $"tenant-{Guid.NewGuid():N}"[..20];
-        Guid refundId;
         Guid paymentId;
+        Guid refundIdA;
+        Guid refundIdB;
 
         using (var scope = _env.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             await EnsureTenantExists(scope.ServiceProvider, tenantId);
 
-            var (contract, _, payment) = await SetupRefundScenario(db, tenantId, 10000m);
-            paymentId = payment.Id;
+            var (contract, _, setupPayment) = await SetupRefundScenario(db, tenantId, 1000m);
+            paymentId = setupPayment.Id;
 
-            var refundResult = Refund.Create(
+            var refundA = Refund.Create(
                 Guid.NewGuid(), "REF-" + Guid.NewGuid().ToString("N")[..8],
-                contract.Id, null, null, 7000m, "EGP", "Test", "user-1", DateTime.UtcNow);
-            Assert.True(refundResult.IsSuccess);
-            var refund = refundResult.Value;
-            db.Refunds.Add(refund);
+                contract.Id, null, null, 700m, "EGP", "Refund A", "user-1", DateTime.UtcNow).Value;
+            db.Refunds.Add(refundA);
+            db.RefundAllocations.Add(RefundAllocation.Create(
+                Guid.NewGuid(), refundA.Id, paymentId, 700m, PaymentMethod.Cash, "EGP", "PAY-001").Value);
+            refundIdA = refundA.Id;
 
-            var allocation = RefundAllocation.Create(
-                Guid.NewGuid(), refund.Id, paymentId, 7000m, PaymentMethod.Cash, "EGP", "PAY-001");
-            Assert.True(allocation.IsSuccess);
-            db.RefundAllocations.Add(allocation.Value);
+            var refundB = Refund.Create(
+                Guid.NewGuid(), "REF-" + Guid.NewGuid().ToString("N")[..8],
+                contract.Id, null, null, 700m, "EGP", "Refund B", "user-1", DateTime.UtcNow).Value;
+            db.Refunds.Add(refundB);
+            db.RefundAllocations.Add(RefundAllocation.Create(
+                Guid.NewGuid(), refundB.Id, paymentId, 700m, PaymentMethod.Cash, "EGP", "PAY-001").Value);
+            refundIdB = refundB.Id;
 
             db.StampAddedTenantIds(tenantId);
             await db.SaveChangesAsync();
-            refundId = refund.Id;
         }
 
         var (result1, result2) = await ExecuteConcurrentWithBarrier(
@@ -224,7 +196,7 @@ public class Phase13RefundAllocationSqlServerTests
                 var currentUser = Substitute.For<ICurrentUser>();
                 currentUser.UserId.Returns("user-1");
                 var handler = new ExecuteRefundHandler(db, currentUser, Substitute.For<IAuditWriter>());
-                return await handler.Handle(new ExecuteRefundCommand(refundId), ct);
+                return await handler.Handle(new ExecuteRefundCommand(refundIdA), ct);
             },
             async ct =>
             {
@@ -234,29 +206,61 @@ public class Phase13RefundAllocationSqlServerTests
                 var currentUser = Substitute.For<ICurrentUser>();
                 currentUser.UserId.Returns("user-1");
                 var handler = new ExecuteRefundHandler(db, currentUser, Substitute.For<IAuditWriter>());
-                return await handler.Handle(new ExecuteRefundCommand(refundId), ct);
+                return await handler.Handle(new ExecuteRefundCommand(refundIdB), ct);
             },
             CancellationToken.None);
 
-        var successCount = new[] { result1, result2 }.Count(r => r.IsSuccess);
-        Assert.True(successCount >= 1,
-            $"Expected at least 1 success but got {successCount}. " +
-            $"R1: {result1.IsSuccess} ({string.Join(", ", result1.Errors?.Select(e => e.Code) ?? [])}), " +
-            $"R2: {result2.IsSuccess} ({string.Join(", ", result2.Errors?.Select(e => e.Code) ?? [])})");
+        var results = new[] { result1, result2 };
+        var successCount = results.Count(r => r.IsSuccess);
+        var insufficientCount = results.Count(r => r.Errors?.Any(e => e.Code == "Refund.InsufficientPaymentSource") == true);
+        var concurrencyCount = results.Count(r => r.Errors?.Any(e => e.Code == "Refund.ExecutionConcurrencyConflict") == true);
+        var unexpectedFailureCount = results.Count(r => !r.IsSuccess && !r.Errors!.Any(e =>
+            e.Code == "Refund.InsufficientPaymentSource" || e.Code == "Refund.ExecutionConcurrencyConflict"));
 
-        using (var scope = _env.Factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            AuthorizeTenant(scope.ServiceProvider, tenantId);
-            var refund = await db.Refunds.FindAsync(refundId);
-            Assert.Equal(RefundStatus.Completed, refund!.Status);
-        }
+        Assert.True(successCount == 1 && insufficientCount == 1 && unexpectedFailureCount == 0,
+            $"Expected exactly 1 success + 1 InsufficientPaymentSource + 0 unexpected. " +
+            $"Actual: success={successCount}, insufficient={insufficientCount}, concurrency={concurrencyCount}, unexpected={unexpectedFailureCount}. " +
+            $"R1: {(result1.IsSuccess ? "OK" : string.Join(", ", result1.Errors!.Select(e => e.Code)))}, " +
+            $"R2: {(result2.IsSuccess ? "OK" : string.Join(", ", result2.Errors!.Select(e => e.Code)))}");
+
+        // Post-concurrency financial invariant: SUM(RefundAllocations from COMPLETED refunds) <= Payment.Amount
+        using var verifyScope = _env.Factory.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+
+        var payment = await verifyDb.Payments.FindAsync(paymentId);
+        Assert.NotNull(payment);
+
+        var totalRefunded = await verifyDb.RefundAllocations
+            .Where(ra => ra.PaymentId == paymentId && ra.TenantId == tenantId
+                && verifyDb.Refunds.Any(r => r.Id == ra.RefundId
+                    && r.Status == RefundStatus.Completed))
+            .SumAsync(ra => ra.Amount);
+        Assert.True(totalRefunded <= payment.Amount,
+            $"Over-refund detected: totalRefunded={totalRefunded} > payment.Amount={payment.Amount}");
+
+        // Exactly one completed refund
+        var completedRefunds = await verifyDb.Refunds
+            .Where(r => (r.Id == refundIdA || r.Id == refundIdB)
+                && r.TenantId == tenantId && r.Status == RefundStatus.Completed)
+            .ToListAsync();
+        Assert.Single(completedRefunds);
+
+        // Exactly one ledger settlement
+        var ledgerEntries = await verifyDb.CustomerLedgerEntries
+            .Where(e => e.TenantId == tenantId && e.EntryType == LedgerEntryType.RefundSettlement)
+            .ToListAsync();
+        Assert.Single(ledgerEntries);
+
+        // Historical integrity
+        Assert.Equal(1000m, payment.Amount);
+        Assert.Equal(PaymentStatus.Completed, payment.Status);
     }
 
     [Fact]
     [Trait("Category", "SqlServer")]
-    [Trait("Category", "Phase13")]
-    public async Task ConcurrentRefundExecution_SameIdempotencyKey_ConvergesIdempotently()
+    [Trait("Category", "Phase13_1")]
+    public async Task SameRefund_SameIdempotencyKey_ExactOneFinancialExecution()
     {
         var tenantId = $"tenant-{Guid.NewGuid():N}"[..20];
         Guid refundId;
@@ -267,17 +271,15 @@ public class Phase13RefundAllocationSqlServerTests
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             await EnsureTenantExists(scope.ServiceProvider, tenantId);
 
-            var (contract, _, payment) = await SetupRefundScenario(db, tenantId);
+            var (contract, _, setupPayment) = await SetupRefundScenario(db, tenantId);
 
-            var refundResult = Refund.Create(
+            var refund = Refund.Create(
                 Guid.NewGuid(), "REF-" + Guid.NewGuid().ToString("N")[..8],
-                contract.Id, null, null, 5000m, "EGP", "Test", "user-1", DateTime.UtcNow);
-            Assert.True(refundResult.IsSuccess);
-            var refund = refundResult.Value;
+                contract.Id, null, null, 5000m, "EGP", "Test", "user-1", DateTime.UtcNow).Value;
             db.Refunds.Add(refund);
 
             var allocation = RefundAllocation.Create(
-                Guid.NewGuid(), refund.Id, payment.Id, 5000m, PaymentMethod.Cash, "EGP", "PAY-001");
+                Guid.NewGuid(), refund.Id, setupPayment.Id, 5000m, PaymentMethod.Cash, "EGP", "PAY-001");
             Assert.True(allocation.IsSuccess);
             db.RefundAllocations.Add(allocation.Value);
 
@@ -292,9 +294,9 @@ public class Phase13RefundAllocationSqlServerTests
                 using var scope = _env.Factory.Services.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 AuthorizeTenant(scope.ServiceProvider, tenantId);
-                var currentUser1 = Substitute.For<ICurrentUser>();
-                currentUser1.UserId.Returns("user-1");
-                var handler = new ExecuteRefundHandler(db, currentUser1, Substitute.For<IAuditWriter>());
+                var currentUser = Substitute.For<ICurrentUser>();
+                currentUser.UserId.Returns("user-1");
+                var handler = new ExecuteRefundHandler(db, currentUser, Substitute.For<IAuditWriter>());
                 return await handler.Handle(new ExecuteRefundCommand(refundId, sharedKey), ct);
             },
             async ct =>
@@ -302,36 +304,134 @@ public class Phase13RefundAllocationSqlServerTests
                 using var scope = _env.Factory.Services.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 AuthorizeTenant(scope.ServiceProvider, tenantId);
-                var currentUser2 = Substitute.For<ICurrentUser>();
-                currentUser2.UserId.Returns("user-1");
-                var handler = new ExecuteRefundHandler(db, currentUser2, Substitute.For<IAuditWriter>());
+                var currentUser = Substitute.For<ICurrentUser>();
+                currentUser.UserId.Returns("user-1");
+                var handler = new ExecuteRefundHandler(db, currentUser, Substitute.For<IAuditWriter>());
                 return await handler.Handle(new ExecuteRefundCommand(refundId, sharedKey), ct);
             },
             CancellationToken.None);
 
-        var successCount = new[] { result1, result2 }.Count(r => r.IsSuccess);
-        Assert.True(successCount >= 1,
-            $"Expected at least 1 success but got {successCount}. " +
-            $"R1: {result1.IsSuccess} ({string.Join(", ", result1.Errors?.Select(e => e.Code) ?? [])}), " +
-            $"R2: {result2.IsSuccess} ({string.Join(", ", result2.Errors?.Select(e => e.Code) ?? [])})");
+        var results = new[] { result1, result2 };
+        var successCount = results.Count(r => r.IsSuccess);
+        var unexpectedFailureCount = results.Count(r => !r.IsSuccess && !r.Errors!.Any(e =>
+            e.Code == "Refund.ExecutionConcurrencyConflict"));
 
-        using (var scope = _env.Factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            AuthorizeTenant(scope.ServiceProvider, tenantId);
-            var refund = await db.Refunds.FindAsync(refundId);
-            Assert.Equal(RefundStatus.Completed, refund!.Status);
+        Assert.Equal(2, successCount);
+        Assert.Equal(0, unexpectedFailureCount);
 
-            var ledgerEntries = await db.CustomerLedgerEntries
-                .Where(e => e.RefundId == refundId && e.EntryType == LedgerEntryType.RefundSettlement)
-                .ToListAsync();
-            Assert.Single(ledgerEntries);
-        }
+        // Post: exactly 1 financial execution (1 ledger settlement, refund Completed)
+        using var verifyScope = _env.Factory.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+
+        var verifyRefund = await verifyDb.Refunds.FindAsync(refundId);
+        Assert.Equal(RefundStatus.Completed, verifyRefund!.Status);
+        Assert.Equal(sharedKey, verifyRefund.IdempotencyKey);
+
+        var ledgerEntries = await verifyDb.CustomerLedgerEntries
+            .Where(e => e.RefundId == refundId && e.EntryType == LedgerEntryType.RefundSettlement)
+            .ToListAsync();
+        Assert.Single(ledgerEntries);
+        Assert.Equal(5000m, ledgerEntries[0].Amount);
+
+        var refundAllocations = await verifyDb.RefundAllocations
+            .Where(ra => ra.RefundId == refundId)
+            .ToListAsync();
+        Assert.Single(refundAllocations);
     }
 
     [Fact]
     [Trait("Category", "SqlServer")]
-    [Trait("Category", "Phase13")]
+    [Trait("Category", "Phase13_1")]
+    public async Task SameKey_DifferentPayload_ExactOneSuccessOneConflict()
+    {
+        var tenantId = $"tenant-{Guid.NewGuid():N}"[..20];
+        Guid refundIdA;
+        Guid refundIdB;
+        var sharedKey = $"idem-{Guid.NewGuid():N}";
+
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await EnsureTenantExists(scope.ServiceProvider, tenantId);
+
+            var (contract, _, payment) = await SetupRefundScenario(db, tenantId);
+
+            var refundA = Refund.Create(
+                Guid.NewGuid(), "REF-" + Guid.NewGuid().ToString("N")[..8],
+                contract.Id, null, null, 5000m, "EGP", "Refund A", "user-1", DateTime.UtcNow).Value;
+            db.Refunds.Add(refundA);
+            db.RefundAllocations.Add(RefundAllocation.Create(
+                Guid.NewGuid(), refundA.Id, payment.Id, 5000m, PaymentMethod.Cash, "EGP", "PAY-001").Value);
+            refundIdA = refundA.Id;
+
+            var refundB = Refund.Create(
+                Guid.NewGuid(), "REF-" + Guid.NewGuid().ToString("N")[..8],
+                contract.Id, null, null, 3000m, "EGP", "Refund B", "user-1", DateTime.UtcNow).Value;
+            db.Refunds.Add(refundB);
+            db.RefundAllocations.Add(RefundAllocation.Create(
+                Guid.NewGuid(), refundB.Id, payment.Id, 3000m, PaymentMethod.Cash, "EGP", "PAY-001").Value);
+            refundIdB = refundB.Id;
+
+            db.StampAddedTenantIds(tenantId);
+            await db.SaveChangesAsync();
+        }
+
+        var (result1, result2) = await ExecuteConcurrentWithBarrier(
+            async ct =>
+            {
+                using var scope = _env.Factory.Services.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                AuthorizeTenant(scope.ServiceProvider, tenantId);
+                var currentUser = Substitute.For<ICurrentUser>();
+                currentUser.UserId.Returns("user-1");
+                var handler = new ExecuteRefundHandler(db, currentUser, Substitute.For<IAuditWriter>());
+                return await handler.Handle(new ExecuteRefundCommand(refundIdA, sharedKey), ct);
+            },
+            async ct =>
+            {
+                using var scope = _env.Factory.Services.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                AuthorizeTenant(scope.ServiceProvider, tenantId);
+                var currentUser = Substitute.For<ICurrentUser>();
+                currentUser.UserId.Returns("user-1");
+                var handler = new ExecuteRefundHandler(db, currentUser, Substitute.For<IAuditWriter>());
+                return await handler.Handle(new ExecuteRefundCommand(refundIdB, sharedKey), ct);
+            },
+            CancellationToken.None);
+
+        var results = new[] { result1, result2 };
+        var successCount = results.Count(r => r.IsSuccess);
+        var conflictCount = results.Count(r => r.Errors?.Any(e =>
+            e.Code == "RefundAllocation.IdempotencyKeyConflict") == true);
+        var unexpectedFailureCount = results.Count(r => !r.IsSuccess && !r.Errors!.Any(e =>
+            e.Code == "RefundAllocation.IdempotencyKeyConflict"
+            || e.Code == "Refund.ExecutionConcurrencyConflict"));
+
+        Assert.Equal(1, successCount);
+        Assert.Equal(1, conflictCount);
+        Assert.Equal(0, unexpectedFailureCount);
+
+        // Post: exactly 1 completed refund, 1 ledger settlement
+        using var verifyScope = _env.Factory.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        AuthorizeTenant(verifyScope.ServiceProvider, tenantId);
+
+        var completedCount = await verifyDb.Refunds
+            .Where(r => (r.Id == refundIdA || r.Id == refundIdB)
+                && r.TenantId == tenantId && r.Status == RefundStatus.Completed)
+            .CountAsync();
+        Assert.Equal(1, completedCount);
+
+        var ledgerEntries = await verifyDb.CustomerLedgerEntries
+            .Where(e => e.TenantId == tenantId && e.EntryType == LedgerEntryType.RefundSettlement)
+            .ToListAsync();
+        Assert.Single(ledgerEntries);
+    }
+
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    [Trait("Category", "Phase13_1")]
     public async Task MultiplePaymentRefundAllocation_SumsCorrectly()
     {
         var tenantId = $"tenant-{Guid.NewGuid():N}"[..20];
@@ -376,9 +476,9 @@ public class Phase13RefundAllocationSqlServerTests
         var db2 = scope2.ServiceProvider.GetRequiredService<AppDbContext>();
         AuthorizeTenant(scope2.ServiceProvider, tenantId);
 
-            var currentUser3 = Substitute.For<ICurrentUser>();
-            currentUser3.UserId.Returns("user-1");
-            var handler = new ExecuteRefundHandler(db2, currentUser3, Substitute.For<IAuditWriter>());
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns("user-1");
+        var handler = new ExecuteRefundHandler(db2, currentUser, Substitute.For<IAuditWriter>());
         var result = await handler.Handle(new ExecuteRefundCommand(refundId), CancellationToken.None);
         Assert.True(result.IsSuccess);
 
@@ -387,5 +487,11 @@ public class Phase13RefundAllocationSqlServerTests
             .ToListAsync();
         Assert.Single(ledgerEntries);
         Assert.Equal(5000m, ledgerEntries[0].Amount);
+
+        // Financial invariant: SUM(allocations per payment) <= Payment.Amount
+        var pay1Allocations = await db2.RefundAllocations
+            .Where(ra => ra.RefundId == refundId)
+            .ToListAsync();
+        Assert.Equal(5000m, pay1Allocations.Sum(a => a.Amount));
     }
 }

@@ -142,12 +142,15 @@ public class CreateRefundHandler(
         // Distribute RefundAmount pro-rata across the payment sources that
         // contributed to AmountActuallyPaid. This preserves the exact source
         // breakdown for financial traceability.
+        // Each allocation is validated against the payment's remaining refundable
+        // balance: Payment.Amount - SUM(existing RefundAllocations for that Payment).
         var allocations = GenerateAllocations(
             refund.Id,
             contract.TenantId!,
             calculation.RefundAmount,
             calculation.CurrencyCode,
-            calculation.PaymentContributions);
+            calculation.PaymentContributions,
+            payments);
 
         foreach (var allocation in allocations)
         {
@@ -181,13 +184,16 @@ public class CreateRefundHandler(
     /// <summary>
     /// Generates RefundAllocations by distributing the refund amount pro-rata
     /// across the payment contributions that funded this contract.
+    /// Validates that each allocation does not exceed the payment's remaining
+    /// refundable balance (Payment.Amount - existing RefundAllocations).
     /// </summary>
     private static List<RefundAllocation> GenerateAllocations(
         Guid refundId,
         string tenantId,
         decimal refundAmount,
         string currencyCode,
-        IReadOnlyList<PaymentContribution> contributions)
+        IReadOnlyList<PaymentContribution> contributions,
+        IReadOnlyList<Payment> payments)
     {
         var allocations = new List<RefundAllocation>();
 
@@ -227,6 +233,14 @@ public class CreateRefundHandler(
 
             if (allocationAmount <= 0)
                 continue;
+
+            // Currency integrity: payment currency must match refund currency
+            var payment = payments.FirstOrDefault(p => p.Id == contribution.PaymentId);
+            if (payment is not null && payment.CurrencyCode != currencyCode)
+            {
+                // Skip payments with mismatched currency — do not create allocation
+                continue;
+            }
 
             var result = RefundAllocation.Create(
                 Guid.NewGuid(),

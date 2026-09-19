@@ -102,6 +102,15 @@ public class RefundConfiguration : IEntityTypeConfiguration<Refund>
         builder.Property(r => r.ExecutedBy)
             .HasMaxLength(450);
 
+        // Idempotency key: client-supplied execution key, unique within a tenant
+        builder.Property(r => r.IdempotencyKey)
+            .HasMaxLength(256);
+
+        builder.HasIndex(r => new { r.TenantId, r.IdempotencyKey })
+            .IsUnique()
+            .HasFilter("[IdempotencyKey] IS NOT NULL")
+            .HasDatabaseName("UX_Refunds_TenantId_IdempotencyKey");
+
         // Optimistic concurrency token
         builder.Property(r => r.RowVersion)
             .IsRowVersion();

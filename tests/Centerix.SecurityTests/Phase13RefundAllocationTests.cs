@@ -759,7 +759,7 @@ public class Phase13RefundAllocationTests
 
         Assert.False(secondResult.IsSuccess);
         var errorCodes = secondResult.Errors!.Select(e => e.Code).ToList();
-        Assert.Contains("RefundAllocation.ExceedsRefundableBalance", errorCodes);
+        Assert.Contains("Refund.InsufficientPaymentSource", errorCodes);
     }
 
     // ==================================================================

@@ -128,4 +128,12 @@ public static class RefundErrors
     public static Error AllocationIdempotencyKeyConflict =>
         Error.Conflict("RefundAllocation.IdempotencyKeyConflict",
             "A refund execution with this idempotency key but different payload already exists.");
+
+    public static Error InsufficientPaymentSource =>
+        Error.Conflict("Refund.InsufficientPaymentSource",
+            "The payment source has insufficient refundable amount to cover this refund allocation.");
+
+    public static Error CurrencyMismatch =>
+        Error.Conflict("Refund.CurrencyMismatch",
+            "The payment currency does not match the refund currency. Cross-currency refund allocation is not supported.");
 }

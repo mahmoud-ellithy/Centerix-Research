@@ -64,6 +64,9 @@ public class Refund : AuditableEntity<Guid>
     /// <summary>ID of the user who executed the refund.</summary>
     public string? ExecutedBy { get; private set; }
 
+    /// <summary>Client-supplied idempotency key for the execution request (unique per tenant).</summary>
+    public string? IdempotencyKey { get; private set; }
+
     /// <summary>Indicates whether this refund has been executed (immutable once true).</summary>
     public bool IsExecuted => Status == RefundStatus.Completed;
 
@@ -196,7 +199,7 @@ public class Refund : AuditableEntity<Guid>
     /// Executes the refund and marks it as completed.
     /// Allows Pending → Completed directly (optional approval workflow) per Task #4.
     /// </summary>
-    public Result<Updated> Execute(string executedBy, DateTime executedAtUtc)
+    public Result<Updated> Execute(string executedBy, DateTime executedAtUtc, string? idempotencyKey = null)
     {
         if (Status != RefundStatus.Pending && Status != RefundStatus.Approved && Status != RefundStatus.Processing)
             return RefundErrors.InvalidStateTransition(Status, "execute");
@@ -207,6 +210,11 @@ public class Refund : AuditableEntity<Guid>
         Status = RefundStatus.Completed;
         ExecutedBy = executedBy;
         ExecutedAtUtc = executedAtUtc;
+
+        if (!string.IsNullOrWhiteSpace(idempotencyKey))
+        {
+            IdempotencyKey = idempotencyKey;
+        }
 
         return Result.Updated;
     }

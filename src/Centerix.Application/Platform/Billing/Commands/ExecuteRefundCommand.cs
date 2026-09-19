@@ -1,4 +1,4 @@
-namespace Centerix.Application.Platform.Billing.Commands;
+﻿namespace Centerix.Application.Platform.Billing.Commands;
 
 using System.Data;
 using Centerix.Application.Common.Interfaces;
@@ -18,17 +18,17 @@ using Microsoft.EntityFrameworkCore.Storage;
 /// and creates an immutable ledger entry.
 /// </summary>
 /// <remarks>
-/// The execution is protected against concurrent execution using:
+/// Concurrency strategy:
 /// 1. Serializable isolation level for the transaction
-/// 2. Optimistic concurrency via RowVersion
-/// 3. Idempotency check (already executed refunds are skipped)
-/// 4. Deadlock retry resilience
-/// 5. UPDLOCK on refund read to serialize concurrent executions
+/// 2. UPDLOCK + HOLDLOCK on Payment reads to serialize concurrent refund source consumption
+/// 3. Optimistic concurrency via RowVersion
+/// 4. Idempotency key validation (same key = idempotent, different key = IdempotencyKeyConflict)
+/// 5. Deadlock retry resilience with ChangeTracker.Clear() before each retry
 ///
 /// Before execution, the handler validates:
 /// - Refund allocations exist and sum to the refund amount
-/// - Each referenced payment is completed and in the same tenant
-/// - Payment refundable balances are sufficient
+/// - Each referenced payment is completed, in the same tenant, and same currency
+/// - Payment refundable balance: Payment.Amount - SUM(existing RefundAllocations for that Payment)
 /// </remarks>
 public record ExecuteRefundCommand(
     Guid RefundId,
@@ -39,18 +39,19 @@ public class ExecuteRefundHandler(
     ICurrentUser currentUserService,
     IAuditWriter auditWriter) : IRequestHandler<ExecuteRefundCommand, Result<Updated>>
 {
-    /// <summary>
-    /// Maximum number of retry attempts when a SQL Server deadlock (error 1205) occurs.
-    /// </summary>
     private const int MaxDeadlockRetries = 3;
 
     public async Task<Result<Updated>> Handle(
         ExecuteRefundCommand request,
         CancellationToken cancellationToken)
     {
-        // Retry loop for deadlock resilience
         for (int attempt = 0; attempt <= MaxDeadlockRetries; attempt++)
         {
+            if (dbContext is DbContext dbc)
+            {
+                dbc.ChangeTracker.Clear();
+            }
+
             var result = await TryHandleAsync(request, cancellationToken);
 
             if (result.IsSuccess || !IsRetryableError(result))
@@ -58,7 +59,6 @@ public class ExecuteRefundHandler(
                 return result;
             }
 
-            // Bounded exponential backoff: 50ms, 100ms, 200ms
             if (attempt < MaxDeadlockRetries)
             {
                 var delay = TimeSpan.FromMilliseconds(50 * Math.Pow(2, attempt));
@@ -102,7 +102,6 @@ public class ExecuteRefundHandler(
         CancellationToken cancellationToken,
         IDbContextTransaction? transaction)
     {
-        // Load the refund
         var refund = await dbContext.Refunds
             .FirstOrDefaultAsync(r => r.Id == request.RefundId, cancellationToken);
 
@@ -111,9 +110,17 @@ public class ExecuteRefundHandler(
             return RefundErrors.NotFound;
         }
 
-        // Idempotency check: if already completed, return success
+        // ── IDEMPOTENCY CHECK ───────────────────────────────────────────
+        // If already completed, verify the idempotency key matches.
         if (refund.Status == RefundStatus.Completed)
         {
+            if (!string.IsNullOrWhiteSpace(request.IdempotencyKey)
+                && !string.IsNullOrWhiteSpace(refund.IdempotencyKey)
+                && refund.IdempotencyKey != request.IdempotencyKey)
+            {
+                return RefundErrors.AllocationIdempotencyKeyConflict;
+            }
+
             if (transaction is not null)
             {
                 await transaction.CommitAsync(cancellationToken);
@@ -121,10 +128,21 @@ public class ExecuteRefundHandler(
             return Result.Updated;
         }
 
-        // Validate the refund can be executed (Pending allowed for optional approval workflow)
-        if (refund.Status != RefundStatus.Pending && refund.Status != RefundStatus.Approved && refund.Status != RefundStatus.Processing)
+        if (refund.Status != RefundStatus.Pending
+            && refund.Status != RefundStatus.Approved
+            && refund.Status != RefundStatus.Processing)
         {
             return RefundErrors.InvalidStateTransition(refund.Status, "execute");
+        }
+
+        // ── IDEMPOTENCY KEY CONFLICT CHECK (before execution) ───────────
+        // If this refund already has a stored idempotency key from a prior execution
+        // attempt (Processing status), verify it matches.
+        if (!string.IsNullOrWhiteSpace(request.IdempotencyKey)
+            && !string.IsNullOrWhiteSpace(refund.IdempotencyKey)
+            && refund.IdempotencyKey != request.IdempotencyKey)
+        {
+            return RefundErrors.AllocationIdempotencyKeyConflict;
         }
 
         // ── VALIDATE REFUND ALLOCATIONS ────────────────────────────────
@@ -137,16 +155,45 @@ public class ExecuteRefundHandler(
             return RefundErrors.AllocationsRequired;
         }
 
-        // Validate allocation sum equals refund amount
         var allocationSum = allocations.Sum(a => a.Amount);
         if (allocationSum != refund.Amount)
         {
             return RefundErrors.AllocationSumMismatch;
         }
 
-        // Validate each referenced payment exists, is completed, and belongs to the same tenant
+        // ── VALIDATE PAYMENTS (with UPDLOCK on SQL Server) ──────────────
+        // Lock payment rows to serialize concurrent refund executions against
+        // the same payment source. This prevents the TOCTOU race where two
+        // concurrent refunds both read sufficient balance and both proceed.
+        // The UPDLOCK is acquired via a separate raw SQL query under the
+        // Serializable transaction, then the full entity is loaded via EF Core.
         var paymentIds = allocations.Select(a => a.PaymentId).Distinct().ToList();
-        var payments = await dbContext.Payments
+        var payments = new List<Payment>();
+
+        if (dbContext.IsRelational && dbContext is DbContext efDb)
+        {
+            foreach (var paymentId in paymentIds)
+            {
+                // Acquire UPDLOCK on the payment row to serialize concurrent reads
+                var conn = efDb.Database.GetDbConnection();
+                await using var cmd = conn.CreateCommand();
+                cmd.Transaction = transaction!.GetDbTransaction();
+                cmd.CommandText = "SELECT 1 FROM Platform.Payments WITH (UPDLOCK, ROWLOCK, HOLDLOCK) WHERE PaymentId = @p0 AND TenantId = @p1";
+                var p0 = cmd.CreateParameter(); p0.ParameterName = "@p0"; p0.Value = paymentId;
+                var p1 = cmd.CreateParameter(); p1.ParameterName = "@p1"; p1.Value = refund.TenantId!;
+                cmd.Parameters.Add(p0); cmd.Parameters.Add(p1);
+                if (conn.State != System.Data.ConnectionState.Open)
+                    await conn.OpenAsync(cancellationToken);
+                var lockResult = await cmd.ExecuteScalarAsync(cancellationToken);
+                if (lockResult is null)
+                {
+                    return RefundErrors.AllocationCrossTenant;
+                }
+            }
+        }
+
+        // Load payments with allocations (under the acquired locks on SQL Server)
+        payments = await dbContext.Payments
             .Include(p => p.Allocations)
             .Where(p => paymentIds.Contains(p.Id) && p.TenantId == refund.TenantId)
             .ToListAsync(cancellationToken);
@@ -156,28 +203,63 @@ public class ExecuteRefundHandler(
             return RefundErrors.AllocationCrossTenant;
         }
 
+        // ── VALIDATE EACH PAYMENT ──────────────────────────────────────
         foreach (var payment in payments)
         {
+            // Payment must be completed
             if (payment.Status != PaymentStatus.Completed)
             {
                 return RefundErrors.AllocationPaymentNotCompleted;
             }
-        }
 
-        // Validate refundable balance per payment: SUM(existing allocations for this payment) <= payment allocated amount
-        foreach (var payment in payments)
-        {
-            var paymentAllocationTotal = await dbContext.RefundAllocations
-                .Where(ra => ra.PaymentId == payment.Id && ra.TenantId == refund.TenantId)
-                .SumAsync(ra => ra.Amount, cancellationToken);
-
-            if (paymentAllocationTotal > payment.GetAllocatedAmount())
+            // Currency integrity: Payment.CurrencyCode must match Refund.CurrencyCode
+            if (payment.CurrencyCode != refund.CurrencyCode)
             {
-                return RefundErrors.AllocationExceedsRefundableBalance;
+                return RefundErrors.CurrencyMismatch;
+            }
+
+            // Refundable balance: Payment.Amount - SUM(RefundAllocations for OTHER refunds
+            // that are Processing or Completed). Pending refunds have not consumed the balance yet.
+            // Under Serializable isolation + UPDLOCK on Payment, the next transaction sees the
+            // updated status after the first transaction commits.
+            // We load the allocations with their refund status to compute this correctly,
+            // because EF Core subqueries may not translate well across entity boundaries.
+            var otherAllocations = await dbContext.RefundAllocations
+                .Where(ra => ra.PaymentId == payment.Id
+                    && ra.TenantId == refund.TenantId
+                    && ra.RefundId != refund.Id)
+                .ToListAsync(cancellationToken);
+
+            decimal existingRefundedAmount = 0;
+            if (otherAllocations.Count > 0)
+            {
+                var otherRefundIds = otherAllocations.Select(a => a.RefundId).Distinct().ToList();
+                var otherRefunds = await dbContext.Refunds
+                    .Where(r => otherRefundIds.Contains(r.Id)
+                        && (r.Status == RefundStatus.Processing || r.Status == RefundStatus.Completed))
+                    .ToListAsync(cancellationToken);
+                var settledRefundIds = otherRefunds.Select(r => r.Id).ToHashSet();
+                existingRefundedAmount = otherAllocations
+                    .Where(a => settledRefundIds.Contains(a.RefundId))
+                    .Sum(a => a.Amount);
+            }
+
+            var refundableAmount = payment.Amount - existingRefundedAmount;
+            if (refundableAmount < 0)
+            {
+                refundableAmount = 0;
+            }
+
+            // Find the allocation for this payment in this refund
+            var allocationForPayment = allocations.First(a => a.PaymentId == payment.Id);
+
+            if (allocationForPayment.Amount > refundableAmount)
+            {
+                return RefundErrors.InsufficientPaymentSource;
             }
         }
 
-        // Mark as processing (skip if already Processing)
+        // ── PROCEED WITH EXECUTION ─────────────────────────────────────
         if (refund.Status != RefundStatus.Processing)
         {
             var processingResult = refund.MarkProcessing();
@@ -187,13 +269,10 @@ public class ExecuteRefundHandler(
             }
         }
 
-        // Compute the current ledger balance from immutable movements
         var previousBalance = await dbContext.CustomerLedgerEntries
             .Where(e => e.TenantId == refund.TenantId)
             .SumAsync(e => e.EntryType == LedgerEntryType.InvoiceCharge ? e.Amount : -e.Amount, cancellationToken);
 
-        // Create a single refund settlement ledger entry for the total amount.
-        // Per-payment traceability is provided by the RefundAllocation entities.
         var allocationSummary = string.Join(", ",
             allocations.Select(a => $"{a.PaymentMethod} {a.Amount}"));
         var ledgerEntry = CustomerLedgerEntry.CreateRefundSettlement(
@@ -212,14 +291,13 @@ public class ExecuteRefundHandler(
 
         dbContext.CustomerLedgerEntries.Add(ledgerEntry.Value);
 
-        // Execute the refund (marks as completed)
-        var executeResult = refund.Execute(currentUserService.UserId!, DateTime.UtcNow);
+        // Execute: mark completed and store the idempotency key
+        var executeResult = refund.Execute(currentUserService.UserId!, DateTime.UtcNow, request.IdempotencyKey);
         if (!executeResult.IsSuccess)
         {
             return executeResult.Errors!;
         }
 
-        // Stamp the authorized tenant id
         dbContext.StampAddedTenantIds(refund.TenantId!);
 
         try
@@ -270,6 +348,25 @@ public class ExecuteRefundHandler(
 
             return RefundErrors.ExecutionConcurrencyConflict;
         }
+        catch (DbUpdateException ex) when (IsDuplicateIdempotencyKeyException(ex))
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            var existing = await dbContext.Refunds
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == request.RefundId, cancellationToken);
+
+            if (existing?.Status == RefundStatus.Completed
+                && existing.IdempotencyKey == request.IdempotencyKey)
+            {
+                return Result.Updated;
+            }
+
+            return RefundErrors.AllocationIdempotencyKeyConflict;
+        }
         catch (Exception ex) when (IsDeadlockException(ex))
         {
             if (transaction is not null)
@@ -296,6 +393,7 @@ public class ExecuteRefundHandler(
                 Status = refund.Status.ToString(),
                 ExecutedBy = refund.ExecutedBy,
                 ExecutedAtUtc = refund.ExecutedAtUtc,
+                IdempotencyKey = refund.IdempotencyKey,
                 AllocationCount = allocations.Count,
                 Allocations = allocations.Select(a => new
                 {
@@ -310,11 +408,6 @@ public class ExecuteRefundHandler(
         return Result.Updated;
     }
 
-    /// <summary>
-    /// Checks whether the given DbUpdateException was caused by a duplicate key violation
-    /// on the UX_Refunds_TenantId_RefundNumber unique index.
-    /// SQL Server error 2601/2627 includes the index name in the error message.
-    /// </summary>
     private static bool IsDuplicateRefundNumberException(DbUpdateException ex)
     {
         if (ex.InnerException is SqlException sqlEx)
@@ -328,10 +421,6 @@ public class ExecuteRefundHandler(
         return false;
     }
 
-    /// <summary>
-    /// Checks whether the given DbUpdateException was caused by a duplicate key violation
-    /// on the CustomerLedgerEntry filtered unique index UX_CustomerLedgerEntries_SettlementByAllocation.
-    /// </summary>
     private static bool IsDuplicateLedgerKeyException(DbUpdateException ex)
     {
         if (ex.InnerException is SqlException sqlEx)
@@ -346,10 +435,19 @@ public class ExecuteRefundHandler(
         return false;
     }
 
-    /// <summary>
-    /// Checks whether the given exception was caused by a SQL Server deadlock.
-    /// Deadlock victim error number is 1205.
-    /// </summary>
+    private static bool IsDuplicateIdempotencyKeyException(DbUpdateException ex)
+    {
+        if (ex.InnerException is SqlException sqlEx)
+        {
+            if (sqlEx.Number == 2601 || sqlEx.Number == 2627)
+            {
+                var msg = ex.InnerException?.Message ?? ex.Message;
+                return msg.Contains("UX_Refunds_TenantId_IdempotencyKey", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        return false;
+    }
+
     private static bool IsDeadlockException(Exception ex)
     {
         var current = ex;
