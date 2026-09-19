@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-19
 **Status:** ✅ COMPLETE
-**Implementation SHA:** `13c21b5` (12.1.1) → `pending` (12.1.2)
+**Implementation SHA:** `c37d6b6` (12.1.2)
 **Build:** 0 errors
 **Tests:** 1133 InMemory passed, 8 SQL Server passed, 0 failures
 
