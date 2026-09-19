@@ -404,13 +404,14 @@ public class Phase13RefundAllocationSqlServerTests
         var successCount = results.Count(r => r.IsSuccess);
         var conflictCount = results.Count(r => r.Errors?.Any(e =>
             e.Code == "RefundAllocation.IdempotencyKeyConflict") == true);
-        var unexpectedFailureCount = results.Count(r => !r.IsSuccess && !r.Errors!.Any(e =>
-            e.Code == "RefundAllocation.IdempotencyKeyConflict"
-            || e.Code == "Refund.ExecutionConcurrencyConflict"));
 
         Assert.Equal(1, successCount);
         Assert.Equal(1, conflictCount);
-        Assert.Equal(0, unexpectedFailureCount);
+
+        // Verify the failing result is strictly IdempotencyKeyConflict (not ExecutionConcurrencyConflict)
+        var failingResult = results.First(r => !r.IsSuccess);
+        Assert.Contains(failingResult.Errors!, e => e.Code == "RefundAllocation.IdempotencyKeyConflict");
+        Assert.DoesNotContain(failingResult.Errors!, e => e.Code == "Refund.ExecutionConcurrencyConflict");
 
         // Post: exactly 1 completed refund, 1 ledger settlement
         using var verifyScope = _env.Factory.Services.CreateScope();
@@ -493,5 +494,52 @@ public class Phase13RefundAllocationSqlServerTests
             .Where(ra => ra.RefundId == refundId)
             .ToListAsync();
         Assert.Equal(5000m, pay1Allocations.Sum(a => a.Amount));
+    }
+
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    [Trait("Category", "Phase13_1_1")]
+    public async Task TamperedPaymentMethod_Rejected()
+    {
+        var tenantId = $"tenant-{Guid.NewGuid():N}"[..20];
+        Guid refundId;
+
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await EnsureTenantExists(scope.ServiceProvider, tenantId);
+
+            var (contract, _, payment) = await SetupRefundScenario(db, tenantId, 10000m);
+
+            var refund = Refund.Create(
+                Guid.NewGuid(), "REF-" + Guid.NewGuid().ToString("N")[..8],
+                contract.Id, null, null, 5000m, "EGP", "Tampered method test", "user-1", DateTime.UtcNow).Value;
+            db.Refunds.Add(refund);
+
+            // Payment was created with PaymentMethod.Cash, but allocation says InstaPay (tampered)
+            db.RefundAllocations.Add(RefundAllocation.Create(
+                Guid.NewGuid(), refund.Id, payment.Id, 5000m, PaymentMethod.InstaPay, "EGP", "PAY-001").Value);
+
+            db.StampAddedTenantIds(tenantId);
+            await db.SaveChangesAsync();
+            refundId = refund.Id;
+        }
+
+        using var scope2 = _env.Factory.Services.CreateScope();
+        var db2 = scope2.ServiceProvider.GetRequiredService<AppDbContext>();
+        AuthorizeTenant(scope2.ServiceProvider, tenantId);
+
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.UserId.Returns("user-1");
+        var handler = new ExecuteRefundHandler(db2, currentUser, Substitute.For<IAuditWriter>());
+        var result = await handler.Handle(new ExecuteRefundCommand(refundId), CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Errors!, e => e.Code == "Refund.PaymentMethodMismatch");
+
+        // Verify refund is still Pending (not executed)
+        var verifyDb = scope2.ServiceProvider.GetRequiredService<AppDbContext>();
+        var verifyRefund = await verifyDb.Refunds.FindAsync(refundId);
+        Assert.Equal(RefundStatus.Pending, verifyRefund!.Status);
     }
 }

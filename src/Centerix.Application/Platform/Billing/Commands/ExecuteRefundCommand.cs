@@ -253,6 +253,12 @@ public class ExecuteRefundHandler(
             // Find the allocation for this payment in this refund
             var allocationForPayment = allocations.First(a => a.PaymentId == payment.Id);
 
+            // PaymentMethod authority: allocation snapshot must match the authoritative Payment.Method
+            if (allocationForPayment.PaymentMethod != payment.Method.ToString())
+            {
+                return RefundErrors.PaymentMethodMismatch;
+            }
+
             if (allocationForPayment.Amount > refundableAmount)
             {
                 return RefundErrors.InsufficientPaymentSource;
@@ -310,6 +316,25 @@ public class ExecuteRefundHandler(
             {
                 await transaction.RollbackAsync(cancellationToken);
             }
+
+            var existing = await dbContext.Refunds
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == request.RefundId, cancellationToken);
+
+            if (existing?.Status == RefundStatus.Completed
+                && existing.IdempotencyKey == request.IdempotencyKey)
+            {
+                return Result.Updated;
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.IdempotencyKey)
+                && existing is not null
+                && existing.IdempotencyKey == request.IdempotencyKey
+                && existing.Status != RefundStatus.Completed)
+            {
+                return RefundErrors.AllocationIdempotencyKeyConflict;
+            }
+
             return RefundErrors.ExecutionConcurrencyConflict;
         }
         catch (DbUpdateException ex) when (IsDuplicateRefundNumberException(ex))
@@ -373,6 +398,25 @@ public class ExecuteRefundHandler(
             {
                 await transaction.RollbackAsync(cancellationToken);
             }
+
+            var existing = await dbContext.Refunds
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == request.RefundId, cancellationToken);
+
+            if (existing?.Status == RefundStatus.Completed
+                && existing.IdempotencyKey == request.IdempotencyKey)
+            {
+                return Result.Updated;
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.IdempotencyKey)
+                && existing is not null
+                && existing.IdempotencyKey == request.IdempotencyKey
+                && existing.Status != RefundStatus.Completed)
+            {
+                return RefundErrors.AllocationIdempotencyKeyConflict;
+            }
+
             return RefundErrors.ExecutionConcurrencyConflict;
         }
 

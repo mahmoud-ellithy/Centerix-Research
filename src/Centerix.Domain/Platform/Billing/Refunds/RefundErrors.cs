@@ -136,4 +136,8 @@ public static class RefundErrors
     public static Error CurrencyMismatch =>
         Error.Conflict("Refund.CurrencyMismatch",
             "The payment currency does not match the refund currency. Cross-currency refund allocation is not supported.");
+
+    public static Error PaymentMethodMismatch =>
+        Error.Conflict("Refund.PaymentMethodMismatch",
+            "The refund allocation's payment method does not match the authoritative payment method.");
 }
