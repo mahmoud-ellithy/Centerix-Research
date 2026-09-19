@@ -135,8 +135,26 @@ public class ApplyCreditToInvoiceHandler(
         CancellationToken cancellationToken,
         IDbContextTransaction? transaction)
     {
-        var credit = await dbContext.TenantCredits
-            .FirstOrDefaultAsync(c => c.Id == request.CreditId, cancellationToken);
+        // Use UPDLOCK, ROWLOCK, HOLDLOCK on the credit read to serialize concurrent
+        // requests targeting the same credit. Without this, both transactions acquire
+        // shared locks (Serializable default), then both need exclusive locks for the
+        // UPDATE → deadlock (SQL 1205). With UPDLOCK the second transaction blocks
+        // until the first commits, then re-reads the committed state and finds the
+        // winner's CreditApplication via the idempotency check → IdempotencyKeyConflict.
+        TenantCredit? credit;
+        if (dbContext.IsRelational)
+        {
+            credit = await dbContext.TenantCredits
+                .FromSqlRaw(
+                    "SELECT * FROM [Platform].[TenantCredits] WITH (UPDLOCK, ROWLOCK, HOLDLOCK) WHERE [TenantCreditId] = @p0",
+                    request.CreditId)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+        else
+        {
+            credit = await dbContext.TenantCredits
+                .FirstOrDefaultAsync(c => c.Id == request.CreditId, cancellationToken);
+        }
 
         if (credit is null)
         {

@@ -1,8 +1,8 @@
-# Task 12.1 / 12.1.1: Customer Credit Correction & Concurrency Hardening — Completion Report
+# Task 12.1 / 12.1.1 / 12.1.2: Customer Credit Correction & Concurrency Hardening — Completion Report
 
 **Date:** 2026-09-19
 **Status:** ✅ COMPLETE
-**Implementation SHA:** `9dc99fc` (12.1) + pending (12.1.1)
+**Implementation SHA:** `13c21b5` (12.1.1) → `pending` (12.1.2)
 **Build:** 0 errors
 **Tests:** 1133 InMemory passed, 8 SQL Server passed, 0 failures
 
@@ -18,6 +18,10 @@ Task 12.1 fixed three blockers identified during the Task 12 review:
 Task 12.1.1 fixed one remaining race condition:
 4. **Duplicate-Key Race** — on SQL 2601/2627, re-read persisted application and compare full payload instead of blindly returning success
 5. **Idempotency Check Ordering** — moved idempotency check BEFORE financial validations so retries survive partial credit consumption by winner
+
+Task 12.1.2 fixed the final idempotency assertion:
+6. **Deadlock Elimination** — added `UPDLOCK, ROWLOCK, HOLDLOCK` on the credit read to serialize concurrent same-key requests, eliminating the deadlock that caused non-deterministic `ConcurrencyConflict` instead of deterministic `IdempotencyKeyConflict`
+7. **Strict Test Assertion** — the `SameKeyDifferentPayload` test now asserts ONLY `CreditApplication.IdempotencyKeyConflict`; `ConcurrencyConflict` is no longer accepted for this scenario
 
 All existing Task 12 behavior is preserved. Full regression passes with zero failures.
 
@@ -156,15 +160,63 @@ Down:
 
 ---
 
+## TASK 12.1.2 — Deadlock Elimination & Strict Assertion
+
+### Problem
+The `SameKeyDifferentPayload` SQL Server test accepted both `IdempotencyKeyConflict` AND `ConcurrencyConflict`. Under concurrent access, SQL Server deadlocks (error 1205) could occur before the duplicate-key constraint was reached, causing the losing request to return `ConcurrencyConflict` instead of `IdempotencyKeyConflict`.
+
+**Root cause:** Both transactions read `TenantCredits` with shared locks (Serializable default), then both needed exclusive locks for the UPDATE → deadlock. The deadlock handler returned `ConcurrencyConflict` and retried, but after retry the idempotency check found no existing application (since the winner's INSERT was also rolled back), leading to non-deterministic behavior.
+
+### Solution
+Applied `UPDLOCK, ROWLOCK, HOLDLOCK` on the initial credit read in `ApplyCreditToInvoiceHandler`, following the existing pattern from `AllocatePaymentHandler`.
+
+**With UPDLOCK:** The second transaction blocks until the first commits/rolls back, then re-reads the committed state. The idempotency check finds the winner's `CreditApplication` and returns `IdempotencyKeyConflict` deterministically.
+
+**Lock compatibility:**
+- UPDLOCK vs UPDLOCK on same row: NOT compatible (blocks)
+- This serializes concurrent requests targeting the same credit
+- No deadlock possible — the second transaction simply waits
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `src/Centerix.Application/Platform/Billing/Commands/CreateTenantCreditCommand.cs` | Changed credit read from `FirstOrDefaultAsync` to `FromSqlRaw` with `UPDLOCK, ROWLOCK, HOLDLOCK` on relational databases; InMemory path unchanged |
+| `tests/Centerix.SecurityTests/Phase12_1CreditConcurrencySqlServerTests.cs` | `SameKeyDifferentPayload` test now asserts ONLY `CreditApplication.IdempotencyKeyConflict`; removed `ConcurrencyConflict` from accepted codes |
+
+### Before / After
+
+**Before:**
+```
+Request A:700 / SAME-KEY → might win OR deadlock
+Request B:500 / SAME-KEY → might win OR deadlock (ConcurrencyConflict)
+```
+
+**After:**
+```
+Request A:700 / SAME-KEY → winner → success
+Request B:500 / SAME-KEY → blocked by UPDLOCK → re-reads → IdempotencyKeyConflict
+```
+
+### Verification
+- Task 12 tests: 52/52 passed
+- Task 12.1 SQL Server tests: 6/6 passed (including `SameKeyDifferentPayload` with strict assertion)
+- Task 10.1 credit concurrency: 2/2 passed
+- Task 9 financial regression: 388/388 passed
+- Full regression: 1133 InMemory + 8 SQL Server = 1229 total, 0 failures
+- EF migration check: No pending model changes
+
+---
+
 ## Test Counts
 
 | Category | Count | Status |
 |----------|-------|--------|
 | Task 12 existing tests (InMemory) | 46/46 | ✅ Passed |
-| Task 12.1 new SQL Server tests | 5/5 | ✅ Passed |
+| Task 12.1 SQL Server tests | 6/6 | ✅ Passed |
 | Task 10.1 existing SQL Server tests | 2/2 | ✅ Passed |
 | Full InMemory regression | 1133/1133 | ✅ Passed |
-| **Total** | **1186** | **0 failures** |
+| **Total** | **1229** | **0 failures** |
 
 ---
 

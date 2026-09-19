@@ -629,18 +629,14 @@ public class Phase12_1CreditConcurrencySqlServerTests
             },
             CancellationToken.None);
 
-        // Exactly one must succeed. The loser can return either:
-        //   - IdempotencyKeyConflict: duplicate-key caught, re-read confirmed different payload
-        //   - ConcurrencyConflict: deadlock victim (SQL 1205) before duplicate-key path
-        // Both are correct — the important invariant is exactly one persists.
+        // Exactly one must succeed. The loser MUST return IdempotencyKeyConflict:
+        // UPDLOCK serializes the credit-row read so the second transaction blocks,
+        // then re-reads the committed state, finds the winner's CreditApplication
+        // via the idempotency check, and returns IdempotencyKeyConflict.
+        // ConcurrencyConflict is NOT acceptable for same-key/different-payload.
         var successCount = new[] { result1, result2 }.Count(r => r.IsSuccess);
-        var expectedLoseCodes = new HashSet<string>
-        {
-            "CreditApplication.IdempotencyKeyConflict",
-            "CreditApplication.ConcurrencyConflict"
-        };
         var loserCount = new[] { result1, result2 }
-            .Count(r => r.Errors?.Any(e => expectedLoseCodes.Contains(e.Code)) ?? false);
+            .Count(r => r.Errors?.Any(e => e.Code == "CreditApplication.IdempotencyKeyConflict") ?? false);
 
         Assert.True(successCount == 1,
             $"Expected exactly 1 success but got {successCount}. " +
