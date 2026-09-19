@@ -1666,6 +1666,18 @@ public class Phase9FinancialConcurrencySqlServerTests
                 "user-1",
                 DateTime.UtcNow).Value;
             db.Refunds.Add(refund);
+
+            // Create a RefundAllocation linking the refund to the payment (required by ExecuteRefundHandler)
+            var refundAllocation = RefundAllocation.Create(
+                Guid.NewGuid(),
+                refund.Id,
+                payment.Id,
+                4275.89m,
+                PaymentMethod.Cash,
+                "EGP",
+                "PAY-CONCURRENT-REFUND").Value;
+            db.RefundAllocations.Add(refundAllocation);
+
             db.StampAddedTenantIds(tenantId);
             await db.SaveChangesAsync();
 
