@@ -1,116 +1,101 @@
-﻿# Task 13 — Refund Settlement & Payment Source Allocation
+﻿# Task 13/13.1 — Refund Settlement & Payment Source Allocation
 
-## 1. Objective
+## Implementation SHA
+ffe63aa
 
-Complete the remaining financial gap: a Refund must explicitly record how the refunded amount is sourced from the customer's original completed payments, preserving the original payment method for full financial traceability.
+## Files Changed
+- src/Centerix.Domain/Platform/Billing/Refunds/RefundAllocation.cs
+- src/Centerix.Domain/Platform/Billing/Refunds/RefundErrors.cs
+- src/Centerix.Domain/Platform/Billing/Refunds/Refund.cs
+- src/Centerix.Application/Platform/Billing/Commands/CreateRefundCommand.cs
+- src/Centerix.Application/Platform/Billing/Commands/ExecuteRefundCommand.cs
+- src/Centerix.Infrastructure/Data/Configurations/RefundAllocationConfiguration.cs
+- src/Centerix.Infrastructure/Data/Configurations/RefundAllocationConfiguration.cs
+- src/Centerix.Infrastructure/Data/Configurations/RefundConfiguration.cs
+- src/Centerix.API/Controllers/RefundsController.cs
+- tests/Centerix.SecurityTests/Phase13RefundAllocationTests.cs
+- tests/Centerix.SecurityTests/Phase13RefundAllocationSqlServerTests.cs
+- docs/TASK-13-REFUND-SETTLEMENT-REPORT.md
 
-## 2. Existing Refund Architecture
+## Exact Financial Invariant Implemented
 
-Before Task 13:
-- Refund entity with lifecycle (Pending/Approved/Processing/Completed)
-- RefundCalculationService producing RefundCalculationResult with PaymentContributions[]
-- ExecuteRefundCommand creating a single RefundSettlement ledger entry
-- No per-payment allocation concept
+```
+Refundable Payment Amount
+  =
+  Completed Payment Amount
+  -
+  SUM(RefundAllocation.Amount for OTHER refunds in Processing or Completed status)
+```
 
-## 3. Implemented Changes
+For every completed payment:
+```
+TotalRefundAllocations (from Processing/Completed refunds)
+    <=
+Payment.Amount
+```
 
-### 3.1 Domain Layer
-- New entity: RefundAllocation linking Refund to source Payment
-- 12 new allocation-specific error codes in RefundErrors
+and:
+```
+NewRefundAllocation.Amount
+    <=
+Payment.Amount - ExistingRefundedAmount
+```
 
-### 3.2 Application Layer
-- CreateRefundCommand: auto-generates RefundAllocations from PaymentContributions (pro-rata)
-- ExecuteRefundCommand: validates allocations, creates single total ledger entry with allocation summary
+## Concurrency Strategy
 
-### 3.3 Infrastructure Layer
-- RefundAllocationConfiguration with PK, FK, unique constraint on (TenantId, RefundId, PaymentId)
-- EF Migration: Task13_RefundAllocation
+- Serializable isolation level for all financial transactions
+- UPDLOCK + ROWLOCK + HOLDLOCK on Payment reads to serialize concurrent refund source consumption
+- ChangeTracker.Clear() before each deadlock retry
+- Bounded exponential backoff (3 retries: 50ms, 100ms, 200ms)
 
-### 3.4 API Layer
-- RefundsController: POST create, POST approve, POST execute (with idempotency key), POST calculate
+## Idempotency
 
-## 4. Refund Allocation Model
+ExecuteRefundCommand accepts an explicit IdempotencyKey parameter:
+- Stored on the Refund entity during first execution
+- Same key + same Refund = idempotent success
+- Same key + different Refund = IdempotencyKeyConflict
+- Unique filtered index UX_Refunds_TenantId_IdempotencyKey enforces at DB level
 
-Refund -> RefundAllocation (PaymentId, Amount, PaymentMethod snapshot, CurrencyCode, PaymentNumber)
-     -> CustomerLedgerEntry (RefundSettlement - single total with allocation summary)
+## SQL Server Concurrency Test Results
 
-Pro-rata distribution: AllocationAmount = RefundAmount * (PaymentAllocatedAmount / TotalAmountPaid)
+| Scenario | Required Result | Actual Result |
+|----------|----------------|---------------|
+| Two refunds, same payment (700+700 against 1000) | 1 success + 1 InsufficientPaymentSource + 0 unexpected | PASS |
+| Same refund, same idempotency key | 1 financial execution + 1 idempotent success + 0 unexpected | PASS |
+| Same key, different payload | 1 success + 1 IdempotencyKeyConflict + 0 unexpected | PASS |
+| Multiple payment sources | Allocation total equals refund amount | PASS |
 
-## 5. Payment Source Rules
+## Post-Concurrency Financial Invariants
 
-1. Only Completed payments can be refund sources
-2. Allocation amount must be > 0
-3. Sum of allocations == Refund.Amount
-4. SUM(allocations for payment) <= Payment.AllocatedAmount
-5. Allocations immutable after creation
-6. Currency must match
-7. Tenant isolation enforced
+After every concurrency test:
+- SUM(RefundAllocation.Amount per Payment from Completed refunds) <= Payment.Amount
+- Exactly 1 ledger settlement for the winning refund
+- No duplicate ledger settlements
+- Payment.Amount unchanged
+- Payment.Status unchanged
+- PaymentAllocation.Amount unchanged
+- Invoice.TotalAmount unchanged
 
-## 6. Refund Execution Lifecycle
+## Test Matrix
 
-CreateRefundCommand: Calculate -> Create Refund -> Create RefundAllocations (pro-rata)
-ExecuteRefundCommand: Idempotency check -> State validation -> Validate allocations -> Validate payments -> Execute -> Ledger entry -> Audit
-
-## 7. Idempotency
-
-ExecuteRefundCommand accepts IdempotencyKey:
-- Same key + same request -> idempotent success
-- Same key + different payload -> IdempotencyKeyConflict
-- Different keys -> separate operations
-
-## 8. Concurrency (SQL Server Tests)
-
-| Test | Scenario | Expected |
-|------|----------|----------|
-| ConcurrentRefundExecution_SamePayment_OnlyOneSucceeds | Two concurrent executions | At least 1 succeeds |
-| ConcurrentRefundExecution_SameIdempotencyKey_ConvergesIdempotently | Same idempotency key | At least 1 succeeds; single ledger entry |
-| MultiplePaymentRefundAllocation_SumsCorrectly | Refund from 2 payments | Both allocations recorded |
-
-## 9. Tenant Isolation
-
-- EF global query filter on TenantId
-- Cross-tenant payment references rejected
-- StampAddedTenantIds() on every SaveChanges
-
-## 10. Database Changes
-
-Platform.RefundAllocations table with:
-- RefundAllocationId (PK), TenantId, RefundId (FK), PaymentId (FK)
-- Amount (18,2), CurrencyCode (3), PaymentMethod (50), PaymentNumber (50)
-- RowVersion, CreatedAt, CreatedBy
-- Unique index on (TenantId, RefundId, PaymentId)
-- Restrict delete on both FKs
-
-## 11. API Changes
-
-POST /api/Refunds - Create refund request
-POST /api/Refunds/{id}/approve - Approve refund
-POST /api/Refunds/{id}/execute - Execute refund (with idempotency key)
-POST /api/Refunds/calculate - Side-effect-free calculation
-
-## 12. Test Matrix
-
-Total: 25 tests (22 InMemory + 3 SQL Server)
+### InMemory Tests (22 total)
 - 6 domain entity tests
 - 9 handler tests (CreateRefund allocation + ExecuteRefund validation)
 - 3 financial invariant tests
 - 3 historical integrity tests
 - 1 authorization test
-- 3 SQL Server concurrency tests
 
-## 13. Historical Integrity
+### SQL Server Tests (4 total)
+- CompetingRefunds_SamePayment_ExactOneSuccessOneInsufficient
+- SameRefund_SameIdempotencyKey_ExactOneFinancialExecution
+- SameKey_DifferentPayload_ExactOneSuccessOneConflict
+- MultiplePaymentRefundAllocation_SumsCorrectly
 
-Refund execution does NOT modify:
-- Payment.Amount
-- Payment.Status
-- PaymentAllocation.AllocatedAmount
-- Invoice.TotalAmount
+## Full Regression Results
 
-## 14. Migration Verification
-
-dotnet ef migrations has-pending-model-changes -> No changes
-1155 InMemory + 11 SQL Server = 1166 total, 0 failures
-
-## 15. Implementation SHA
-
-89229db
+- 1155 InMemory tests: PASS
+- 4 Phase13 SQL Server tests: PASS
+- 6 Phase12_1 SQL Server tests: PASS
+- 2 Phase10_1 SQL Server tests: PASS
+- Total: 1167 tests, 0 failures
+- EF migration check: No pending model changes
