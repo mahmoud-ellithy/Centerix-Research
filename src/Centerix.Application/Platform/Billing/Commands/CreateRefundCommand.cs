@@ -137,6 +137,23 @@ public class CreateRefundHandler(
         var refund = refundResult.Value;
 
         dbContext.Refunds.Add(refund);
+
+        // ── Generate RefundAllocations from PaymentContributions ──────────
+        // Distribute RefundAmount pro-rata across the payment sources that
+        // contributed to AmountActuallyPaid. This preserves the exact source
+        // breakdown for financial traceability.
+        var allocations = GenerateAllocations(
+            refund.Id,
+            contract.TenantId!,
+            calculation.RefundAmount,
+            calculation.CurrencyCode,
+            calculation.PaymentContributions);
+
+        foreach (var allocation in allocations)
+        {
+            dbContext.RefundAllocations.Add(allocation);
+        }
+
         dbContext.StampAddedTenantIds(contract.TenantId!);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -159,5 +176,75 @@ public class CreateRefundHandler(
             cancellationToken: cancellationToken);
 
         return refund.Id;
+    }
+
+    /// <summary>
+    /// Generates RefundAllocations by distributing the refund amount pro-rata
+    /// across the payment contributions that funded this contract.
+    /// </summary>
+    private static List<RefundAllocation> GenerateAllocations(
+        Guid refundId,
+        string tenantId,
+        decimal refundAmount,
+        string currencyCode,
+        IReadOnlyList<PaymentContribution> contributions)
+    {
+        var allocations = new List<RefundAllocation>();
+
+        if (contributions.Count == 0 || refundAmount <= 0)
+            return allocations;
+
+        // Filter to only payments with positive contributions (Completed + Active allocations)
+        var validContributions = contributions
+            .Where(c => c.AllocatedAmount > 0)
+            .ToList();
+
+        if (validContributions.Count == 0)
+            return allocations;
+
+        var totalContributed = validContributions.Sum(c => c.AllocatedAmount);
+
+        // Pro-rata distribution with remainder correction on the last allocation
+        decimal allocatedSoFar = 0;
+
+        for (int i = 0; i < validContributions.Count; i++)
+        {
+            var contribution = validContributions[i];
+            decimal allocationAmount;
+
+            if (i == validContributions.Count - 1)
+            {
+                // Last allocation gets the remainder to avoid rounding gaps
+                allocationAmount = refundAmount - allocatedSoFar;
+            }
+            else
+            {
+                allocationAmount = Math.Round(
+                    refundAmount * (contribution.AllocatedAmount / totalContributed),
+                    2,
+                    MidpointRounding.AwayFromZero);
+            }
+
+            if (allocationAmount <= 0)
+                continue;
+
+            var result = RefundAllocation.Create(
+                Guid.NewGuid(),
+                refundId,
+                contribution.PaymentId,
+                allocationAmount,
+                contribution.Method,
+                currencyCode,
+                contribution.PaymentNumber);
+
+            if (result.IsSuccess)
+            {
+                allocations.Add(result.Value);
+            }
+
+            allocatedSoFar += allocationAmount;
+        }
+
+        return allocations;
     }
 }

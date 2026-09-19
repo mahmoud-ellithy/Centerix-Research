@@ -104,6 +104,7 @@ public interface IAppDbContext
     DbSet<PaymentReceipt> PaymentReceipts { get; }
     DbSet<CustomerLedgerEntry> CustomerLedgerEntries { get; }
     DbSet<Refund> Refunds { get; }
+    DbSet<RefundAllocation> RefundAllocations { get; }
 
     // Billing: Installments (payment obligations)
     DbSet<Installment> Installments { get; }

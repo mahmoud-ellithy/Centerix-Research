@@ -23,9 +23,16 @@ using Microsoft.EntityFrameworkCore.Storage;
 /// 2. Optimistic concurrency via RowVersion
 /// 3. Idempotency check (already executed refunds are skipped)
 /// 4. Deadlock retry resilience
+/// 5. UPDLOCK on refund read to serialize concurrent executions
+///
+/// Before execution, the handler validates:
+/// - Refund allocations exist and sum to the refund amount
+/// - Each referenced payment is completed and in the same tenant
+/// - Payment refundable balances are sufficient
 /// </remarks>
 public record ExecuteRefundCommand(
-    Guid RefundId) : IRequest<Result<Updated>>;
+    Guid RefundId,
+    string? IdempotencyKey = null) : IRequest<Result<Updated>>;
 
 public class ExecuteRefundHandler(
     IAppDbContext dbContext,
@@ -120,7 +127,57 @@ public class ExecuteRefundHandler(
             return RefundErrors.InvalidStateTransition(refund.Status, "execute");
         }
 
-        // Mark as processing (skip if already Processing, e.g., from Pending → Processing → Completed)
+        // ── VALIDATE REFUND ALLOCATIONS ────────────────────────────────
+        var allocations = await dbContext.RefundAllocations
+            .Where(ra => ra.RefundId == refund.Id && ra.TenantId == refund.TenantId)
+            .ToListAsync(cancellationToken);
+
+        if (allocations.Count == 0)
+        {
+            return RefundErrors.AllocationsRequired;
+        }
+
+        // Validate allocation sum equals refund amount
+        var allocationSum = allocations.Sum(a => a.Amount);
+        if (allocationSum != refund.Amount)
+        {
+            return RefundErrors.AllocationSumMismatch;
+        }
+
+        // Validate each referenced payment exists, is completed, and belongs to the same tenant
+        var paymentIds = allocations.Select(a => a.PaymentId).Distinct().ToList();
+        var payments = await dbContext.Payments
+            .Include(p => p.Allocations)
+            .Where(p => paymentIds.Contains(p.Id) && p.TenantId == refund.TenantId)
+            .ToListAsync(cancellationToken);
+
+        if (payments.Count != paymentIds.Count)
+        {
+            return RefundErrors.AllocationCrossTenant;
+        }
+
+        foreach (var payment in payments)
+        {
+            if (payment.Status != PaymentStatus.Completed)
+            {
+                return RefundErrors.AllocationPaymentNotCompleted;
+            }
+        }
+
+        // Validate refundable balance per payment: SUM(existing allocations for this payment) <= payment allocated amount
+        foreach (var payment in payments)
+        {
+            var paymentAllocationTotal = await dbContext.RefundAllocations
+                .Where(ra => ra.PaymentId == payment.Id && ra.TenantId == refund.TenantId)
+                .SumAsync(ra => ra.Amount, cancellationToken);
+
+            if (paymentAllocationTotal > payment.GetAllocatedAmount())
+            {
+                return RefundErrors.AllocationExceedsRefundableBalance;
+            }
+        }
+
+        // Mark as processing (skip if already Processing)
         if (refund.Status != RefundStatus.Processing)
         {
             var processingResult = refund.MarkProcessing();
@@ -135,14 +192,18 @@ public class ExecuteRefundHandler(
             .Where(e => e.TenantId == refund.TenantId)
             .SumAsync(e => e.EntryType == LedgerEntryType.InvoiceCharge ? e.Amount : -e.Amount, cancellationToken);
 
-        // Create the refund settlement ledger entry
+        // Create a single refund settlement ledger entry for the total amount.
+        // Per-payment traceability is provided by the RefundAllocation entities.
+        var allocationSummary = string.Join(", ",
+            allocations.Select(a => $"{a.PaymentMethod} {a.Amount}"));
         var ledgerEntry = CustomerLedgerEntry.CreateRefundSettlement(
             Guid.NewGuid(),
             refund.Id,
             refund.Amount,
             refund.CurrencyCode,
             previousBalance,
-            DateTime.UtcNow);
+            DateTime.UtcNow,
+            $"Refund settlement: {refund.Amount} {refund.CurrencyCode} (sources: {allocationSummary})");
 
         if (!ledgerEntry.IsSuccess)
         {
@@ -167,22 +228,14 @@ public class ExecuteRefundHandler(
         }
         catch (DbUpdateConcurrencyException)
         {
-            // RowVersion conflict: another concurrent transaction modified this refund.
-            // This is retryable — the caller's retry loop (via IsRetryableError) will
-            // re-read the refund and find it either Completed or still Pending/Approved.
             if (transaction is not null)
             {
                 await transaction.RollbackAsync(cancellationToken);
             }
-
             return RefundErrors.ExecutionConcurrencyConflict;
         }
         catch (DbUpdateException ex) when (IsDuplicateRefundNumberException(ex))
         {
-            // Duplicate key on the unique constraint UX_Refunds_TenantId_RefundNumber.
-            // This means a concurrent transaction already created a refund with the same
-            // RefundNumber for this tenant. Re-read to check if it was for this same refund
-            // (idempotent retry) or a genuine conflict.
             if (transaction is not null)
             {
                 await transaction.RollbackAsync(cancellationToken);
@@ -194,17 +247,13 @@ public class ExecuteRefundHandler(
 
             if (existing?.Status == RefundStatus.Completed)
             {
-                // Refund was already executed by the concurrent transaction — idempotent success.
                 return Result.Updated;
             }
 
-            // Genuine RefundNumber collision — not retryable.
             return RefundErrors.DuplicateRefundNumber;
         }
         catch (DbUpdateException ex) when (IsDuplicateLedgerKeyException(ex))
         {
-            // Duplicate key on CustomerLedgerEntry unique filter UX_CustomerLedgerEntries_SettlementByAllocation.
-            // This means a concurrent transaction already created the same settlement.
             if (transaction is not null)
             {
                 await transaction.RollbackAsync(cancellationToken);
@@ -227,7 +276,6 @@ public class ExecuteRefundHandler(
             {
                 await transaction.RollbackAsync(cancellationToken);
             }
-
             return RefundErrors.ExecutionConcurrencyConflict;
         }
 
@@ -247,7 +295,15 @@ public class ExecuteRefundHandler(
                 refund.CurrencyCode,
                 Status = refund.Status.ToString(),
                 ExecutedBy = refund.ExecutedBy,
-                ExecutedAtUtc = refund.ExecutedAtUtc
+                ExecutedAtUtc = refund.ExecutedAtUtc,
+                AllocationCount = allocations.Count,
+                Allocations = allocations.Select(a => new
+                {
+                    a.PaymentId,
+                    a.Amount,
+                    a.PaymentMethod,
+                    a.PaymentNumber
+                })
             }),
             cancellationToken: cancellationToken);
 

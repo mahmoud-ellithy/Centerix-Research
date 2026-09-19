@@ -80,4 +80,52 @@ public static class RefundErrors
     public static Error CrossTenantInvoice =>
         Error.Forbidden("Refund.CrossTenantInvoice",
             "Cannot attach an Invoice belonging to a different tenant.");
+
+    // ── Refund Allocation errors ──
+
+    public static Error AllocationIdRequired =>
+        Error.Validation("RefundAllocation.Id_Required", "Refund allocation ID is required.");
+
+    public static Error AllocationRefundIdRequired =>
+        Error.Validation("RefundAllocation.RefundId_Required", "Refund ID is required.");
+
+    public static Error AllocationPaymentIdRequired =>
+        Error.Validation("RefundAllocation.PaymentId_Required", "Payment ID is required.");
+
+    public static Error AllocationAmountMustBePositive =>
+        Error.Validation("RefundAllocation.Amount_MustBePositive", "Refund allocation amount must be greater than zero.");
+
+    public static Error AllocationInvalidPaymentMethod =>
+        Error.Validation("RefundAllocation.PaymentMethod_Invalid", "Payment method is not valid.");
+
+    public static Error AllocationSumMismatch =>
+        Error.Conflict("RefundAllocation.SumMismatch",
+            "Sum of refund allocations does not equal the refund amount.");
+
+    public static Error AllocationPaymentNotCompleted =>
+        Error.Conflict("RefundAllocation.PaymentNotCompleted",
+            "Only completed payments can be refund sources.");
+
+    public static Error AllocationExceedsRefundableBalance =>
+        Error.Conflict("RefundAllocation.ExceedsRefundableBalance",
+            "Refund allocation exceeds the refundable balance of the payment.");
+
+    public static Error AllocationCurrencyMismatch =>
+        Error.Conflict("RefundAllocation.CurrencyMismatch",
+            "Refund allocation currency does not match the refund currency.");
+
+    public static Error AllocationCrossTenant =>
+        Error.Forbidden("RefundAllocation.CrossTenant",
+            "Refund allocation references a payment from a different tenant.");
+
+    public static Error AllocationNotFound =>
+        Error.NotFound("RefundAllocation.NotFound", "Refund allocation was not found.");
+
+    public static Error AllocationsRequired =>
+        Error.Validation("RefundAllocation.Required",
+            "Refund must have at least one payment allocation before execution.");
+
+    public static Error AllocationIdempotencyKeyConflict =>
+        Error.Conflict("RefundAllocation.IdempotencyKeyConflict",
+            "A refund execution with this idempotency key but different payload already exists.");
 }
