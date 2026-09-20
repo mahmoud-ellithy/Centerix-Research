@@ -3,6 +3,8 @@ namespace Centerix.Application.Teachers.Teachers.Commands;
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Subscriptions;
+using Centerix.Domain.Platform.Tenants;
+using Centerix.Domain.Platform.Tenants.Enums;
 using Centerix.Domain.Students.Branches;
 using Centerix.Domain.Teachers.Enums;
 using Centerix.Domain.Teachers.Teachers;
@@ -64,6 +66,20 @@ public class CreateTeacherHandler(
             currentTenant.TenantId!, LimitTypeCodes.Teachers, cancellationToken);
         if (!limitResult.IsSuccess)
             return limitResult.Errors!;
+
+        // Security: the referenced Identity user must hold an active membership in this tenant.
+        var userIsMember = await dbContext.TenantMemberships
+            .AsNoTracking()
+            .AnyAsync(m =>
+                m.UserId == request.UserId
+                && m.TenantId == currentTenant.TenantId
+                && m.Status == TenantMembershipStatus.Active,
+                cancellationToken);
+        if (!userIsMember)
+        {
+            await limitService.ReleaseAsync(currentTenant.TenantId!, LimitTypeCodes.Teachers, cancellationToken);
+            return TeacherErrors.UserNotInTenant;
+        }
 
         // Tenant-scoped referential integrity: branch must exist within the resolved tenant.
         var branchExists = await dbContext.Branches

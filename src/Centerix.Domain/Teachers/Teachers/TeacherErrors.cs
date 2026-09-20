@@ -39,4 +39,7 @@ public static class TeacherErrors
 
     public static Error DuplicateUser =>
         Error.Conflict("Teacher.DuplicateUser", "A teacher is already linked to this user");
+
+    public static Error UserNotInTenant =>
+        Error.Validation("Teacher.UserNotInTenant", "The specified user is not a member of this tenant");
 }

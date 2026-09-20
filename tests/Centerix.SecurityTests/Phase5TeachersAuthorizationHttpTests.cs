@@ -412,12 +412,15 @@ public class Phase5TeachersAuthorizationHttpTests : IClassFixture<TestWebApplica
         var branchId = await SeedBranchAsync(s);
         var teacherId = await SeedTeacherAsync(s, branchId);
 
+        var updateUserId = $"user-{Guid.NewGuid():N}";
+        await EnsureTenantMembershipForUserAsync(s, updateUserId);
+
         var update = await _client.SendAsync(Put(
             $"/api/teachers/{teacherId}",
             new
             {
                 id = teacherId,
-                userId = $"user-{Guid.NewGuid():N}",
+                userId = updateUserId,
                 branchId = branchId,
                 fullName = "Updated Name",
                 phone = "01000000000",
@@ -678,5 +681,18 @@ public class Phase5TeachersAuthorizationHttpTests : IClassFixture<TestWebApplica
         var cancel = await _client.SendAsync(cancelReq);
 
         Assert.Equal(HttpStatusCode.NoContent, cancel.StatusCode);
+    }
+
+    private async Task EnsureTenantMembershipForUserAsync(Phase5Seed s, string userId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantId = s.TenantId.ToString();
+        if (!db.TenantMemberships.Any(m => m.UserId == userId && m.TenantId == tenantId))
+        {
+            db.TenantMemberships.Add(TenantMembership.Create(
+                userId, tenantId, "TenantUser", TenantMembershipStatus.Active).Value);
+            await db.SaveChangesAsync();
+        }
     }
 }

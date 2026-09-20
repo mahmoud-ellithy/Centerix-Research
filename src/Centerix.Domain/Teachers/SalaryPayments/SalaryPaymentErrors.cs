@@ -30,4 +30,7 @@ public static class SalaryPaymentErrors
 
     public static Error DuplicatePayment =>
         Error.Conflict("SalaryPayment.Duplicate", "A salary payment for this teacher in this period already exists");
+
+    public static Error NetExceedsGross =>
+        Error.Validation("SalaryPayment.NetExceedsGross", "Net amount must not exceed gross amount");
 }

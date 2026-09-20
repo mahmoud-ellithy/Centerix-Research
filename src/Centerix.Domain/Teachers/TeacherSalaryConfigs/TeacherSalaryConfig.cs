@@ -60,6 +60,9 @@ public class TeacherSalaryConfig : AuditableEntity<int>
         if (salaryType == SalaryType.Percentage && value > 100m)
             return TeacherSalaryConfigErrors.PercentageOutOfRange;
 
+        if (effectiveFrom == default)
+            return TeacherSalaryConfigErrors.EffectiveFromRequired;
+
         return new TeacherSalaryConfig(id, teacherId, groupId, salaryType, value, effectiveFrom);
     }
 

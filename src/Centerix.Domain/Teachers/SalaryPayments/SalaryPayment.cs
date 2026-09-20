@@ -79,6 +79,9 @@ public class SalaryPayment : AuditableEntity<Guid>
         if (netAmount <= 0)
             return SalaryPaymentErrors.NetAmountRequired;
 
+        if (netAmount > grossAmount)
+            return SalaryPaymentErrors.NetExceedsGross;
+
         return new SalaryPayment(
             id,
             teacherId,

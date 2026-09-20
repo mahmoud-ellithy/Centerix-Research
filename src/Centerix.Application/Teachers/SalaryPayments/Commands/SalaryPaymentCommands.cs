@@ -27,6 +27,8 @@ public class CreateSalaryPaymentValidator : AbstractValidator<CreateSalaryPaymen
         RuleFor(x => x.PeriodYear).InclusiveBetween((short)2000, (short)2100);
         RuleFor(x => x.GrossAmount).GreaterThan(0);
         RuleFor(x => x.NetAmount).GreaterThan(0);
+        RuleFor(x => x.NetAmount).LessThanOrEqualTo(x => x.GrossAmount)
+            .WithMessage("Net amount must not exceed gross amount.");
     }
 }
 

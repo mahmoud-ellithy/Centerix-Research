@@ -2,6 +2,8 @@ namespace Centerix.Application.Teachers.Teachers.Commands;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Tenants;
+using Centerix.Domain.Platform.Tenants.Enums;
 using Centerix.Domain.Students.Branches;
 using Centerix.Domain.Teachers.Enums;
 using Centerix.Domain.Teachers.Teachers;
@@ -37,6 +39,7 @@ public class UpdateTeacherValidator : AbstractValidator<UpdateTeacherCommand>
 
 public class UpdateTeacherHandler(
     IAppDbContext dbContext,
+    ICurrentTenant currentTenant,
     IAuditWriter auditWriter) : IRequestHandler<UpdateTeacherCommand, Result<Updated>>
 {
     public async Task<Result<Updated>> Handle(
@@ -47,6 +50,17 @@ public class UpdateTeacherHandler(
             .FirstOrDefaultAsync(t => t.Id == request.Id, cancellationToken);
         if (teacher is null)
             return TeacherErrors.NotFound;
+
+        // Security: the referenced Identity user must hold an active membership in this tenant.
+        var userIsMember = await dbContext.TenantMemberships
+            .AsNoTracking()
+            .AnyAsync(m =>
+                m.UserId == request.UserId
+                && m.TenantId == currentTenant.TenantId
+                && m.Status == TenantMembershipStatus.Active,
+                cancellationToken);
+        if (!userIsMember)
+            return TeacherErrors.UserNotInTenant;
 
         var branchExists = await dbContext.Branches
             .AsNoTracking()
