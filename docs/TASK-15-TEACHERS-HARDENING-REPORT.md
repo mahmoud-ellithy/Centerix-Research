@@ -123,6 +123,55 @@ F-05's new membership check rejected the random `userId` used in the update. Fix
 | `tests/.../Task15TeachersHardeningTests.cs` | New test file (23 tests) |
 | `tests/.../Phase5TeachersAuthorizationHttpTests.cs` | Fixed side-effect from F-05 |
 
+## Task 15.1 — Verification Gap Closure
+
+### H-01 — HTTP Feature-Gating Matrix (32 tests, 32/32 pass)
+
+Tests across 8 endpoints × 4 cases (FeaturePresent→Allowed, FeatureMissing→403, FeatureExpired→403, PermissionMissing→403):
+
+| Endpoint | FeaturePresent | FeatureMissing | FeatureExpired | PermissionMissing |
+|----------|---------------|---------------|---------------|-------------------|
+| Teacher PUT | ✅ 204 | ✅ 403 | ✅ 403 | ✅ 403 |
+| Teacher DELETE | ✅ 204 | ✅ 403 | ✅ 403 | ✅ 403 |
+| Subject PUT | ✅ 204 | ✅ 403 | ✅ 403 | ✅ 403 |
+| Subject DELETE | ✅ 204 | ✅ 403 | ✅ 403 | ✅ 403 |
+| TeacherSalaryConfig PUT | ✅ 204 | ✅ 403 | ✅ 403 | ✅ 403 |
+| TeacherSalaryConfig DELETE | ✅ 204 | ✅ 403 | ✅ 403 | ✅ 403 |
+| SalaryPayment MarkPaid | ✅ 204 | ✅ 403 | ✅ 403 | ✅ 403 |
+| SalaryPayment Cancel | ✅ 204 | ✅ 403 | ✅ 403 | ✅ 403 |
+
+File: `tests/.../Task15_1FeatureGatingHttpTests.cs`
+
+**Test fixes applied:**
+- TeacherSalaryConfig URL: corrected `teacherssalaryconfigs` → `teachersalaryconfigs` (route mismatch)
+- Subject AcademicStage seed: changed from hardcoded Id=1 (duplicate key across tests) to auto-generated Id per tenant
+
+### H-04 — Shared Soft-Delete Regression (10 tests, 10/10 pass)
+
+| Entity | NotVisibleInList | GetById_ReturnsNull | Any_ReturnsFalse |
+|--------|-----------------|--------------------|-----------------|
+| Teacher | ✅ | ✅ | ✅ |
+| Student | ✅ | ✅ | ✅ |
+| Branch | ✅ | ✅ | ✅ |
+| Cross-Tenant Soft-Delete Combined | ✅ | | |
+
+File: `tests/.../Task15_1SoftDeleteRegressionTests.cs`
+
+### H-03 — SQL Server Concurrency (2 tests, Docker required — not run)
+
+- `SalaryPayment_SequentialMarkPaidVsCancel_ExactlyOneWins`
+- `SalaryPayment_ParallelCancelVsCancel_ExactlyOneWins`
+
+Uses Testcontainers SQL Server via `SqlServerIntegrationFactory`. Requires Docker — could not execute in current environment.
+
+File: `tests/.../Task15_1ConcurrencySqlServerTests.cs`
+
+### EF Model Changes Check
+
+```
+No changes have been made to the model since the last migration.
+```
+
 ## Ambiguous Business Rules (NOT implemented — documented as UNKNOWN)
 
 1. **Effective-date overlap**: No duplicate-prevention logic exists for overlapping `EffectiveFrom` ranges on `TeacherSalaryConfig`. Business rule unclear.
