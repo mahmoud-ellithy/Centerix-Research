@@ -9,10 +9,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 /// <summary>
-/// Task 15.1 — H-03 real SQL Server concurrency tests for SalaryPayment Cancel vs Cancel.
-/// Proves that concurrent Cancel operations on the same Pending row are guarded by RowVersion:
+/// Task 15.1 — H-03 real SQL Server concurrency tests for SalaryPayment state transitions.
+/// Proves that concurrent mutations on the same Pending row are guarded by RowVersion:
 /// exactly one SaveChanges succeeds; the other receives DbUpdateConcurrencyException.
-/// Final database state is always valid (Cancelled, never stale/invalid).
+/// Final database state is always valid (Paid or Cancelled, never stale/invalid).
 /// Uses Testcontainers SQL Server via SqlServerIntegrationFactory.
 /// </summary>
 [Collection("SqlServerIntegration")]
@@ -73,7 +73,7 @@ public class Task15_1ConcurrencySqlServerTests
     }
 
     // ==================================================================
-    // Test C — Cancel vs Cancel
+    // Test C — Cancel vs Cancel (sequential)
     // ==================================================================
 
     [Fact]
@@ -137,8 +137,15 @@ public class Task15_1ConcurrencySqlServerTests
             var pay = await db.SalaryPayments.IgnoreQueryFilters().SingleAsync(p => p.Id == paymentId, cts.Token);
             barrier.SignalAndWait(cts.Token);
             pay.Cancel();
-            await db.SaveChangesAsync(cts.Token);
-            return true;
+            try
+            {
+                await db.SaveChangesAsync(cts.Token);
+                return true;
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return false;
+            }
         }, cts.Token);
 
         var taskB = Task.Run(async () =>
@@ -169,6 +176,146 @@ public class Task15_1ConcurrencySqlServerTests
             var db = verify.ServiceProvider.GetRequiredService<AppDbContext>();
             var final = await db.SalaryPayments.IgnoreQueryFilters().SingleAsync(p => p.Id == paymentId);
             Assert.Equal(SalaryPaymentStatus.Cancelled, final.Status);
+            Assert.Null(final.PaidAt);
+        }
+    }
+
+    // ==================================================================
+    // Test A — MarkPaid vs Cancel with Barrier (true parallel)
+    // ==================================================================
+
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    [Trait("Category", "Task15_1")]
+    public async Task SalaryPayment_ParallelMarkPaidVsCancel_ExactlyOneWins()
+    {
+        var tenantId = await SeedTenantAsync();
+        var (_, teacherId) = await SeedTeacherAsync(tenantId);
+        var paymentId = await SeedPendingPaymentAsync(tenantId, teacherId, 3, 2027);
+
+        using var barrier = new Barrier(2);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+
+        var taskMarkPaid = Task.Run(async () =>
+        {
+            using var scope = _env.Factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var pay = await db.SalaryPayments.IgnoreQueryFilters().SingleAsync(p => p.Id == paymentId, cts.Token);
+            barrier.SignalAndWait(cts.Token);
+            pay.MarkPaid(DateTime.UtcNow);
+            try
+            {
+                await db.SaveChangesAsync(cts.Token);
+                return true;
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return false;
+            }
+        }, cts.Token);
+
+        var taskCancel = Task.Run(async () =>
+        {
+            using var scope = _env.Factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var pay = await db.SalaryPayments.IgnoreQueryFilters().SingleAsync(p => p.Id == paymentId, cts.Token);
+            barrier.SignalAndWait(cts.Token);
+            pay.Cancel();
+            try
+            {
+                await db.SaveChangesAsync(cts.Token);
+                return true;
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return false;
+            }
+        }, cts.Token);
+
+        var results = await Task.WhenAll(taskMarkPaid, taskCancel);
+        var successCount = results.Count(r => r);
+
+        Assert.Equal(1, successCount);
+
+        using (var verify = _env.Factory.Services.CreateScope())
+        {
+            var db = verify.ServiceProvider.GetRequiredService<AppDbContext>();
+            var final = await db.SalaryPayments.IgnoreQueryFilters().SingleAsync(p => p.Id == paymentId);
+            Assert.NotEqual(SalaryPaymentStatus.Pending, final.Status);
+            if (final.Status == SalaryPaymentStatus.Paid)
+            {
+                Assert.NotNull(final.PaidAt);
+            }
+            else
+            {
+                Assert.Null(final.PaidAt);
+            }
+        }
+    }
+
+    // ==================================================================
+    // Test B — MarkPaid vs MarkPaid with Barrier (true parallel)
+    // ==================================================================
+
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    [Trait("Category", "Task15_1")]
+    public async Task SalaryPayment_ParallelMarkPaidVsMarkPaid_ExactlyOneWins()
+    {
+        var tenantId = await SeedTenantAsync();
+        var (_, teacherId) = await SeedTeacherAsync(tenantId);
+        var paymentId = await SeedPendingPaymentAsync(tenantId, teacherId, 4, 2027);
+
+        using var barrier = new Barrier(2);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+
+        var taskA = Task.Run(async () =>
+        {
+            using var scope = _env.Factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var pay = await db.SalaryPayments.IgnoreQueryFilters().SingleAsync(p => p.Id == paymentId, cts.Token);
+            barrier.SignalAndWait(cts.Token);
+            pay.MarkPaid(DateTime.UtcNow);
+            try
+            {
+                await db.SaveChangesAsync(cts.Token);
+                return true;
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return false;
+            }
+        }, cts.Token);
+
+        var taskB = Task.Run(async () =>
+        {
+            using var scope = _env.Factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var pay = await db.SalaryPayments.IgnoreQueryFilters().SingleAsync(p => p.Id == paymentId, cts.Token);
+            barrier.SignalAndWait(cts.Token);
+            pay.MarkPaid(DateTime.UtcNow);
+            try
+            {
+                await db.SaveChangesAsync(cts.Token);
+                return true;
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return false;
+            }
+        }, cts.Token);
+
+        var results = await Task.WhenAll(taskA, taskB);
+        var successCount = results.Count(r => r);
+
+        Assert.Equal(1, successCount);
+
+        using (var verify = _env.Factory.Services.CreateScope())
+        {
+            var db = verify.ServiceProvider.GetRequiredService<AppDbContext>();
+            var final = await db.SalaryPayments.IgnoreQueryFilters().SingleAsync(p => p.Id == paymentId);
+            Assert.Equal(SalaryPaymentStatus.Paid, final.Status);
+            Assert.NotNull(final.PaidAt);
         }
     }
 }

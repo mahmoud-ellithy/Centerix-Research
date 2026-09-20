@@ -12,7 +12,7 @@
 | F-10 EffectiveFrom Default Guard | FIXED — domain model |
 | F-14 NetAmount > GrossAmount Guard | FIXED — domain + validator |
 | Test Coverage | 23 new tests |
-| Full Regression | **1279 passed, 0 failed** |
+| Full Regression | **1325 passed, 0 failed** |
 
 ## Findings Detail
 
@@ -157,20 +157,39 @@ File: `tests/.../Task15_1FeatureGatingHttpTests.cs`
 
 File: `tests/.../Task15_1SoftDeleteRegressionTests.cs`
 
-### H-03 — SQL Server Concurrency (2 tests, Docker required — not run)
+### H-03 — SQL Server Concurrency (4 tests)
 
-- `SalaryPayment_SequentialMarkPaidVsCancel_ExactlyOneWins`
-- `SalaryPayment_ParallelCancelVsCancel_ExactlyOneWins`
-
-Uses Testcontainers SQL Server via `SqlServerIntegrationFactory`. Requires Docker — could not execute in current environment.
+| Test Class | Test Method | Provider | Database | Concurrency Mechanism | Expected Outcome | Actual Outcome |
+|-----------|-------------|----------|----------|----------------------|------------------|----------------|
+| `Task15_1ConcurrencySqlServerTests` | `SalaryPayment_ConcurrentCancelVsCancel_OnlyOneSucceeds_BecauseOfRowVersion` | EF Core SqlServer | SQL Server (Testcontainer) | Sequential two-scope read-modify-write | 1st SaveChanges OK, 2nd throws `DbUpdateConcurrencyException` | ✅ PASS (executed) |
+| `Task15_1ConcurrencySqlServerTests` | `SalaryPayment_ParallelCancelVsCancel_ExactlyOneWins` | EF Core SqlServer | SQL Server (Testcontainer) | `Barrier(2)` + independent DbContext | Exactly 1 succeeds, final state Cancelled | ✅ PASS (executed) |
+| `Task15_1ConcurrencySqlServerTests` | `SalaryPayment_ParallelMarkPaidVsCancel_ExactlyOneWins` | EF Core SqlServer | SQL Server (Testcontainer) | `Barrier(2)` + independent DbContext | Exactly 1 succeeds, final state Paid or Cancelled (never Pending) | ✅ PASS (executed) |
+| `Task15_1ConcurrencySqlServerTests` | `SalaryPayment_ParallelMarkPaidVsMarkPaid_ExactlyOneWins` | EF Core SqlServer | SQL Server (Testcontainer) | `Barrier(2)` + independent DbContext | Exactly 1 succeeds, final state Paid with valid PaidAt | ✅ PASS (executed) |
 
 File: `tests/.../Task15_1ConcurrencySqlServerTests.cs`
+
+Note: Docker/Testcontainers was available in the execution environment. All 4 tests executed and passed.
 
 ### EF Model Changes Check
 
 ```
 No changes have been made to the model since the last migration.
 ```
+
+### Regression Count Discrepancy: 1220 vs 1279
+
+| Run | Filter | Discovered | Passed | Failed | Skipped | Excluded |
+|-----|--------|-----------|--------|--------|---------|----------|
+| Task 15 | None | 1279 | 1279 | 0 | 0 | 0 |
+| Task 15.1 | `Category!=SqlServer` | 1220 | 1220 | 0 | 0 | 101 |
+| Task 15.1.1 (current) | None | 1325 | 1325 | 0 | 0 | 0 |
+| Task 15.1.1 (current) | `Category!=SqlServer` | 1220 | 1220 | 0 | 0 | 105 |
+
+**Explanation:**
+- Task 15 ran the full suite (no filter): 1178 non-SqlServer + 101 SqlServer = **1279 total**
+- Task 15.1 ran with `--filter "Category!=SqlServer"` which excluded all 101 SqlServer tests, then added 42 new non-SqlServer tests + 2 new SqlServer tests: (1178 + 42) = **1220 non-SqlServer**
+- Task 15.1.1 added 2 more SqlServer tests: 101 + 2 + 2 = **105 SqlServer**
+- Current full suite: 1220 + 105 = **1325 total**
 
 ## Ambiguous Business Rules (NOT implemented — documented as UNKNOWN)
 
