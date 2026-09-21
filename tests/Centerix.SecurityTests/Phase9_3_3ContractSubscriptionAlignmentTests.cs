@@ -296,49 +296,52 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
     }
 
     // ==================================================================
-    // Test 7: Contract End Date Matches Contract Duration (No Bonus)
+    // Test 7: Contract End Date Calculation (No Bonus)
     // ==================================================================
 
     [Fact]
-    public void Test07_ContractEndsAt_EqualsStartsPlusDurationMonths()
+    public void Test07_ContractEndsAt_CalculatedWithAddCalendarMonths()
     {
         var startsAt = new DateTime(2026, 12, 31, 0, 0, 0, DateTimeKind.Utc);
         var durationMonths = 12;
 
-        var endsAt = startsAt.AddMonths(durationMonths);
+        // Use AddCalendarMonths for correct month-end handling (leap year, etc.)
+        var endsAt = TenantPlan.AddCalendarMonths(startsAt, durationMonths);
 
         var contract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-DUR-001", 1,
             startsAt, endsAt, durationMonths,
             1000m, 1000m, "EGP", 12000m).Value;
 
-        // Contract end is based on DurationMonths only (no bonus)
+        // Contract end is based on DurationMonths using AddCalendarMonths
         Assert.Equal(startsAt, contract.EffectiveAtUtc);
         Assert.Equal(endsAt, contract.EndsAtUtc);
         Assert.Equal(durationMonths, contract.DurationMonths);
     }
 
     // ==================================================================
-    // Test 8: Scheduled Renewal With Bonus Months — Contract vs Subscription End
+    // Test 8: Contract and Subscription End Alignment — Both Include Bonus
     // ==================================================================
 
     [Fact]
-    public void Test08_BonusMonths_SubscriptionEffectiveEnd_ExtendsBeyondContractEnd()
+    public void Test08_ContractEndsAt_AlignedWithSubscription_IncludesBonusMonths()
     {
         var startsAt = new DateTime(2026, 12, 31, 0, 0, 0, DateTimeKind.Utc);
         var durationMonths = 12;
         var bonusMonths = 2;
 
-        // Contract end = startsAt + durationMonths (no bonus)
-        var contractEndsAt = startsAt.AddMonths(durationMonths);
+        // CORRECTED: Contract ends at startsAt + durationMonths + bonusMonths (aligned with Subscription)
+        var contractEndsAt = TenantPlan.AddCalendarMonths(
+            TenantPlan.AddCalendarMonths(startsAt, durationMonths), bonusMonths);
 
-        // Subscription effective end = startsAt + durationMonths + bonusMonths
+        // Subscription effective end = same calculation
         var subEffectiveEndsAt = TenantPlan.AddCalendarMonths(
             TenantPlan.AddCalendarMonths(startsAt, durationMonths), bonusMonths);
 
-        Assert.Equal(new DateTime(2027, 12, 31, 0, 0, 0, DateTimeKind.Utc), contractEndsAt);
+        // Both MUST be equal (the invariant fixed by this task)
+        Assert.Equal(contractEndsAt, subEffectiveEndsAt);
+        Assert.Equal(new DateTime(2028, 2, 29, 0, 0, 0, DateTimeKind.Utc), contractEndsAt);
         Assert.Equal(new DateTime(2028, 2, 29, 0, 0, 0, DateTimeKind.Utc), subEffectiveEndsAt);
-        Assert.True(subEffectiveEndsAt > contractEndsAt);
     }
 
     // ==================================================================

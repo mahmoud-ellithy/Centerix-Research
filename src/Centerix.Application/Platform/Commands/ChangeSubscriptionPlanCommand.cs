@@ -210,7 +210,8 @@ public class ChangeSubscriptionPlanHandler(
                 return acceptResult.Errors!;
 
             var effectiveAt = startsAt;
-            var endsAt = startsAt.AddMonths(durationMonths);
+            // Contract period must align with subscription period: endsAt = startsAt + DurationMonths + BonusMonths
+            var endsAt = TenantPlan.AddCalendarMonths(startsAt, durationMonths + plan.BonusMonths);
 
             var contractResult = Contract.Create(
                 id: Guid.NewGuid(),
@@ -241,6 +242,11 @@ public class ChangeSubscriptionPlanHandler(
                 return contractResult.Errors!;
 
             var contract = contractResult.Value;
+
+            // Validate that the entitlement snapshot is complete per prompt section #5
+            var snapshotValidation = contract.ValidateSnapshotCompleteness();
+            if (!snapshotValidation.IsSuccess)
+                return snapshotValidation.Errors!;
 
             contract.LinkToPreviousSubscription(oldSubscription.Id);
 
@@ -409,7 +415,7 @@ public class ChangeSubscriptionPlanHandler(
 
                                 unusedCredit = creditResult.Value;
 
-                                // Create ledger entry for credit creation
+                                // Create ledger entry for credit creation — fail-fast per section #17
                                 var previousBalance = await dbContext.CustomerLedgerEntries
                                     .Where(e => e.TenantId == oldSubscription.TenantId)
                                     .OrderByDescending(e => e.RecordedAtUtc)
@@ -425,10 +431,10 @@ public class ChangeSubscriptionPlanHandler(
                                     now,
                                     $"Unused paid value from subscription change: {creditAmount} {oldContract.CurrencyCode}");
 
-                                if (ledgerEntry.IsSuccess)
-                                {
-                                    dbContext.CustomerLedgerEntries.Add(ledgerEntry.Value);
-                                }
+                                if (!ledgerEntry.IsSuccess)
+                                    return ledgerEntry.Errors!;
+
+                                dbContext.CustomerLedgerEntries.Add(ledgerEntry.Value);
 
                                 // Apply credit to the new invoice — cap at invoice remaining amount
                                 var invoiceRemaining = invoice.GetRemainingAmount();
@@ -442,40 +448,45 @@ public class ChangeSubscriptionPlanHandler(
                                     now,
                                     $"subscription-change-{oldSubscription.Id:N}");
 
-                                if (creditApplicationResult.IsSuccess)
-                                {
-                                    dbContext.CreditApplications.Add(creditApplicationResult.Value);
-                                    unusedCredit.ConsumeAmount(applicationAmount);
-                                    creditAppliedToInvoice = applicationAmount;
+                                if (!creditApplicationResult.IsSuccess)
+                                    return creditApplicationResult.Errors!;
 
-                                    // Create CreditUsage ledger entry — use the balance AFTER CreditCreation
-                                    var balanceAfterCreditCreation = ledgerEntry.IsSuccess
-                                        ? ledgerEntry.Value.RunningBalance
-                                        : previousBalance - creditAmount;
+                                dbContext.CreditApplications.Add(creditApplicationResult.Value);
 
-                                    var usageLedgerEntry = CustomerLedgerEntry.CreateCreditUsage(
-                                        Guid.NewGuid(),
-                                        unusedCredit.Id,
-                                        creditApplicationResult.Value.Id,
-                                        invoice.Id,
-                                        applicationAmount,
-                                        oldContract.CurrencyCode,
-                                        balanceAfterCreditCreation,
-                                        now,
-                                        $"Credit applied to invoice from subscription change: {applicationAmount} {oldContract.CurrencyCode}");
+                                var consumeResult = unusedCredit.ConsumeAmount(applicationAmount);
+                                if (!consumeResult.IsSuccess)
+                                    return consumeResult.Errors!;
 
-                                    if (usageLedgerEntry.IsSuccess)
-                                    {
-                                        dbContext.CustomerLedgerEntries.Add(usageLedgerEntry.Value);
-                                    }
-                                }
+                                creditAppliedToInvoice = applicationAmount;
 
+                                // Create CreditUsage ledger entry — fail-fast per section #17
+                                var balanceAfterCreditCreation = ledgerEntry.Value.RunningBalance;
+
+                                var usageLedgerEntry = CustomerLedgerEntry.CreateCreditUsage(
+                                    Guid.NewGuid(),
+                                    unusedCredit.Id,
+                                    creditApplicationResult.Value.Id,
+                                    invoice.Id,
+                                    applicationAmount,
+                                    oldContract.CurrencyCode,
+                                    balanceAfterCreditCreation,
+                                    now,
+                                    $"Credit applied to invoice from subscription change: {applicationAmount} {oldContract.CurrencyCode}");
+
+                                if (!usageLedgerEntry.IsSuccess)
+                                    return usageLedgerEntry.Errors!;
+
+                                dbContext.CustomerLedgerEntries.Add(usageLedgerEntry.Value);
                                 dbContext.TenantCredits.Add(unusedCredit);
                             }
                             else
                             {
-                                // Idempotent: credit already exists for this subscription change
-                                creditAppliedToInvoice = existingCredit.RemainingAmount;
+                                // Idempotent: credit already exists — look up the actual applied amount
+                                var existingApplication = await dbContext.CreditApplications
+                                    .Where(ca => ca.CreditId == existingCredit.Id && ca.InvoiceId == invoice.Id)
+                                    .FirstOrDefaultAsync(cancellationToken);
+
+                                creditAppliedToInvoice = existingApplication?.Amount ?? 0m;
                             }
                         }
                     }

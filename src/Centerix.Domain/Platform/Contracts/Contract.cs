@@ -95,6 +95,14 @@ public class Contract : AuditableEntity<Guid>
     public int SmsQuota { get; private set; }
 
     /// <summary>
+    /// Version marker for the entitlement snapshot. Indicates that the Contract
+    /// has been fully populated with a complete commercial snapshot from the Plan.
+    /// Value of 0 means incomplete/migration-era contract. Value of 1 means complete.
+    /// Used by ValidateSnapshotCompleteness() to distinguish missing data from legitimate zeros.
+    /// </summary>
+    public int EntitlementSnapshotVersion { get; private set; }
+
+    /// <summary>
     /// When this Contract is a renewal, references the previous Subscription (TenantPlan)
     /// that was renewed. Preserves renewal traceability without constraining the relationship
     /// to a specific Contract or requiring a versioning system.
@@ -143,7 +151,8 @@ public class Contract : AuditableEntity<Guid>
         int maxBranches,
         int maxTeachers,
         int storageGb,
-        int smsQuota)
+        int smsQuota,
+        int entitlementSnapshotVersion = 1)
         : base(id)
     {
         TenantId = tenantId;
@@ -169,6 +178,7 @@ public class Contract : AuditableEntity<Guid>
         MaxTeachers = maxTeachers;
         StorageGb = storageGb;
         SmsQuota = smsQuota;
+        EntitlementSnapshotVersion = entitlementSnapshotVersion;
     }
 
     /// <summary>
@@ -197,7 +207,8 @@ public class Contract : AuditableEntity<Guid>
         int maxBranches = 0,
         int maxTeachers = 0,
         int storageGb = 0,
-        int smsQuota = 0)
+        int smsQuota = 0,
+        int entitlementSnapshotVersion = 1)
     {
         if (id == Guid.Empty)
             return ContractErrors.PricingTier.IdRequired;
@@ -268,7 +279,8 @@ public class Contract : AuditableEntity<Guid>
             maxBranches,
             maxTeachers,
             storageGb,
-            smsQuota);
+            smsQuota,
+            entitlementSnapshotVersion);
 
         contract.AddDomainEvent(new ContractCreatedEvent(id, tenantId, planId, contractNumber));
 
@@ -485,6 +497,10 @@ public class Contract : AuditableEntity<Guid>
     /// </summary>
     public Result<Updated> ValidateSnapshotCompleteness()
     {
+        if (EntitlementSnapshotVersion < 1)
+            return ContractErrors.SnapshotIncomplete(
+                $"EntitlementSnapshotVersion is {EntitlementSnapshotVersion}, expected >= 1");
+
         if (MonthlyListPrice <= 0)
             return ContractErrors.SnapshotIncomplete("MonthlyListPrice must be positive");
 

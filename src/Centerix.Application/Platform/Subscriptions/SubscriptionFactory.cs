@@ -9,46 +9,26 @@ using Centerix.Domain.Platform.Subscriptions.Enums;
 using Microsoft.EntityFrameworkCore;
 
 /// <summary>
-/// Builds a fully-snapshotted, ACTIVATED TenantPlan:
-/// - From a live Plan catalog (legacy/initial assignment path)
-/// - From a Contract snapshot (contract creation path): no Plan queries for limits/features
+/// Builds a fully-snapshotted TenantPlan from Contract snapshots.
+/// 
+/// The ONLY allowed creation path for commercial Contract→Subscription workflows is via
+/// SubscriptionSnapshot — all commercial terms, limits, and features come from the snapshot,
+/// NOT from the Plan catalog.
+/// 
+/// Key invariant (prompt section #12):
+///   SubscriptionFactory → NO dbContext.Plans
+///   SubscriptionFactory → NO dbContext.PlanFeatures
+///   SubscriptionFactory → NO dbContext.Features
+/// 
+/// The PlanId is retained as historical/reference identity only.
 /// </summary>
 public interface ISubscriptionFactory
 {
     /// <summary>
-    /// Creates an activated subscription from the current Plan catalog (legacy/initial assignment path).
-    /// Commercial terms are derived from the Plan.
-    /// </summary>
-    Task<Result<TenantPlan>> CreateActivatedAsync(
-        string tenantId,
-        int planId,
-        DateTime startsAtUtc,
-        bool autoRenew,
-        CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Creates an activated subscription from an explicit commercial snapshot (renewal path).
-    /// All commercial values come from the accepted Offer/Contract — NOT from the Plan catalog.
-    /// Features are still resolved from the current Plan catalog.
-    /// When <paramref name="activate"/> is false, the subscription remains Pending (used for
-    /// future-starting subscriptions that coexist with an Active old subscription).
-    /// </summary>
-    Task<Result<TenantPlan>> CreateFromSnapshotAsync(
-        string tenantId,
-        int planId,
-        decimal snapshotPrice,
-        string snapshotCurrency,
-        int durationMonths,
-        int bonusMonths,
-        DateTime startsAtUtc,
-        bool autoRenew,
-        bool activate,
-        CancellationToken cancellationToken);
-
-    /// <summary>
     /// Creates a subscription exclusively from a Contract snapshot.
     /// No Plan queries — all commercial terms, limits, and features come from the snapshot.
-    /// The PlanId is still stored for reference, but no catalog data is read.
+    /// The PlanId is stored for reference, but no catalog data is read.
+    /// Used by: CreateSubscriptionFromContractCommand, RenewSubscriptionOfferCommand, ChangeSubscriptionPlanCommand.
     /// </summary>
     Task<Result<TenantPlan>> CreateFromSnapshotAsync(
         string tenantId,
@@ -60,17 +40,13 @@ public interface ISubscriptionFactory
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Creates an activated subscription from an explicit commercial snapshot (renewal path).
-    /// All commercial values come from the accepted Offer/Contract — NOT from the Plan catalog.
-    /// Features are still resolved from the current Plan catalog.
+    /// Creates an activated subscription from the current Plan catalog (initial assignment path).
+    /// Commercial terms are derived from the Plan — this is the only path that reads Plan catalog.
+    /// Used by: AssignPlanCommand, ApproveTenantCommand (platform-only initial assignment).
     /// </summary>
-    Task<Result<TenantPlan>> CreateFromSnapshotAsync(
+    Task<Result<TenantPlan>> CreateActivatedAsync(
         string tenantId,
         int planId,
-        decimal snapshotPrice,
-        string snapshotCurrency,
-        int durationMonths,
-        int bonusMonths,
         DateTime startsAtUtc,
         bool autoRenew,
         CancellationToken cancellationToken);
@@ -78,6 +54,65 @@ public interface ISubscriptionFactory
 
 public class SubscriptionFactory(IAppDbContext dbContext) : ISubscriptionFactory
 {
+    /// <summary>
+    /// Creates a subscription exclusively from the Contract snapshot.
+    /// No Plan queries for commercial terms, limits, or features (per prompt section #12).
+    /// </summary>
+    public async Task<Result<TenantPlan>> CreateFromSnapshotAsync(
+        string tenantId,
+        int planId,
+        SubscriptionSnapshot snapshot,
+        DateTime startsAtUtc,
+        bool autoRenew,
+        bool activate,
+        CancellationToken cancellationToken)
+    {
+        var createResult = TenantPlan.Create(
+            Guid.NewGuid(),
+            tenantId,
+            planId,
+            snapshot.MonthlyListPrice,
+            snapshot.CurrencyCode,
+            snapshot.DurationMonths,
+            snapshot.BonusMonths,
+            startsAtUtc,
+            autoRenew,
+            SubscriptionStatus.Pending,
+            snapshot.MaxStudents,
+            snapshot.MaxUsers,
+            snapshot.MaxBranches,
+            snapshot.MaxTeachers,
+            snapshot.StorageGb,
+            snapshot.SmsQuota);
+
+        if (!createResult.IsSuccess)
+            return createResult.Errors!;
+
+        var subscription = createResult.Value;
+
+        // Feature codes come from the snapshot, not the Plan catalog (per prompt section #12)
+        foreach (var featureCode in snapshot.FeatureCodes)
+        {
+            var grant = subscription.GrantFeature(featureCode);
+            if (!grant.IsSuccess)
+                return grant.Errors!;
+        }
+
+        if (activate)
+        {
+            var activation = subscription.Activate(startsAtUtc);
+            if (!activation.IsSuccess)
+                return activation.Errors!;
+        }
+
+        return subscription;
+    }
+
+    /// <summary>
+    /// Creates an activated subscription from the current Plan catalog.
+    /// This is the ONLY path that reads Plan catalog data.
+    /// Reserved for initial plan assignment (AssignPlanCommand, ApproveTenantCommand).
+    /// </summary>
     public async Task<Result<TenantPlan>> CreateActivatedAsync(
         string tenantId,
         int planId,
@@ -139,143 +174,6 @@ public class SubscriptionFactory(IAppDbContext dbContext) : ISubscriptionFactory
         var activation = subscription.Activate(startsAtUtc);
         if (!activation.IsSuccess)
             return activation.Errors!;
-
-        return subscription;
-    }
-
-    public async Task<Result<TenantPlan>> CreateFromSnapshotAsync(
-        string tenantId,
-        int planId,
-        decimal snapshotPrice,
-        string snapshotCurrency,
-        int durationMonths,
-        int bonusMonths,
-        DateTime startsAtUtc,
-        bool autoRenew,
-        CancellationToken cancellationToken)
-        => await CreateFromSnapshotAsync(tenantId, planId, snapshotPrice, snapshotCurrency,
-            durationMonths, bonusMonths, startsAtUtc, autoRenew, activate: true, cancellationToken);
-
-    public async Task<Result<TenantPlan>> CreateFromSnapshotAsync(
-        string tenantId,
-        int planId,
-        decimal snapshotPrice,
-        string snapshotCurrency,
-        int durationMonths,
-        int bonusMonths,
-        DateTime startsAtUtc,
-        bool autoRenew,
-        bool activate,
-        CancellationToken cancellationToken)
-    {
-        var plan = await dbContext.Plans
-            .Include(p => p.PlanFeatures)
-            .FirstOrDefaultAsync(p => p.Id == planId, cancellationToken);
-
-        if (plan is null)
-            return Error.NotFound("Subscription.PlanNotFound", $"Plan '{planId}' was not found.");
-
-        // NOTE: CreateFromSnapshotAsync intentionally does NOT require the Plan to be Active.
-        // When creating a subscription from an accepted Contract/Offer, the commercial terms
-        // are authoritative regardless of the Plan catalog's current status. A Plan may be
-        // deactivated after the Contract was signed; the Contract's terms must still be honored.
-
-        var createResult = TenantPlan.Create(
-            Guid.NewGuid(),
-            tenantId,
-            plan.Id,
-            snapshotPrice,
-            snapshotCurrency,
-            durationMonths,
-            bonusMonths,
-            startsAtUtc,
-            autoRenew,
-            SubscriptionStatus.Pending,
-            plan.MaxStudents,
-            plan.MaxUsers,
-            plan.MaxBranches,
-            plan.MaxTeachers,
-            plan.StorageGB,
-            plan.SMSQuota);
-
-        if (!createResult.IsSuccess)
-            return createResult.Errors!;
-
-        var subscription = createResult.Value;
-
-        foreach (var pf in plan.PlanFeatures.Where(f => f.IsEnabled))
-        {
-            var feature = await dbContext.Features
-                .AsNoTracking()
-                .Where(f => f.Id == pf.FeatureId)
-                .Select(f => f.Code)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (feature is null)
-                continue;
-
-            var grant = subscription.GrantFeature(feature);
-            if (!grant.IsSuccess)
-                return grant.Errors!;
-        }
-
-        if (activate)
-        {
-            var activation = subscription.Activate(startsAtUtc);
-            if (!activation.IsSuccess)
-                return activation.Errors!;
-        }
-
-        return subscription;
-    }
-
-    public async Task<Result<TenantPlan>> CreateFromSnapshotAsync(
-        string tenantId,
-        int planId,
-        SubscriptionSnapshot snapshot,
-        DateTime startsAtUtc,
-        bool autoRenew,
-        bool activate,
-        CancellationToken cancellationToken)
-    {
-        // Create subscription exclusively from the snapshot — no Plan queries
-        var createResult = TenantPlan.Create(
-            Guid.NewGuid(),
-            tenantId,
-            planId,
-            snapshot.MonthlyListPrice,
-            snapshot.CurrencyCode,
-            snapshot.DurationMonths,
-            snapshot.BonusMonths,
-            startsAtUtc,
-            autoRenew,
-            SubscriptionStatus.Pending,
-            snapshot.MaxStudents,
-            snapshot.MaxUsers,
-            snapshot.MaxBranches,
-            snapshot.MaxTeachers,
-            snapshot.StorageGb,
-            snapshot.SmsQuota);
-
-        if (!createResult.IsSuccess)
-            return createResult.Errors!;
-
-        var subscription = createResult.Value;
-
-        // Feature codes come from the snapshot, not the Plan catalog
-        foreach (var featureCode in snapshot.FeatureCodes)
-        {
-            var grant = subscription.GrantFeature(featureCode);
-            if (!grant.IsSuccess)
-                return grant.Errors!;
-        }
-
-        if (activate)
-        {
-            var activation = subscription.Activate(startsAtUtc);
-            if (!activation.IsSuccess)
-                return activation.Errors!;
-        }
 
         return subscription;
     }

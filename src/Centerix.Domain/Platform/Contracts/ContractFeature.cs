@@ -24,5 +24,11 @@ public class ContractFeature : GlobalAuditableEntity<Guid>
     }
 
     public static ContractFeature Create(Guid contractId, string featureCode)
-        => new(Guid.NewGuid(), contractId, featureCode.Trim());
+    {
+        var trimmed = featureCode?.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+            throw new ArgumentException("FeatureCode must not be null, empty, or whitespace.", nameof(featureCode));
+
+        return new(Guid.NewGuid(), contractId, trimmed.ToUpperInvariant());
+    }
 }

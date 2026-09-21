@@ -64,18 +64,23 @@ public class CreateContractFromOfferHandler(
             .Include(p => p.PlanFeatures)
             .FirstOrDefaultAsync(p => p.Id == offer.PlanId, cancellationToken);
 
+        if (plan is null)
+            return OfferErrors.PlanNotFound;
+
         var utcNow = DateTime.UtcNow;
         var effectiveAt = request.EffectiveAtUtc ?? utcNow;
-        var endsAt = effectiveAt.AddMonths(offer.DurationMonths);
 
-        // Resolve plan limits — defaults to 0 when plan is missing (shouldn't happen in production)
-        var bonusMonths = plan?.BonusMonths ?? 0;
-        var maxStudents = plan?.MaxStudents ?? 0;
-        var maxUsers = plan?.MaxUsers ?? 0;
-        var maxBranches = plan?.MaxBranches ?? 0;
-        var maxTeachers = plan?.MaxTeachers ?? 0;
-        var storageGb = plan?.StorageGB ?? 0;
-        var smsQuota = plan?.SMSQuota ?? 0;
+        // Contract period must align with subscription period: endsAt = effectiveAt + DurationMonths + BonusMonths
+        var endsAt = effectiveAt.AddMonths(offer.DurationMonths + plan.BonusMonths);
+
+        // Resolve plan limits — fail if plan is missing (per prompt section #7)
+        var bonusMonths = plan.BonusMonths;
+        var maxStudents = plan.MaxStudents;
+        var maxUsers = plan.MaxUsers;
+        var maxBranches = plan.MaxBranches;
+        var maxTeachers = plan.MaxTeachers;
+        var storageGb = plan.StorageGB;
+        var smsQuota = plan.SMSQuota;
 
         // Create the Contract aggregate using Offer-derived commercial terms + Plan limits
         var contractResult = Contract.Create(
@@ -108,8 +113,12 @@ public class CreateContractFromOfferHandler(
 
         var contract = contractResult.Value;
 
+        // Validate that the entitlement snapshot is complete per prompt section #5
+        var snapshotValidation = contract.ValidateSnapshotCompleteness();
+        if (!snapshotValidation.IsSuccess)
+            return snapshotValidation.Errors!;
+
         // Snapshot pricing tiers from the Plan catalog into the Contract
-        if (plan is not null)
         {
             var seenDurations = new HashSet<int>();
             foreach (var planTier in plan.PricingTiers.OrderBy(t => t.DisplayOrder))

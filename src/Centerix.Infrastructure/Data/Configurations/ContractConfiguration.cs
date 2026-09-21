@@ -87,6 +87,9 @@ public class ContractConfiguration : IEntityTypeConfiguration<Contract>
         builder.Property(c => c.BonusMonths)
             .IsRequired();
 
+        builder.Property(c => c.EntitlementSnapshotVersion)
+            .IsRequired();
+
         builder.Property(c => c.MaxStudents)
             .IsRequired();
 

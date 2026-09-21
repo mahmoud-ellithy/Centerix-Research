@@ -235,7 +235,8 @@ public class RenewSubscriptionOfferHandler(
             // For scheduled renewals, startsAt == oldSubscription.EffectiveEndsAtUtc,
             // so the new Contract does not start during the old service period.
             var effectiveAt = startsAt;
-            var endsAt = startsAt.AddMonths(durationMonths);
+            // Contract period must align with subscription period: endsAt = startsAt + DurationMonths + BonusMonths
+            var endsAt = TenantPlan.AddCalendarMonths(startsAt, durationMonths + plan.BonusMonths);
 
             var contractResult = Contract.Create(
                 id: Guid.NewGuid(),
@@ -266,6 +267,11 @@ public class RenewSubscriptionOfferHandler(
                 return contractResult.Errors!;
 
             var contract = contractResult.Value;
+
+            // Validate that the entitlement snapshot is complete per prompt section #5
+            var snapshotValidation = contract.ValidateSnapshotCompleteness();
+            if (!snapshotValidation.IsSuccess)
+                return snapshotValidation.Errors!;
 
             contract.LinkToPreviousSubscription(oldSubscription.Id);
 
