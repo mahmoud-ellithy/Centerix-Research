@@ -54,12 +54,18 @@ public class CreateSubscriptionFromContractHandler(
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
 
-        // Create subscription from contract snapshot using the factory
-        // The factory creates from Plan, so we need to pass the contract's PlanId
-        var subscriptionResult = await subscriptionFactory.CreateActivatedAsync(
+        // Create subscription from the Contract's authoritative commercial snapshot.
+        // The Plan catalog is mutable; the Contract is the historical commercial agreement.
+        // Using CreateFromSnapshotAsync ensures that the negotiated price, currency, duration,
+        // and charged months from the Contract survive into the Subscription — NOT the current Plan values.
+        var subscriptionResult = await subscriptionFactory.CreateFromSnapshotAsync(
             contract.TenantId,
             contract.PlanId,
-            now,
+            snapshotPrice: contract.MonthlyListPrice,
+            snapshotCurrency: contract.CurrencyCode,
+            durationMonths: contract.DurationMonths,
+            bonusMonths: 0,
+            startsAtUtc: now,
             autoRenew: false,
             cancellationToken);
 

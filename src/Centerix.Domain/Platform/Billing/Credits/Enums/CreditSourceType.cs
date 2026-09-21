@@ -6,5 +6,6 @@ public enum CreditSourceType
     Promotional = 1,
     Compensation = 2,
     Manual = 3,
-    Overpayment = 4
+    Overpayment = 4,
+    SubscriptionChange = 5
 }

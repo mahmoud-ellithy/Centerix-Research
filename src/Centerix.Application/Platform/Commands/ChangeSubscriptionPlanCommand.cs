@@ -6,7 +6,11 @@ using Centerix.Domain.Platform.Promotions;
 using Centerix.Application.Platform.Subscriptions;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Billing.BillingCycles;
+using Centerix.Domain.Platform.Billing.Credits;
+using Centerix.Domain.Platform.Billing.Credits.Enums;
 using Centerix.Domain.Platform.Billing.Invoicing;
+using Centerix.Domain.Platform.Billing.Payments;
+using Centerix.Domain.Platform.Billing.Payments.Enums;
 using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Contracts.Enums;
 using Centerix.Domain.Platform.Plans;
@@ -323,6 +327,124 @@ public class ChangeSubscriptionPlanHandler(
             if (!markInvoicedResult.IsSuccess)
                 return markInvoicedResult.Errors!;
 
+            // ── D-02: Calculate unused paid value and create Customer Credit ──
+            // Before cancelling the old subscription, calculate the eligible unused PAID value.
+            // The unused value becomes Customer Credit (NOT a Refund) applied to the new invoice.
+            TenantCredit? unusedCredit = null;
+            decimal creditAppliedToInvoice = 0m;
+
+            if (oldSubscription.ContractId.HasValue)
+            {
+                var oldContract = await dbContext.Contracts
+                    .IgnoreQueryFilters()
+                    .Include(c => c.PricingTiers)
+                    .FirstOrDefaultAsync(c => c.Id == oldSubscription.ContractId.Value, cancellationToken);
+
+                if (oldContract is not null)
+                {
+                    var elapsedMonths = oldContract.GetElapsedMonths(now);
+                    var consumedValue = oldContract.CalculateValueForElapsedMonths(elapsedMonths);
+                    var totalContractValue = oldContract.ContractedAmount;
+                    var unusedValue = totalContractValue - consumedValue;
+
+                    if (unusedValue > 0)
+                    {
+                        // Verify the old subscription has been paid (check payment allocations)
+                        var paidAmount = await dbContext.Invoices
+                            .Where(i => i.ContractId == oldContract.Id && i.TenantId == oldSubscription.TenantId)
+                            .SelectMany(i => i.PaymentAllocations.Where(a => a.Status == PaymentAllocationStatus.Active))
+                            .SumAsync(a => a.AllocatedAmount, cancellationToken);
+
+                        var creditAmount = Math.Min(unusedValue, paidAmount);
+
+                        if (creditAmount > 0)
+                        {
+                            // Check for existing credit from this subscription change (idempotency)
+                            var existingCredit = await dbContext.TenantCredits
+                                .Where(tc =>
+                                    tc.TenantId == oldSubscription.TenantId &&
+                                    tc.SourceType == CreditSourceType.SubscriptionChange &&
+                                    tc.SourceId == oldSubscription.Id)
+                                .FirstOrDefaultAsync(cancellationToken);
+
+                            if (existingCredit is null)
+                            {
+                                var creditResult = TenantCredit.Create(
+                                    Guid.NewGuid(),
+                                    creditAmount,
+                                    CreditSourceType.SubscriptionChange,
+                                    sourceId: oldSubscription.Id,
+                                    oldContract.CurrencyCode);
+
+                                if (!creditResult.IsSuccess)
+                                    return creditResult.Errors!;
+
+                                unusedCredit = creditResult.Value;
+
+                                // Create ledger entry for credit creation
+                                var previousBalance = await dbContext.CustomerLedgerEntries
+                                    .Where(e => e.TenantId == oldSubscription.TenantId)
+                                    .SumAsync(e => e.EntryType == LedgerEntryType.InvoiceCharge ? e.Amount : -e.Amount, cancellationToken);
+
+                                var ledgerEntry = CustomerLedgerEntry.CreateCreditCreation(
+                                    Guid.NewGuid(),
+                                    unusedCredit.Id,
+                                    creditAmount,
+                                    oldContract.CurrencyCode,
+                                    previousBalance,
+                                    now,
+                                    $"Unused paid value from subscription change: {creditAmount} {oldContract.CurrencyCode}");
+
+                                if (ledgerEntry.IsSuccess)
+                                {
+                                    dbContext.CustomerLedgerEntries.Add(ledgerEntry.Value);
+                                }
+
+                                // Apply credit to the new invoice
+                                var creditApplicationResult = CreditApplication.Create(
+                                    Guid.NewGuid(),
+                                    unusedCredit.Id,
+                                    invoice.Id,
+                                    creditAmount,
+                                    now,
+                                    $"subscription-change-{oldSubscription.Id:N}");
+
+                                if (creditApplicationResult.IsSuccess)
+                                {
+                                    dbContext.CreditApplications.Add(creditApplicationResult.Value);
+                                    unusedCredit.ConsumeAmount(creditAmount);
+                                    creditAppliedToInvoice = creditAmount;
+
+                                    // Create CreditUsage ledger entry
+                                    var usageLedgerEntry = CustomerLedgerEntry.CreateCreditUsage(
+                                        Guid.NewGuid(),
+                                        unusedCredit.Id,
+                                        creditApplicationResult.Value.Id,
+                                        invoice.Id,
+                                        creditAmount,
+                                        oldContract.CurrencyCode,
+                                        previousBalance - creditAmount,
+                                        now,
+                                        $"Credit applied to invoice from subscription change: {creditAmount} {oldContract.CurrencyCode}");
+
+                                    if (usageLedgerEntry.IsSuccess)
+                                    {
+                                        dbContext.CustomerLedgerEntries.Add(usageLedgerEntry.Value);
+                                    }
+                                }
+
+                                dbContext.TenantCredits.Add(unusedCredit);
+                            }
+                            else
+                            {
+                                // Idempotent: credit already exists for this subscription change
+                                creditAppliedToInvoice = existingCredit.RemainingAmount;
+                            }
+                        }
+                    }
+                }
+            }
+
             var cancelResult = oldSubscription.Cancel(now);
             if (!cancelResult.IsSuccess)
                 return cancelResult.Errors!;
@@ -379,7 +501,10 @@ public class ChangeSubscriptionPlanHandler(
                     offer.FinalAmount,
                     PreviousSubscriptionId = oldSubscription.Id,
                     NewInvoiceId = invoice.Id,
-                    invoice.TotalAmount
+                    invoice.TotalAmount,
+                    UnusedCreditId = unusedCredit?.Id,
+                    UnusedCreditAmount = unusedCredit?.Amount ?? 0m,
+                    CreditAppliedToInvoice = creditAppliedToInvoice
                 }),
                 cancellationToken: cancellationToken);
 

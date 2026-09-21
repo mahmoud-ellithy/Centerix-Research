@@ -124,6 +124,7 @@ public static class PermissionCatalog
 
         new("TenantCredits",  "Create", "TenantCredits.Create",  "Create a tenant credit"),
         new("TenantCredits",  "Read",   "TenantCredits.Read",    "Read tenant credits"),
+        new("TenantCredits",  "Apply",  "TenantCredits.Apply",   "Apply credit to invoice"),
 
         new("Invitations",    "Create", "Invitations.Create",    "Create a tenant invitation"),
         new("Invitations",    "Read",   "Invitations.Read",      "Read tenant invitations"),

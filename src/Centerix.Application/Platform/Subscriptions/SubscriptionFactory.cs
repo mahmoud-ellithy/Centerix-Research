@@ -161,8 +161,10 @@ public class SubscriptionFactory(IAppDbContext dbContext) : ISubscriptionFactory
         if (plan is null)
             return Error.NotFound("Subscription.PlanNotFound", $"Plan '{planId}' was not found.");
 
-        if (!plan.IsActive)
-            return Error.Conflict("Subscription.PlanNotActive", "The selected plan is not active and cannot be assigned.");
+        // NOTE: CreateFromSnapshotAsync intentionally does NOT require the Plan to be Active.
+        // When creating a subscription from an accepted Contract/Offer, the commercial terms
+        // are authoritative regardless of the Plan catalog's current status. A Plan may be
+        // deactivated after the Contract was signed; the Contract's terms must still be honored.
 
         var createResult = TenantPlan.Create(
             Guid.NewGuid(),

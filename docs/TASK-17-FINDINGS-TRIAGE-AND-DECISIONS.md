@@ -30,8 +30,8 @@ Task 16 produced 10 critical/high findings, 8 security findings, and 7 business 
 | ID | Task 16 Finding | Classification | Severity | Confirmed | Resolution |
 |----|-----------------|---------------|----------|-----------|------------|
 | CF-01 | Contract commercial terms lost at Subscription creation | REAL BUG | CRITICAL | YES | Fix: call CreateFromSnapshotAsync |
-| CF-02 | Upgrade/downgrade discards unused period | BUSINESS DECISION | HIGH | YES | OPEN: requires policy decision |
-| CF-03 | TenantAdmin blocked from billing | BUSINESS DECISION | HIGH | YES | OPEN: requires business model decision |
+| CF-02 | Upgrade/downgrade discards unused period | BUSINESS DECISION | HIGH | YES | RESOLVED: Customer Credit (Task 18) |
+| CF-03 | TenantAdmin blocked from billing | BUSINESS DECISION | HIGH | YES | RESOLVED: Hybrid auth (Task 18) |
 | CF-04 | Contract lacks RowVersion | DATABASE INTEGRITY GAP | HIGH | YES | Add RowVersion |
 | CF-05 | Offer lacks RowVersion | DATABASE INTEGRITY GAP | MEDIUM | YES | Add RowVersion |
 | CF-06 | BillingCycle lacks RowVersion | DATABASE INTEGRITY GAP | MEDIUM | YES | Add RowVersion |
@@ -70,8 +70,8 @@ Task 16 produced 10 critical/high findings, 8 security findings, and 7 business 
 
 | ID | Finding | Options |
 |----|---------|---------|
-| D-01 | Upgrade/downgrade unused period | Refund / Credit / Transfer / Forfeiture |
-| D-02 | TenantAdmin billing ownership | Platform-owned / Tenant-owned / Hybrid |
+| D-01 | Upgrade/downgrade unused period | **RESOLVED: Customer Credit** (Task 18) |
+| D-02 | TenantAdmin billing ownership | **RESOLVED: Hybrid auth** (Task 18) |
 
 ## 3.3 SECURITY HARDENING
 
@@ -545,8 +545,8 @@ The snapshot debt means that even after fixing F-01, a Plan limit change would a
 
 | ID | Decision | Current Behavior | Options | Status |
 |----|----------|-----------------|---------|--------|
-| D-01 | TenantAdmin billing ownership | All billing is PlatformAdmin-only | Platform-owned / Tenant-owned / Hybrid | OPEN |
-| D-02 | Upgrade/downgrade unused period | Forfeited (no refund/credit) | Refund / Credit / Transfer / Forfeiture | OPEN |
+| D-01 | TenantAdmin billing ownership | All billing is PlatformAdmin-only | Platform-owned / Tenant-owned / Hybrid | **RESOLVED: Hybrid** (Task 18) |
+| D-02 | Upgrade/downgrade unused period | Forfeited (no refund/credit) | Refund / Credit / Transfer / Forfeiture | **RESOLVED: Customer Credit** (Task 18) |
 
 ---
 
@@ -566,8 +566,8 @@ The snapshot debt means that even after fixing F-01, a Plan limit change would a
 | Priority | ID | Problem | Classification | Required Change | Dependencies |
 |----------|-----|---------|---------------|-----------------|-------------|
 | P0 | F-01 | Contract terms lost at Subscription creation | REAL BUG | Fix SubscriptionFactory call in CreateSubscriptionFromContractCommand | None |
-| P0 | D-01 | TenantAdmin billing ownership | BUSINESS DECISION | Stakeholder decision on Model A/B | None |
-| P0 | D-02 | Upgrade/downgrade unused period | BUSINESS DECISION | Stakeholder decision on policy | None |
+| P0 | D-01 | TenantAdmin billing ownership | BUSINESS DECISION | RESOLVED: Hybrid (Task 18) | None |
+| P0 | D-02 | Upgrade/downgrade unused period | BUSINESS DECISION | RESOLVED: Customer Credit (Task 18) | None |
 | P1 | F-02 | ChangeSubscriptionPlan uses Plan price | REAL BUG | Use Offer-derived values for duration/bonus | None |
 | P1 | G-01 | Contract missing RowVersion | DB INTEGRITY | Add RowVersion + EF config | None |
 | P1 | G-04 | CustomerLedgerEntry missing FKs | DB INTEGRITY | Add FK constraints | None |
@@ -661,8 +661,8 @@ PlatformAdmin bypass behavior tests (P3)
 
 **Task 17 Status:** COMPLETE
 **Implementation Changes:** NONE (analysis only)
-**Business Decisions Resolved:** 0
-**Business Decisions Open:** 2 (D-01: TenantAdmin billing ownership, D-02: Upgrade/downgrade unused period)
+**Business Decisions Resolved:** 2 (D-01: Hybrid auth model, D-02: Customer Credit for unused period)
+**Business Decisions Open:** 0
 **Confirmed Critical Bugs:** 1 (F-01: Contract-to-Subscription snapshot gap)
 **Confirmed Medium Bugs:** 1 (F-02: ChangeSubscriptionPlan uses Plan price)
 **Security Hardening Items:** 4
@@ -674,9 +674,9 @@ PlatformAdmin bypass behavior tests (P3)
 
 The recommended implementation sequence is:
 
-### Phase 1: Resolve Business Decisions (BLOCKING)
-1. Stakeholder meeting to decide D-01 (TenantAdmin billing ownership)
-2. Stakeholder meeting to decide D-02 (Upgrade/downgrade unused period)
+### Phase 1: ~~Resolve Business Decisions~~ DONE
+1. ~~Stakeholder meeting to decide D-01~~ -- RESOLVED: Hybrid (Task 18)
+2. ~~Stakeholder meeting to decide D-02~~ -- RESOLVED: Customer Credit (Task 18)
 
 ### Phase 2: Critical Bug Fixes
 3. Fix CreateSubscriptionFromContractCommand to call CreateFromSnapshotAsync
@@ -695,8 +695,8 @@ The recommended implementation sequence is:
 ### Phase 5: Tests
 11. Add Contract-to-Subscription snapshot integrity test
 12. Add anonymous billing endpoint access tests
-13. Add cross-tenant billing HTTP tests (after D-01 decision)
-14. Add upgrade/downgrade proration tests (after D-02 decision)
+13. ~~Add cross-tenant billing HTTP tests (after D-01 decision)~~ -- DONE (Task 18)
+14. ~~Add upgrade/downgrade proration tests (after D-02 decision)~~ -- DONE (Task 18)
 15. Add PlatformAdmin bypass behavior tests
 
 ---

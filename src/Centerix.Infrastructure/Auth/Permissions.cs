@@ -336,6 +336,15 @@ public static class Permissions
         Offers.Read, Offers.Calculate, Offers.Accept,
         Contracts.Read,
         Installments.Read,
+
+        // D-01: Hybrid billing authorization — TenantAdmin MAY view own billing data and request actions.
+        // TenantAdmin MUST NOT modify issued invoices, payments, or approve/execute refunds.
+        Invoices.Read,
+        Payments.Read,
+        TenantCredits.Read,
+        TenantCredits.Apply,
+        Refunds.Create,
+        Refunds.Read,
     ];
 
     public static string[] GetTenantUserPermissions() =>
