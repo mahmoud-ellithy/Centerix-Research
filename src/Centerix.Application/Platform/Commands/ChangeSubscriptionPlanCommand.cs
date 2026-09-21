@@ -228,7 +228,14 @@ public class ChangeSubscriptionPlanHandler(
                 promotionReference: calc.PromotionName,
                 promotionId: calc.PromotionId,
                 promotionType: calc.PromotionType,
-                chargedMonths: calc.ChargedMonths);
+                chargedMonths: calc.ChargedMonths,
+                bonusMonths: plan.BonusMonths,
+                maxStudents: plan.MaxStudents,
+                maxUsers: plan.MaxUsers,
+                maxBranches: plan.MaxBranches,
+                maxTeachers: plan.MaxTeachers,
+                storageGb: plan.StorageGB,
+                smsQuota: plan.SMSQuota);
 
             if (!contractResult.IsSuccess)
                 return contractResult.Errors!;
@@ -258,19 +265,35 @@ public class ChangeSubscriptionPlanHandler(
                 contract.AddPricingTier(tierResult.Value);
             }
 
+            // Snapshot feature entitlements from the Plan catalog into the Contract
+            foreach (var pf in plan.PlanFeatures.Where(f => f.IsEnabled))
+            {
+                var feature = await dbContext.Features
+                    .AsNoTracking()
+                    .Where(f => f.Id == pf.FeatureId)
+                    .Select(f => f.Code)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                if (feature is not null)
+                {
+                    contract.AddContractFeature(
+                        ContractFeature.Create(contract.Id, feature));
+                }
+            }
+
             var markConvertedResult = offer.MarkConverted(contract.Id, now);
             if (!markConvertedResult.IsSuccess)
                 return markConvertedResult.Errors!;
 
+            var snapshot = contract.GetSubscriptionSnapshot();
+
             var subscriptionResult = await subscriptionFactory.CreateFromSnapshotAsync(
                 oldSubscription.TenantId,
                 plan.Id,
-                snapshotPrice: calc.MonthlyListPrice,
-                snapshotCurrency: calc.CurrencyCode,
-                durationMonths: durationMonths,
-                bonusMonths: plan.BonusMonths,
+                snapshot,
                 startsAtUtc: startsAt,
                 autoRenew: false,
+                activate: true,
                 cancellationToken);
 
             if (!subscriptionResult.IsSuccess)
@@ -349,10 +372,14 @@ public class ChangeSubscriptionPlanHandler(
 
                     if (unusedValue > 0)
                     {
-                        // Verify the old subscription has been paid (check payment allocations)
-                        var paidAmount = await dbContext.Invoices
-                            .Where(i => i.ContractId == oldContract.Id && i.TenantId == oldSubscription.TenantId)
-                            .SelectMany(i => i.PaymentAllocations.Where(a => a.Status == PaymentAllocationStatus.Active))
+                        // Verify the old subscription has been paid (check completed payments with matching currency)
+                        var paidAmount = await dbContext.Payments
+                            .Where(p => p.TenantId == oldSubscription.TenantId
+                                     && p.Status == PaymentStatus.Completed
+                                     && p.CurrencyCode == oldContract.CurrencyCode)
+                            .SelectMany(p => p.Allocations.Where(a =>
+                                a.Status == PaymentAllocationStatus.Active
+                                && a.Invoice.ContractId == oldContract.Id))
                             .SumAsync(a => a.AllocatedAmount, cancellationToken);
 
                         var creditAmount = Math.Min(unusedValue, paidAmount);
@@ -374,7 +401,8 @@ public class ChangeSubscriptionPlanHandler(
                                     creditAmount,
                                     CreditSourceType.SubscriptionChange,
                                     sourceId: oldSubscription.Id,
-                                    oldContract.CurrencyCode);
+                                    oldContract.CurrencyCode,
+                                    idempotencyKey: $"sub-change-{oldSubscription.Id:N}");
 
                                 if (!creditResult.IsSuccess)
                                     return creditResult.Errors!;
@@ -384,7 +412,9 @@ public class ChangeSubscriptionPlanHandler(
                                 // Create ledger entry for credit creation
                                 var previousBalance = await dbContext.CustomerLedgerEntries
                                     .Where(e => e.TenantId == oldSubscription.TenantId)
-                                    .SumAsync(e => e.EntryType == LedgerEntryType.InvoiceCharge ? e.Amount : -e.Amount, cancellationToken);
+                                    .OrderByDescending(e => e.RecordedAtUtc)
+                                    .Select(e => e.RunningBalance)
+                                    .FirstOrDefaultAsync(cancellationToken);
 
                                 var ledgerEntry = CustomerLedgerEntry.CreateCreditCreation(
                                     Guid.NewGuid(),
@@ -400,20 +430,23 @@ public class ChangeSubscriptionPlanHandler(
                                     dbContext.CustomerLedgerEntries.Add(ledgerEntry.Value);
                                 }
 
-                                // Apply credit to the new invoice
+                                // Apply credit to the new invoice — cap at invoice remaining amount
+                                var invoiceRemaining = invoice.GetRemainingAmount();
+                                var applicationAmount = Math.Min(creditAmount, invoiceRemaining);
+
                                 var creditApplicationResult = CreditApplication.Create(
                                     Guid.NewGuid(),
                                     unusedCredit.Id,
                                     invoice.Id,
-                                    creditAmount,
+                                    applicationAmount,
                                     now,
                                     $"subscription-change-{oldSubscription.Id:N}");
 
                                 if (creditApplicationResult.IsSuccess)
                                 {
                                     dbContext.CreditApplications.Add(creditApplicationResult.Value);
-                                    unusedCredit.ConsumeAmount(creditAmount);
-                                    creditAppliedToInvoice = creditAmount;
+                                    unusedCredit.ConsumeAmount(applicationAmount);
+                                    creditAppliedToInvoice = applicationAmount;
 
                                     // Create CreditUsage ledger entry
                                     var usageLedgerEntry = CustomerLedgerEntry.CreateCreditUsage(
@@ -421,11 +454,11 @@ public class ChangeSubscriptionPlanHandler(
                                         unusedCredit.Id,
                                         creditApplicationResult.Value.Id,
                                         invoice.Id,
-                                        creditAmount,
+                                        applicationAmount,
                                         oldContract.CurrencyCode,
-                                        previousBalance - creditAmount,
+                                        previousBalance - applicationAmount,
                                         now,
-                                        $"Credit applied to invoice from subscription change: {creditAmount} {oldContract.CurrencyCode}");
+                                        $"Credit applied to invoice from subscription change: {applicationAmount} {oldContract.CurrencyCode}");
 
                                     if (usageLedgerEntry.IsSuccess)
                                     {

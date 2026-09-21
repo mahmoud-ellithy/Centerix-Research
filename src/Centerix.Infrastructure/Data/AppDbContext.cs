@@ -14,6 +14,7 @@ using Centerix.Domain.Platform.Billing.Installments;
 using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Billing.Payments;
 using Centerix.Domain.Platform.Billing.Refunds;
+using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Features;
 using Centerix.Domain.Platform.Leads;
 using Centerix.Domain.Platform.Plans;
@@ -118,6 +119,7 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     public DbSet<Contract> Contracts { get; set; } = default!;
     public DbSet<ContractPricingTier> ContractPricingTiers { get; set; } = default!;
     public DbSet<ContractBenefit> ContractBenefits { get; set; } = default!;
+    public DbSet<ContractFeature> ContractFeatures { get; set; } = default!;
 
     // Promotion / Offer Engine
     public DbSet<Promotion> Promotions { get; set; } = default!;

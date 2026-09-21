@@ -45,6 +45,9 @@ public class TenantCreditConfiguration : IEntityTypeConfiguration<TenantCredit>
         builder.Property(tc => tc.ReversalOfCreditId)
             .HasColumnType("uniqueidentifier");
 
+        builder.Property(tc => tc.IdempotencyKey)
+            .HasMaxLength(200);
+
         builder.Property(tc => tc.RowVersion)
             .IsRowVersion();
 
@@ -68,5 +71,12 @@ public class TenantCreditConfiguration : IEntityTypeConfiguration<TenantCredit>
 
         builder.HasIndex(tc => tc.TenantId);
         builder.HasIndex(tc => new { tc.TenantId, tc.Status });
+
+        // Unique constraint: one credit per (Tenant, SourceType, SourceId) combination
+        // Prevents duplicate credits from concurrent requests
+        builder.HasIndex(tc => new { tc.TenantId, tc.SourceType, tc.SourceId })
+            .IsUnique()
+            .HasDatabaseName("UX_TenantCredits_TenantId_SourceType_SourceId")
+            .HasFilter("[SourceId] IS NOT NULL");
     }
 }

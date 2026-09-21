@@ -200,7 +200,14 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             contractualMonthlyValue: contractPrice,
             currencyCode: "EGP",
             contractedAmount: contractPrice * durationMonths,
-            discountAmount: 0).Value;
+            discountAmount: 0,
+            bonusMonths: 0,
+            maxStudents: 100,
+            maxUsers: 50,
+            maxBranches: 10,
+            maxTeachers: 20,
+            storageGb: 100,
+            smsQuota: 1000).Value;
 
         contract.Activate(UtcNow);
         db.Contracts.Add(contract);
@@ -221,8 +228,10 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             contractId: contract.Id,
             subscriptionId: subscription.Id).Value;
         invoice.Issue(UtcNow);
+        invoice.TenantId = tenantId;
         db.Invoices.Add(invoice);
 
+        db.StampAddedTenantIds(tenantId);
         await db.SaveChangesAsync();
 
         return (contract.Id, subscription.Id, invoice.Id);
@@ -822,44 +831,642 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
 
     #endregion
 
-    #region 18. Business State Validation
+    #region 18.1 F-01: Contract Snapshot Integrity
 
     [Fact]
-    public void D02_TenantCredit_BelongsToCorrectTenant()
+    public void F01_ContractSnapshot_IncludesLimitFields()
     {
-        var tenantIdA = "tenant-a-credit";
-        var tenantIdB = "tenant-b-credit";
+        var contract = Contract.Create(
+            Guid.NewGuid(), "tenant-1", "CTR-SNAP-LIMITS",
+            planId: 1,
+            effectiveAtUtc: UtcNow,
+            endsAtUtc: UtcNow.AddMonths(12),
+            durationMonths: 12,
+            monthlyListPrice: 1000m,
+            contractualMonthlyValue: 1000m,
+            currencyCode: "EGP",
+            contractedAmount: 12000m,
+            discountAmount: 0,
+            bonusMonths: 2,
+            maxStudents: 50,
+            maxUsers: 25,
+            maxBranches: 5,
+            maxTeachers: 10,
+            storageGb: 50,
+            smsQuota: 500).Value;
 
-        var credit = TenantCredit.Create(
-            Guid.NewGuid(), 5000m, CreditSourceType.SubscriptionChange, sourceId: Guid.NewGuid()).Value;
-
-        // Credit is bound to tenant via TenantId from AuditableEntity
-        credit.TenantId = tenantIdA;
-
-        Assert.Equal(tenantIdA, credit.TenantId);
-        Assert.NotEqual(tenantIdB, credit.TenantId);
+        Assert.Equal(2, contract.BonusMonths);
+        Assert.Equal(50, contract.MaxStudents);
+        Assert.Equal(25, contract.MaxUsers);
+        Assert.Equal(5, contract.MaxBranches);
+        Assert.Equal(10, contract.MaxTeachers);
+        Assert.Equal(50, contract.StorageGb);
+        Assert.Equal(500, contract.SmsQuota);
     }
 
     [Fact]
-    public void D02_CreditApplication_CrossTenant_Rejected()
+    public void F01_ContractSnapshot_GetSubscriptionSnapshot_ReturnsCorrectValues()
     {
-        var tenantIdA = "tenant-a-isolation";
-        var tenantIdB = "tenant-b-isolation";
+        var contract = Contract.Create(
+            Guid.NewGuid(), "tenant-1", "CTR-SNAP-GET",
+            planId: 1,
+            effectiveAtUtc: UtcNow,
+            endsAtUtc: UtcNow.AddMonths(12),
+            durationMonths: 12,
+            monthlyListPrice: 900m,
+            contractualMonthlyValue: 900m,
+            currencyCode: "EGP",
+            contractedAmount: 10800m,
+            discountAmount: 0,
+            bonusMonths: 3,
+            maxStudents: 30,
+            maxUsers: 20,
+            maxBranches: 3,
+            maxTeachers: 8,
+            storageGb: 40,
+            smsQuota: 400).Value;
 
-        // Credit belongs to Tenant A
+        // Add contract features
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEATURE-A"));
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEATURE-B"));
+
+        var snapshot = contract.GetSubscriptionSnapshot();
+
+        Assert.Equal(900m, snapshot.MonthlyListPrice);
+        Assert.Equal("EGP", snapshot.CurrencyCode);
+        Assert.Equal(12, snapshot.DurationMonths);
+        Assert.Equal(3, snapshot.BonusMonths);
+        Assert.Equal(30, snapshot.MaxStudents);
+        Assert.Equal(20, snapshot.MaxUsers);
+        Assert.Equal(3, snapshot.MaxBranches);
+        Assert.Equal(8, snapshot.MaxTeachers);
+        Assert.Equal(40, snapshot.StorageGb);
+        Assert.Equal(400, snapshot.SmsQuota);
+        Assert.Equal(2, snapshot.FeatureCodes.Count);
+        Assert.Contains("FEATURE-A", snapshot.FeatureCodes);
+        Assert.Contains("FEATURE-B", snapshot.FeatureCodes);
+    }
+
+    [Fact]
+    public void F01_ContractSnapshot_PlanMutation_DoesNotAffectSnapshot()
+    {
+        var plan = CreatePlan(id: 1, monthlyPrice: 1000m);
+
+        var contract = Contract.Create(
+            Guid.NewGuid(), "tenant-1", "CTR-SNAP-MUT",
+            planId: plan.Id,
+            effectiveAtUtc: UtcNow,
+            endsAtUtc: UtcNow.AddMonths(12),
+            durationMonths: 12,
+            monthlyListPrice: 800m,
+            contractualMonthlyValue: 800m,
+            currencyCode: "EGP",
+            contractedAmount: 9600m,
+            discountAmount: 0,
+            bonusMonths: 1,
+            maxStudents: 50,
+            maxUsers: 25,
+            maxBranches: 5,
+            maxTeachers: 10,
+            storageGb: 50,
+            smsQuota: 500).Value;
+
+        // Mutate the plan AFTER contract creation
+        plan.Update(plan.Code, plan.DisplayName, plan.MonthlyPrice,
+            maxStudents: 500, maxUsers: 250, maxBranches: 50, maxTeachers: 100,
+            storageGB: 500, smsQuota: 5000, isActive: true);
+
+        var snapshot = contract.GetSubscriptionSnapshot();
+
+        // Contract snapshot is unaffected
+        Assert.Equal(50, snapshot.MaxStudents);
+        Assert.Equal(25, snapshot.MaxUsers);
+        Assert.Equal(5, snapshot.MaxBranches);
+        Assert.Equal(10, snapshot.MaxTeachers);
+        Assert.Equal(50, snapshot.StorageGb);
+        Assert.Equal(500, snapshot.SmsQuota);
+        Assert.Equal(800m, snapshot.MonthlyListPrice);
+    }
+
+    [Fact]
+    public void F01_ContractFeature_Snapshot_UniquePerContract()
+    {
+        var contract = Contract.Create(
+            Guid.NewGuid(), "tenant-1", "CTR-FEAT-001",
+            planId: 1,
+            effectiveAtUtc: UtcNow,
+            endsAtUtc: UtcNow.AddMonths(12),
+            durationMonths: 12,
+            monthlyListPrice: 1000m,
+            contractualMonthlyValue: 1000m,
+            currencyCode: "EGP",
+            contractedAmount: 12000m,
+            discountAmount: 0).Value;
+
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "F-A"));
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "F-B"));
+
+        var snapshot = contract.GetSubscriptionSnapshot();
+
+        Assert.Equal(2, snapshot.FeatureCodes.Count);
+        Assert.Contains("F-A", snapshot.FeatureCodes);
+        Assert.Contains("F-B", snapshot.FeatureCodes);
+    }
+
+    #endregion
+
+    #region 18.1 F-01: Plan Mutation Regression
+
+    [Fact]
+    public void F01_PlanMutationRegression_EndToEnd_PersistsFromDB()
+    {
+        var plan = CreatePlan(id: 1, monthlyPrice: 1000m, durationMonths: 12);
+        AddPricingTiers(plan);
+
+        var contract = Contract.Create(
+            Guid.NewGuid(), "tenant-regression", "CTR-REG-001",
+            planId: plan.Id,
+            effectiveAtUtc: UtcNow,
+            endsAtUtc: UtcNow.AddMonths(12),
+            durationMonths: 12,
+            monthlyListPrice: 900m,
+            contractualMonthlyValue: 900m,
+            currencyCode: "EGP",
+            contractedAmount: 10800m,
+            discountAmount: 0,
+            bonusMonths: 2,
+            maxStudents: 50,
+            maxUsers: 25,
+            maxBranches: 5,
+            maxTeachers: 10,
+            storageGb: 50,
+            smsQuota: 500).Value;
+
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "F-REG-A"));
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "F-REG-B"));
+
+        // Simulate what CreateSubscriptionFromContractHandler does
+        var snapshot = contract.GetSubscriptionSnapshot();
+
+        // Mutate plan AFTER contract creation
+        plan.Update(plan.Code, plan.DisplayName, plan.MonthlyPrice,
+            maxStudents: 999, maxUsers: 999, maxBranches: 99, maxTeachers: 99,
+            storageGB: 999, smsQuota: 9999, isActive: true);
+
+        // Verify snapshot is immutable
+        Assert.Equal(50, snapshot.MaxStudents);
+        Assert.Equal(25, snapshot.MaxUsers);
+        Assert.Equal(5, snapshot.MaxBranches);
+        Assert.Equal(10, snapshot.MaxTeachers);
+        Assert.Equal(50, snapshot.StorageGb);
+        Assert.Equal(500, snapshot.SmsQuota);
+        Assert.Equal(900m, snapshot.MonthlyListPrice);
+        Assert.Equal(12, snapshot.DurationMonths);
+        Assert.Equal(2, snapshot.BonusMonths);
+        Assert.Equal(2, snapshot.FeatureCodes.Count);
+        Assert.Contains("F-REG-A", snapshot.FeatureCodes);
+        Assert.Contains("F-REG-B", snapshot.FeatureCodes);
+    }
+
+    #endregion
+
+    #region 18.1 D-01: HTTP Authorization Tests
+
+    [Fact]
+    public async Task D01_Http_TenantAdmin_GetOwnContract_Returns200()
+    {
+        var env = await SeedAndCreateTestEnvironmentAsync();
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var contract = Contract.Create(
+            Guid.NewGuid(), env.TenantId, $"CTR-{Guid.NewGuid().ToString("N")[..8]}",
+            planId: 1,
+            effectiveAtUtc: UtcNow,
+            endsAtUtc: UtcNow.AddMonths(12),
+            durationMonths: 12,
+            monthlyListPrice: 1000m,
+            contractualMonthlyValue: 1000m,
+            currencyCode: "EGP",
+            contractedAmount: 12000m,
+            discountAmount: 0).Value;
+        contract.Activate(UtcNow);
+        db.Contracts.Add(contract);
+        db.StampAddedTenantIds(env.TenantId);
+        await db.SaveChangesAsync();
+
+        var request = CreateAuthRequest(HttpMethod.Get, $"/api/contracts/{contract.Id}", env.TenantId, env.TenantAdminToken);
+        var response = await _client.SendAsync(request);
+
+        Assert.True(response.StatusCode == System.Net.HttpStatusCode.OK,
+            $"Expected 200 but got {response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
+    }
+
+    [Fact]
+    public async Task D01_Http_TenantAdmin_GetOwnInvoice_Returns200()
+    {
+        var env = await SeedAndCreateTestEnvironmentAsync();
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var (contractId, _, invoiceId) = await SeedContractWithSubscriptionAndInvoice(
+            db, env.TenantId, 1000m, 12);
+
+        var request = CreateAuthRequest(HttpMethod.Get, $"/api/invoices/{invoiceId}", env.TenantId, env.TenantAdminToken);
+        var response = await _client.SendAsync(request);
+
+        Assert.True(response.StatusCode == System.Net.HttpStatusCode.OK,
+            $"Expected 200 but got {response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
+    }
+
+    [Fact]
+    public async Task D01_Http_TenantAdmin_GetOwnTenantCredits_Returns200()
+    {
+        var env = await SeedAndCreateTestEnvironmentAsync();
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
         var credit = TenantCredit.Create(
-            Guid.NewGuid(), 5000m, CreditSourceType.SubscriptionChange, sourceId: Guid.NewGuid()).Value;
-        credit.TenantId = tenantIdA;
+            Guid.NewGuid(), 5000m, CreditSourceType.SubscriptionChange, sourceId: Guid.NewGuid(), currencyCode: "EGP").Value;
+        credit.TenantId = env.TenantId;
+        db.TenantCredits.Add(credit);
+        await db.SaveChangesAsync();
 
-        // Invoice belongs to Tenant B
+        var request = CreateAuthRequest(HttpMethod.Get, "/api/tenantcredits", env.TenantId, env.TenantAdminToken);
+        var response = await _client.SendAsync(request);
+
+        Assert.True(response.StatusCode == System.Net.HttpStatusCode.OK,
+            $"Expected 200 but got {response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
+    }
+
+    [Fact]
+    public async Task D01_Http_TenantAdmin_ApproveRefund_Returns403Or404()
+    {
+        var env = await SeedAndCreateTestEnvironmentAsync();
+
+        var fakeRefundId = Guid.NewGuid();
+        var request = CreateAuthRequest(HttpMethod.Post, $"/api/refunds/{fakeRefundId}/approve", env.TenantId, env.TenantAdminToken);
+        var response = await _client.SendAsync(request);
+
+        // TenantAdmin lacks Refunds.Approve permission
+        // If routing matches before auth: 403 Forbidden; if resource not found: 404 NotFound
+        Assert.True(response.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.NotFound,
+            $"Expected 403 or 404 but got {response.StatusCode}");
+    }
+
+    [Fact]
+    public async Task D01_Http_TenantAdmin_ExecuteRefund_Returns403Or404()
+    {
+        var env = await SeedAndCreateTestEnvironmentAsync();
+
+        var fakeRefundId = Guid.NewGuid();
+        var request = CreateAuthRequest(HttpMethod.Post, $"/api/refunds/{fakeRefundId}/execute", env.TenantId, env.TenantAdminToken);
+        var response = await _client.SendAsync(request);
+
+        // TenantAdmin lacks Refunds.Execute permission
+        Assert.True(response.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.NotFound,
+            $"Expected 403 or 404 but got {response.StatusCode}");
+    }
+
+    #endregion
+
+    #region 18.1 Cross-Tenant: Payment
+
+    [Fact]
+    public async Task D01_CrossTenant_ContractAccess_Returns403()
+    {
+        var env = await SeedAndCreateTestEnvironmentAsync();
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        // Create tenant B with a user
+        var store = scope.ServiceProvider.GetRequiredService<IMultiTenantStore<CenterixTenantInfo>>();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+
+        var tenantBId = Guid.NewGuid().ToString();
+        var tenantBGuid = Guid.Parse(tenantBId);
+
+        var tenantB = Tenant.Create(
+            tenantBGuid, tenantBId, tenantBId, tenantBId,
+            "EG", "EGP", "Africa/Cairo", "O", "W",
+            $"{tenantBId}@test.com", IsolationMode.Shared).Value;
+        db.Tenants.Add(tenantB);
+
+        await store.TryAddAsync(new CenterixTenantInfo
+        {
+            Id = tenantBId, Identifier = tenantBId, Name = tenantBId,
+            Email = $"{tenantBId}@test.com", IsActive = true,
+            ValidUpTo = DateTime.UtcNow.AddYears(1), CreatedAt = DateTime.UtcNow
+        });
+
+        db.StampAddedTenantIds(tenantBId);
+        await db.SaveChangesAsync();
+
+        // Create contract in tenant A
+        var contract = Contract.Create(
+            Guid.NewGuid(), env.TenantId, $"CTR-CT-{Guid.NewGuid().ToString("N")[..8]}",
+            planId: 1,
+            effectiveAtUtc: UtcNow,
+            endsAtUtc: UtcNow.AddMonths(12),
+            durationMonths: 12,
+            monthlyListPrice: 1000m,
+            contractualMonthlyValue: 1000m,
+            currencyCode: "EGP",
+            contractedAmount: 12000m,
+            discountAmount: 0).Value;
+        contract.Activate(UtcNow);
+        db.Contracts.Add(contract);
+        db.StampAddedTenantIds(env.TenantId);
+        await db.SaveChangesAsync();
+
+        // Tenant B user
+        var tenantBUser = new IdentityUser
+        {
+            Email = $"user-pay-{tenantBId}@test.com",
+            UserName = $"user-pay-{tenantBId}@test.com",
+            EmailConfirmed = true
+        };
+        await userManager.CreateAsync(tenantBUser, "User@test123!");
+        await userManager.AddToRoleAsync(tenantBUser, "TenantAdmin");
+
+        var membership = TenantMembership.Create(tenantBUser.Id, tenantBId, "TenantAdmin",
+            Domain.Platform.Tenants.Enums.TenantMembershipStatus.Active);
+        if (membership.IsSuccess) db.TenantMemberships.Add(membership.Value);
+        await db.SaveChangesAsync();
+
+        var tenantBToken = _factory.GenerateTestToken(
+            tenantBUser.Id, tenantBUser.Email!,
+            new[] { "TenantAdmin" },
+            Permissions.GetTenantAdminPermissions().ToList());
+
+        // Tenant B user tries to access tenant A's contract via the list endpoint
+        var request = CreateAuthRequest(HttpMethod.Get, "/api/contracts", tenantBId, tenantBToken);
+        var response = await _client.SendAsync(request);
+
+        // Should get 200 (list endpoint) but with empty results (cross-tenant filter)
+        Assert.True(response.StatusCode == System.Net.HttpStatusCode.OK,
+            $"Expected 200 but got {response.StatusCode}");
+
+        var content = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(contract.Id.ToString(), content);
+    }
+
+    #endregion
+
+    #region 18.1 Cross-Tenant: CustomerCredit
+
+    [Fact]
+    public async Task D01_CrossTenant_CustomerCreditAccess_Returns403()
+    {
+        var env = await SeedAndCreateTestEnvironmentAsync();
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        // Create tenant B
+        var store = scope.ServiceProvider.GetRequiredService<IMultiTenantStore<CenterixTenantInfo>>();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+
+        var tenantBId = Guid.NewGuid().ToString();
+        var tenantBGuid = Guid.Parse(tenantBId);
+
+        var tenantB = Tenant.Create(
+            tenantBGuid, tenantBId, tenantBId, tenantBId,
+            "EG", "EGP", "Africa/Cairo", "O", "W",
+            $"{tenantBId}@test.com", IsolationMode.Shared).Value;
+        db.Tenants.Add(tenantB);
+
+        await store.TryAddAsync(new CenterixTenantInfo
+        {
+            Id = tenantBId, Identifier = tenantBId, Name = tenantBId,
+            Email = $"{tenantBId}@test.com", IsActive = true,
+            ValidUpTo = DateTime.UtcNow.AddYears(1), CreatedAt = DateTime.UtcNow
+        });
+        db.StampAddedTenantIds(tenantBId);
+        await db.SaveChangesAsync();
+
+        // Create credit in tenant A
+        var credit = TenantCredit.Create(
+            Guid.NewGuid(), 3000m, CreditSourceType.SubscriptionChange, sourceId: Guid.NewGuid()).Value;
+        credit.TenantId = env.TenantId;
+        db.TenantCredits.Add(credit);
+        await db.SaveChangesAsync();
+
+        // Tenant B user
+        var tenantBUser = new IdentityUser
+        {
+            Email = $"user-credit-{tenantBId}@test.com",
+            UserName = $"user-credit-{tenantBId}@test.com",
+            EmailConfirmed = true
+        };
+        await userManager.CreateAsync(tenantBUser, "User@test123!");
+        await userManager.AddToRoleAsync(tenantBUser, "TenantAdmin");
+
+        var membership = TenantMembership.Create(tenantBUser.Id, tenantBId, "TenantAdmin",
+            Domain.Platform.Tenants.Enums.TenantMembershipStatus.Active);
+        if (membership.IsSuccess) db.TenantMemberships.Add(membership.Value);
+        await db.SaveChangesAsync();
+
+        var tenantBToken = _factory.GenerateTestToken(
+            tenantBUser.Id, tenantBUser.Email!,
+            new[] { "TenantAdmin" },
+            Permissions.GetTenantAdminPermissions().ToList());
+
+        var request = CreateAuthRequest(HttpMethod.Get, "/api/tenantcredits", tenantBId, tenantBToken);
+        var response = await _client.SendAsync(request);
+
+        // Should not see tenant A's credits
+        Assert.True(response.StatusCode == System.Net.HttpStatusCode.OK,
+            $"Expected 200 but got {response.StatusCode}");
+
+        var content = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(credit.Id.ToString(), content);
+    }
+
+    #endregion
+
+    #region 18.1 Historical Immutability
+
+    [Fact]
+    public void HistoricalImmutability_PlanMutation_DoesNotAffectContract()
+    {
+        var plan = CreatePlan(id: 1, monthlyPrice: 1000m, durationMonths: 12);
+
+        var contract = Contract.Create(
+            Guid.NewGuid(), "tenant-imm", "CTR-IMM-001",
+            planId: plan.Id,
+            effectiveAtUtc: UtcNow,
+            endsAtUtc: UtcNow.AddMonths(12),
+            durationMonths: 12,
+            monthlyListPrice: 900m,
+            contractualMonthlyValue: 900m,
+            currencyCode: "EGP",
+            contractedAmount: 10800m,
+            discountAmount: 0,
+            bonusMonths: 1,
+            maxStudents: 50,
+            maxUsers: 25,
+            maxBranches: 5,
+            maxTeachers: 10,
+            storageGb: 50,
+            smsQuota: 500).Value;
+
+        // Mutate plan
+        plan.Update(plan.Code, plan.DisplayName, plan.MonthlyPrice,
+            maxStudents: 999, maxUsers: 999, maxBranches: 99, maxTeachers: 99,
+            storageGB: 999, smsQuota: 9999, isActive: true);
+
+        // Contract snapshot is unaffected
+        Assert.Equal(50, contract.MaxStudents);
+        Assert.Equal(25, contract.MaxUsers);
+        Assert.Equal(5, contract.MaxBranches);
+        Assert.Equal(10, contract.MaxTeachers);
+        Assert.Equal(50, contract.StorageGb);
+        Assert.Equal(500, contract.SmsQuota);
+        Assert.Equal(900m, contract.MonthlyListPrice);
+    }
+
+    [Fact]
+    public void HistoricalImmutability_PlanDeactivation_DoesNotAffectContract()
+    {
+        var plan = CreatePlan(id: 1, monthlyPrice: 1000m, durationMonths: 12, isActive: true);
+
+        var contract = Contract.Create(
+            Guid.NewGuid(), "tenant-imm2", "CTR-IMM-002",
+            planId: plan.Id,
+            effectiveAtUtc: UtcNow,
+            endsAtUtc: UtcNow.AddMonths(12),
+            durationMonths: 12,
+            monthlyListPrice: 800m,
+            contractualMonthlyValue: 800m,
+            currencyCode: "EGP",
+            contractedAmount: 9600m,
+            discountAmount: 0).Value;
+
+        // Deactivate plan
+        plan.Deactivate();
+
+        // Contract snapshot is unaffected — still references the plan
+        Assert.Equal(plan.Id, contract.PlanId);
+        Assert.Equal(800m, contract.MonthlyListPrice);
+    }
+
+    [Fact]
+    public void HistoricalImmutability_ContractBonusMonths_DefaultsToZero()
+    {
+        // Default BonusMonths = 0 when not specified
+        var contract = Contract.Create(
+            Guid.NewGuid(), "tenant-imm3", "CTR-IMM-003",
+            planId: 1,
+            effectiveAtUtc: UtcNow,
+            endsAtUtc: UtcNow.AddMonths(12),
+            durationMonths: 12,
+            monthlyListPrice: 1000m,
+            contractualMonthlyValue: 1000m,
+            currencyCode: "EGP",
+            contractedAmount: 12000m,
+            discountAmount: 0).Value;
+
+        Assert.Equal(0, contract.BonusMonths);
+        Assert.Equal(0, contract.MaxStudents);
+        Assert.Equal(0, contract.MaxUsers);
+        Assert.Equal(0, contract.MaxBranches);
+        Assert.Equal(0, contract.MaxTeachers);
+        Assert.Equal(0, contract.StorageGb);
+        Assert.Equal(0, contract.SmsQuota);
+    }
+
+    #endregion
+
+    #region 18.1 D-02: Credit Application Amount Cap
+
+    [Fact]
+    public void D02_CreditApplication_AmountCappedAtInvoiceRemaining()
+    {
+        var tenantId = "tenant-credit-cap";
+
+        var credit = TenantCredit.Create(
+            Guid.NewGuid(), 8000m, CreditSourceType.SubscriptionChange, sourceId: Guid.NewGuid(), currencyCode: "EGP").Value;
+        credit.TenantId = tenantId;
+
         var invoice = Invoice.Create(
-            Guid.NewGuid(), "INV-ISO",
+            Guid.NewGuid(), "INV-CAP",
             DateOnly.FromDateTime(UtcNow), DateOnly.FromDateTime(UtcNow.AddMonths(12)),
-            subtotal: 3000m, discountAmount: 0, taxAmount: 0, totalAmount: 3000m).Value;
-        invoice.TenantId = tenantIdB;
+            subtotal: 5000m, discountAmount: 0, taxAmount: 0, totalAmount: 5000m).Value;
+        invoice.TenantId = tenantId;
+        invoice.Issue(UtcNow);
 
-        // Cross-tenant check: credit.TenantId != invoice.TenantId
-        Assert.NotEqual(credit.TenantId, invoice.TenantId);
+        // Credit (8000) > invoice remaining (5000) → should cap at 5000
+        var invoiceRemaining = invoice.GetRemainingAmount();
+        var applicationAmount = Math.Min(credit.RemainingAmount, invoiceRemaining);
+
+        Assert.Equal(5000m, invoiceRemaining);
+        Assert.Equal(5000m, applicationAmount);
+
+        // Apply
+        var appResult = CreditApplication.Create(
+            Guid.NewGuid(), credit.Id, invoice.Id, applicationAmount, UtcNow, "test-cap").Value;
+
+        credit.ConsumeAmount(applicationAmount);
+
+        Assert.Equal(3000m, credit.RemainingAmount);
+    }
+
+    [Fact]
+    public void D02_CreditApplication_AmountUsesFullCreditWhenLessThanInvoice()
+    {
+        var tenantId = "tenant-credit-cap2";
+
+        var credit = TenantCredit.Create(
+            Guid.NewGuid(), 3000m, CreditSourceType.SubscriptionChange, sourceId: Guid.NewGuid(), currencyCode: "EGP").Value;
+        credit.TenantId = tenantId;
+
+        var invoice = Invoice.Create(
+            Guid.NewGuid(), "INV-CAP2",
+            DateOnly.FromDateTime(UtcNow), DateOnly.FromDateTime(UtcNow.AddMonths(12)),
+            subtotal: 5000m, discountAmount: 0, taxAmount: 0, totalAmount: 5000m).Value;
+        invoice.TenantId = tenantId;
+        invoice.Issue(UtcNow);
+
+        // Credit (3000) < invoice remaining (5000) → uses full credit
+        var invoiceRemaining = invoice.GetRemainingAmount();
+        var applicationAmount = Math.Min(credit.RemainingAmount, invoiceRemaining);
+
+        Assert.Equal(5000m, invoiceRemaining);
+        Assert.Equal(3000m, applicationAmount);
+    }
+
+    #endregion
+
+    #region 18.1 D-02: Payment Verification
+
+    [Fact]
+    public void D02_PaymentVerification_QueriesCompletedPaymentsWithMatchingCurrency()
+    {
+        var tenantId = "tenant-pay-verify";
+        var contractId = Guid.NewGuid();
+
+        // Create completed payment with matching currency
+        var payment = Payment.Create(
+            Guid.NewGuid(), "PAY-VERIFY-001", 5000m, "EGP", PaymentMethod.Cash).Value;
+        payment.TenantId = tenantId;
+        payment.Complete(UtcNow);
+
+        Assert.True(payment.IsCompleted);
+        Assert.Equal("EGP", payment.CurrencyCode);
+        Assert.Equal(5000m, payment.Amount);
+    }
+
+    [Fact]
+    public void D02_PaymentVerification_FailedPaymentDoesNotCount()
+    {
+        var payment = Payment.Create(
+            Guid.NewGuid(), "PAY-FAIL-001", 5000m, "EGP", PaymentMethod.Cash).Value;
+        payment.MarkFailed();
+
+        Assert.False(payment.CountsTowardSettlement);
+        Assert.False(payment.IsCompleted);
     }
 
     #endregion

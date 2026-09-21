@@ -2,16 +2,16 @@ namespace Centerix.Application.Platform.Subscriptions;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Plans;
 using Centerix.Domain.Platform.Subscriptions;
 using Centerix.Domain.Platform.Subscriptions.Enums;
 using Microsoft.EntityFrameworkCore;
 
 /// <summary>
-/// Builds a fully-snapshotted, ACTIVATED TenantPlan from an active Plan:
-/// commercial terms + limits + feature entitlement are copied at creation time so later
-/// plan changes never alter existing grants. Shared by the ApproveTenant and AssignPlan
-/// workflows; callers own persistence, tenant lifecycle and audit.
+/// Builds a fully-snapshotted, ACTIVATED TenantPlan:
+/// - From a live Plan catalog (legacy/initial assignment path)
+/// - From a Contract snapshot (contract creation path): no Plan queries for limits/features
 /// </summary>
 public interface ISubscriptionFactory
 {
@@ -40,6 +40,20 @@ public interface ISubscriptionFactory
         string snapshotCurrency,
         int durationMonths,
         int bonusMonths,
+        DateTime startsAtUtc,
+        bool autoRenew,
+        bool activate,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Creates a subscription exclusively from a Contract snapshot.
+    /// No Plan queries — all commercial terms, limits, and features come from the snapshot.
+    /// The PlanId is still stored for reference, but no catalog data is read.
+    /// </summary>
+    Task<Result<TenantPlan>> CreateFromSnapshotAsync(
+        string tenantId,
+        int planId,
+        SubscriptionSnapshot snapshot,
         DateTime startsAtUtc,
         bool autoRenew,
         bool activate,
@@ -201,6 +215,57 @@ public class SubscriptionFactory(IAppDbContext dbContext) : ISubscriptionFactory
                 continue;
 
             var grant = subscription.GrantFeature(feature);
+            if (!grant.IsSuccess)
+                return grant.Errors!;
+        }
+
+        if (activate)
+        {
+            var activation = subscription.Activate(startsAtUtc);
+            if (!activation.IsSuccess)
+                return activation.Errors!;
+        }
+
+        return subscription;
+    }
+
+    public async Task<Result<TenantPlan>> CreateFromSnapshotAsync(
+        string tenantId,
+        int planId,
+        SubscriptionSnapshot snapshot,
+        DateTime startsAtUtc,
+        bool autoRenew,
+        bool activate,
+        CancellationToken cancellationToken)
+    {
+        // Create subscription exclusively from the snapshot — no Plan queries
+        var createResult = TenantPlan.Create(
+            Guid.NewGuid(),
+            tenantId,
+            planId,
+            snapshot.MonthlyListPrice,
+            snapshot.CurrencyCode,
+            snapshot.DurationMonths,
+            snapshot.BonusMonths,
+            startsAtUtc,
+            autoRenew,
+            SubscriptionStatus.Pending,
+            snapshot.MaxStudents,
+            snapshot.MaxUsers,
+            snapshot.MaxBranches,
+            snapshot.MaxTeachers,
+            snapshot.StorageGb,
+            snapshot.SmsQuota);
+
+        if (!createResult.IsSuccess)
+            return createResult.Errors!;
+
+        var subscription = createResult.Value;
+
+        // Feature codes come from the snapshot, not the Plan catalog
+        foreach (var featureCode in snapshot.FeatureCodes)
+        {
+            var grant = subscription.GrantFeature(featureCode);
             if (!grant.IsSuccess)
                 return grant.Errors!;
         }

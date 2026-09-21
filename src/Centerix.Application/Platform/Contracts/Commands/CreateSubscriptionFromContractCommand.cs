@@ -56,17 +56,17 @@ public class CreateSubscriptionFromContractHandler(
 
         // Create subscription from the Contract's authoritative commercial snapshot.
         // The Plan catalog is mutable; the Contract is the historical commercial agreement.
-        // Using CreateFromSnapshotAsync ensures that the negotiated price, currency, duration,
-        // and charged months from the Contract survive into the Subscription — NOT the current Plan values.
+        // GetSubscriptionSnapshot() returns all limits, features, and commercial terms from the
+        // Contract itself — no Plan queries are made by the factory.
+        var snapshot = contract.GetSubscriptionSnapshot();
+
         var subscriptionResult = await subscriptionFactory.CreateFromSnapshotAsync(
             contract.TenantId,
             contract.PlanId,
-            snapshotPrice: contract.MonthlyListPrice,
-            snapshotCurrency: contract.CurrencyCode,
-            durationMonths: contract.DurationMonths,
-            bonusMonths: 0,
+            snapshot,
             startsAtUtc: now,
             autoRenew: false,
+            activate: true,
             cancellationToken);
 
         if (!subscriptionResult.IsSuccess)

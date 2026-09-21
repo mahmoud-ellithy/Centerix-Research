@@ -83,6 +83,28 @@ public class ContractConfiguration : IEntityTypeConfiguration<Contract>
 
         builder.Property(c => c.ChargedMonths);
 
+        // Snapshot limit fields: Plan limits copied at contract creation
+        builder.Property(c => c.BonusMonths)
+            .IsRequired();
+
+        builder.Property(c => c.MaxStudents)
+            .IsRequired();
+
+        builder.Property(c => c.MaxUsers)
+            .IsRequired();
+
+        builder.Property(c => c.MaxBranches)
+            .IsRequired();
+
+        builder.Property(c => c.MaxTeachers)
+            .IsRequired();
+
+        builder.Property(c => c.StorageGb)
+            .IsRequired();
+
+        builder.Property(c => c.SmsQuota)
+            .IsRequired();
+
         // Renewal traceability: optional reference to the previous subscription that was renewed
         builder.Property(c => c.PreviousSubscriptionId);
 
@@ -112,6 +134,15 @@ public class ContractConfiguration : IEntityTypeConfiguration<Contract>
             .OnDelete(DeleteBehavior.Cascade);
 
         builder.Navigation(c => c.Benefits)
+            .UsePropertyAccessMode(PropertyAccessMode.Field);
+
+        // Navigation: ContractFeatures (cascade delete)
+        builder.HasMany(c => c.ContractFeatures)
+            .WithOne(cf => cf.Contract)
+            .HasForeignKey(cf => cf.ContractId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Navigation(c => c.ContractFeatures)
             .UsePropertyAccessMode(PropertyAccessMode.Field);
 
         // Navigation: Subscriptions (TenantPlans linked via explicit foreign key)

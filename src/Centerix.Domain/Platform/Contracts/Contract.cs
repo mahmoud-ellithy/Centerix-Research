@@ -81,6 +81,20 @@ public class Contract : AuditableEntity<Guid>
     public int? ChargedMonths { get; private set; }
 
     /// <summary>
+    /// Number of bonus months credited by the promotion at contract creation.
+    /// Snapshot: Subscription uses this value, not the Plan's current BonusMonths.
+    /// </summary>
+    public int BonusMonths { get; private set; }
+
+    /// <summary>Snapshot of Plan limits at contract creation. Used by SubscriptionFactory.</summary>
+    public int MaxStudents { get; private set; }
+    public int MaxUsers { get; private set; }
+    public int MaxBranches { get; private set; }
+    public int MaxTeachers { get; private set; }
+    public int StorageGb { get; private set; }
+    public int SmsQuota { get; private set; }
+
+    /// <summary>
     /// When this Contract is a renewal, references the previous Subscription (TenantPlan)
     /// that was renewed. Preserves renewal traceability without constraining the relationship
     /// to a specific Contract or requiring a versioning system.
@@ -94,6 +108,10 @@ public class Contract : AuditableEntity<Guid>
     /// <summary>Benefits/gifts granted as part of this contract.</summary>
     private readonly List<ContractBenefit> _benefits = [];
     public IReadOnlyList<ContractBenefit> Benefits => _benefits.AsReadOnly();
+
+    /// <summary>Snapshot of feature entitlements copied from Plan at contract creation.</summary>
+    private readonly List<ContractFeature> _contractFeatures = [];
+    public IReadOnlyList<ContractFeature> ContractFeatures => _contractFeatures.AsReadOnly();
 
     /// <summary>Subscriptions associated with this contract (operational execution).</summary>
     private readonly List<Subscriptions.TenantPlan> _subscriptions = [];
@@ -118,7 +136,14 @@ public class Contract : AuditableEntity<Guid>
         string? promotionReference,
         int? promotionId,
         string? promotionType,
-        int? chargedMonths)
+        int? chargedMonths,
+        int bonusMonths,
+        int maxStudents,
+        int maxUsers,
+        int maxBranches,
+        int maxTeachers,
+        int storageGb,
+        int smsQuota)
         : base(id)
     {
         TenantId = tenantId;
@@ -137,6 +162,13 @@ public class Contract : AuditableEntity<Guid>
         PromotionId = promotionId;
         PromotionType = promotionType;
         ChargedMonths = chargedMonths;
+        BonusMonths = bonusMonths;
+        MaxStudents = maxStudents;
+        MaxUsers = maxUsers;
+        MaxBranches = maxBranches;
+        MaxTeachers = maxTeachers;
+        StorageGb = storageGb;
+        SmsQuota = smsQuota;
     }
 
     /// <summary>
@@ -158,7 +190,14 @@ public class Contract : AuditableEntity<Guid>
         string? promotionReference = null,
         int? promotionId = null,
         string? promotionType = null,
-        int? chargedMonths = null)
+        int? chargedMonths = null,
+        int bonusMonths = 0,
+        int maxStudents = 0,
+        int maxUsers = 0,
+        int maxBranches = 0,
+        int maxTeachers = 0,
+        int storageGb = 0,
+        int smsQuota = 0)
     {
         if (id == Guid.Empty)
             return ContractErrors.PricingTier.IdRequired;
@@ -222,7 +261,14 @@ public class Contract : AuditableEntity<Guid>
             promotionReference?.Trim(),
             promotionId,
             promotionType,
-            chargedMonths);
+            chargedMonths,
+            bonusMonths,
+            maxStudents,
+            maxUsers,
+            maxBranches,
+            maxTeachers,
+            storageGb,
+            smsQuota);
 
         contract.AddDomainEvent(new ContractCreatedEvent(id, tenantId, planId, contractNumber));
 
@@ -408,6 +454,40 @@ public class Contract : AuditableEntity<Guid>
         PreviousSubscriptionId = previousSubscriptionId;
         return Result.Updated;
     }
+
+    /// <summary>
+    /// Builds a subscription snapshot from this contract's own data.
+    /// No Plan queries — all values are authoritative snapshots on the Contract.
+    /// </summary>
+    public SubscriptionSnapshot GetSubscriptionSnapshot()
+    {
+        return new SubscriptionSnapshot(
+            MonthlyListPrice,
+            ContractualMonthlyValue,
+            CurrencyCode,
+            DurationMonths,
+            BonusMonths,
+            ChargedMonths ?? 0,
+            MaxStudents,
+            MaxUsers,
+            MaxBranches,
+            MaxTeachers,
+            StorageGb,
+            SmsQuota,
+            _contractFeatures.Select(f => f.FeatureCode).ToList());
+    }
+
+    /// <summary>
+    /// Adds a feature snapshot from the Plan catalog at contract creation time.
+    /// </summary>
+    public void AddContractFeature(ContractFeature feature)
+    {
+        _contractFeatures.Add(feature);
+    }
+
+    /// <summary>EF navigation mutator for rehydration of contract features.</summary>
+    internal void LoadContractFeatures(IEnumerable<ContractFeature> features)
+        => _contractFeatures.AddRange(features);
 
     /// <summary>EF navigation mutator for rehydration of pricing tiers.</summary>
     internal void LoadPricingTiers(IEnumerable<ContractPricingTier> tiers)

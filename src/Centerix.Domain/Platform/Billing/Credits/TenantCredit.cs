@@ -13,6 +13,7 @@ public class TenantCredit : AuditableEntity<Guid>
     public CreditStatus Status { get; private set; }
     public Guid? ReversalOfCreditId { get; private set; }
     public string CurrencyCode { get; private set; } = "EGP";
+    public string? IdempotencyKey { get; private set; }
 
     // Optimistic-concurrency token (SQL Server rowversion, store-generated)
     public byte[] RowVersion { get; internal set; } = [];
@@ -25,7 +26,8 @@ public class TenantCredit : AuditableEntity<Guid>
         CreditSourceType sourceType,
         Guid? sourceId,
         CreditStatus status,
-        string currencyCode)
+        string currencyCode,
+        string? idempotencyKey = null)
         : base(id)
     {
         Amount = amount;
@@ -34,6 +36,7 @@ public class TenantCredit : AuditableEntity<Guid>
         SourceId = sourceId;
         Status = status;
         CurrencyCode = currencyCode;
+        IdempotencyKey = idempotencyKey;
     }
 
     public static Result<TenantCredit> Create(
@@ -41,7 +44,8 @@ public class TenantCredit : AuditableEntity<Guid>
         decimal amount,
         CreditSourceType sourceType,
         Guid? sourceId = null,
-        string currencyCode = "EGP")
+        string currencyCode = "EGP",
+        string? idempotencyKey = null)
     {
         if (amount <= 0)
             return TenantCreditErrors.InvalidAmount;
@@ -52,7 +56,7 @@ public class TenantCredit : AuditableEntity<Guid>
         if (string.IsNullOrWhiteSpace(currencyCode))
             return Error.Validation("TenantCredit.CurrencyRequired", "Currency code is required.");
 
-        return new TenantCredit(id, amount, sourceType, sourceId, CreditStatus.Available, currencyCode.ToUpperInvariant());
+        return new TenantCredit(id, amount, sourceType, sourceId, CreditStatus.Available, currencyCode.ToUpperInvariant(), idempotencyKey);
     }
 
     public Result<Updated> Apply(Guid invoiceLineId)

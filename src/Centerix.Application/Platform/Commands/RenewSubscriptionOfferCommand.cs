@@ -253,7 +253,14 @@ public class RenewSubscriptionOfferHandler(
                 promotionReference: calc.PromotionName,
                 promotionId: calc.PromotionId,
                 promotionType: calc.PromotionType,
-                chargedMonths: calc.ChargedMonths);
+                chargedMonths: calc.ChargedMonths,
+                bonusMonths: plan.BonusMonths,
+                maxStudents: plan.MaxStudents,
+                maxUsers: plan.MaxUsers,
+                maxBranches: plan.MaxBranches,
+                maxTeachers: plan.MaxTeachers,
+                storageGb: plan.StorageGB,
+                smsQuota: plan.SMSQuota);
 
             if (!contractResult.IsSuccess)
                 return contractResult.Errors!;
@@ -284,6 +291,22 @@ public class RenewSubscriptionOfferHandler(
                 contract.AddPricingTier(tierResult.Value);
             }
 
+            // Snapshot feature entitlements from the Plan catalog into the Contract
+            foreach (var pf in plan.PlanFeatures.Where(f => f.IsEnabled))
+            {
+                var feature = await dbContext.Features
+                    .AsNoTracking()
+                    .Where(f => f.Id == pf.FeatureId)
+                    .Select(f => f.Code)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                if (feature is not null)
+                {
+                    contract.AddContractFeature(
+                        ContractFeature.Create(contract.Id, feature));
+                }
+            }
+
             var markConvertedResult = offer.MarkConverted(contract.Id, now);
             if (!markConvertedResult.IsSuccess)
                 return markConvertedResult.Errors!;
@@ -295,13 +318,12 @@ public class RenewSubscriptionOfferHandler(
             // old Active subscription.
             var activateNew = startsAt <= now;
 
+            var snapshot = contract.GetSubscriptionSnapshot();
+
             var subscriptionResult = await subscriptionFactory.CreateFromSnapshotAsync(
                 oldSubscription.TenantId,
                 plan.Id,
-                snapshotPrice: calc.MonthlyListPrice,
-                snapshotCurrency: calc.CurrencyCode,
-                durationMonths: durationMonths,
-                bonusMonths: plan.BonusMonths,
+                snapshot,
                 startsAtUtc: startsAt,
                 autoRenew: false,
                 activate: activateNew,
