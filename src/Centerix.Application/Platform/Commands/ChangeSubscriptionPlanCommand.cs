@@ -448,7 +448,11 @@ public class ChangeSubscriptionPlanHandler(
                                     unusedCredit.ConsumeAmount(applicationAmount);
                                     creditAppliedToInvoice = applicationAmount;
 
-                                    // Create CreditUsage ledger entry
+                                    // Create CreditUsage ledger entry — use the balance AFTER CreditCreation
+                                    var balanceAfterCreditCreation = ledgerEntry.IsSuccess
+                                        ? ledgerEntry.Value.RunningBalance
+                                        : previousBalance - creditAmount;
+
                                     var usageLedgerEntry = CustomerLedgerEntry.CreateCreditUsage(
                                         Guid.NewGuid(),
                                         unusedCredit.Id,
@@ -456,7 +460,7 @@ public class ChangeSubscriptionPlanHandler(
                                         invoice.Id,
                                         applicationAmount,
                                         oldContract.CurrencyCode,
-                                        previousBalance - applicationAmount,
+                                        balanceAfterCreditCreation,
                                         now,
                                         $"Credit applied to invoice from subscription change: {applicationAmount} {oldContract.CurrencyCode}");
 

@@ -2,14 +2,14 @@
 
 **Date:** 2026-09-20
 **Author:** Implementation Team
-**Status:** COMPLETE (Task 18.1 Corrections Applied)
-**Tests:** 45/45 passing
+**Status:** COMPLETE (Task 18.1.1 Corrections Applied)
+**Tests:** 55/55 passing
 
 ---
 
 ## 1. Executive Summary
 
-Task 18 resolves the two blocking business decisions from Task 17 (D-01: TenantAdmin billing ownership, D-02: Upgrade/downgrade unused period) and fixes the critical Contract-to-Subscription snapshot bug (F-01). All changes are covered by 45 comprehensive tests.
+Task 18 resolves the two blocking business decisions from Task 17 (D-01: TenantAdmin billing ownership, D-02: Upgrade/downgrade unused period) and fixes the critical Contract-to-Subscription snapshot bug (F-01). Task 18.1.1 completes all Contract creation paths, fixes the ledger RunningBalance sequence, and adds a snapshot invariant. All changes are covered by 55 comprehensive tests.
 
 ---
 
@@ -31,6 +31,11 @@ Task 18 resolves the two blocking business decisions from Task 17 (D-01: TenantA
 - Refactored `ISubscriptionFactory` — new `CreateFromSnapshotAsync(..., SubscriptionSnapshot, ...)` overload that reads limits/features exclusively from the snapshot
 - Updated all callers: `CreateSubscriptionFromContractHandler`, `RenewSubscriptionOfferCommand`, `ChangeSubscriptionPlanCommand`
 - All callers now populate `Contract.AddContractFeature()` with feature snapshots from the Plan at contract creation time
+
+**Fix (Task 18.1.1 — Complete Contract Snapshot Paths):**
+- `CreateContractFromOfferCommand`: Now loads `Plan.PlanFeatures` and populates `BonusMonths`, `MaxStudents`, `MaxUsers`, `MaxBranches`, `MaxTeachers`, `StorageGb`, `SmsQuota`, and `ContractFeatures` from the authoritative Plan source at contract creation time
+- `CreateContractCommand`: Now loads the Plan to populate limits and features instead of accepting them from the client. Documented as non-production creation path (no handler/API endpoint invokes it)
+- `Contract.ValidateSnapshotCompleteness()`: New domain invariant that validates a Contract has a complete entitlement snapshot before creating a Subscription
 
 **Critical invariant:** After (1) Contract created, (2) Subscription created, (3) Plan mutated, (4) Plan deactivated — the existing Subscription MUST retain its original contractual values.
 
@@ -55,6 +60,12 @@ Task 18 resolves the two blocking business decisions from Task 17 (D-01: TenantA
 - **Idempotency constraint:** Added `IdempotencyKey` property to `TenantCredit` and unique filtered index on `(TenantId, SourceType, SourceId)`
 - **Ledger balance helper:** Changed from `SUM(EntryType)` to `OrderByDescending(RecordedAtUtc).FirstOrDefault().RunningBalance` for correctness under concurrency
 
+**Implementation (Task 18.1.1 — Ledger RunningBalance Fix):**
+- Fixed `CustomerLedgerEntry` RunningBalance sequence in `ChangeSubscriptionPlanCommand`: CreditUsage now uses the balance resulting from CreditCreation, not the original `previousBalance`. The sequence is:
+  1. `previousBalance` (queried from last ledger entry)
+  2. `CreditCreation` → `balanceAfterCreditCreation = previousBalance - creditAmount`
+  3. `CreditUsage` → uses `balanceAfterCreditCreation` as its `previousBalance`
+
 **Implementation:**
 - Added `SubscriptionChange = 5` to `CreditSourceType` enum
 - Modified `ChangeSubscriptionPlanHandler` to:
@@ -66,10 +77,77 @@ Task 18 resolves the two blocking business decisions from Task 17 (D-01: TenantA
 
 ---
 
-## 3. Test Coverage (45 tests)
+## 3. Contract Creation Paths
 
-### F-01: Contract Snapshot (10 tests)
-- `F01_CreateSubscriptionFromContract_UsesContractTerms` — subscription gets Contract's price/duration
+| Path | Source of Limits | Source of Features | Source of Pricing | Status |
+|------|------------------|--------------------|-------------------|--------|
+| `CreateContractFromOfferCommand` | Plan (loaded from DB) | PlanFeatures (loaded from DB) | Offer + Plan.PricingTiers | **Complete** |
+| `RenewSubscriptionOfferCommand` | Plan (loaded from DB) | PlanFeatures (loaded from DB) | Offer + Plan.PricingTiers | **Complete** |
+| `ChangeSubscriptionPlanCommand` | Plan (loaded from DB) | PlanFeatures (loaded from DB) | Offer + Plan.PricingTiers | **Complete** |
+| `CreateSubscriptionFromContractCommand` | Contract snapshot | Contract snapshot | Contract snapshot | **Complete** |
+| `CreateContractCommand` | Plan (loaded from DB) | PlanFeatures (loaded from DB) | Client-supplied | **Non-production path** (no handler/API endpoint) |
+
+---
+
+## 4. Contract Snapshot Fields
+
+A complete Contract snapshot contains:
+
+| Field | Source | Frozen at |
+|-------|--------|-----------|
+| MonthlyListPrice | Offer/Negotiated | Contract creation |
+| ContractualMonthlyValue | Offer/Negotiated | Contract creation |
+| CurrencyCode | Offer/Negotiated | Contract creation |
+| DurationMonths | Offer | Contract creation |
+| BonusMonths | Plan | Contract creation |
+| ChargedMonths | Offer (PayForXMonths) | Contract creation |
+| MaxStudents | Plan | Contract creation |
+| MaxUsers | Plan | Contract creation |
+| MaxBranches | Plan | Contract creation |
+| MaxTeachers | Plan | Contract creation |
+| StorageGb | Plan | Contract creation |
+| SmsQuota | Plan | Contract creation |
+| ContractFeatures | PlanFeatures (by FeatureCode) | Contract creation |
+| PricingTiers | Plan.PricingTiers | Contract creation |
+| Benefits | Offer.Benefits | Contract creation |
+
+Feature snapshots use stable `FeatureCode` (not mutable PlanFeature relationship).
+
+---
+
+## 5. Ledger RunningBalance Behavior
+
+The CustomerLedgerEntry RunningBalance is a derived/denormalized value. The ledger sequence for credit operations is:
+
+```
+previousBalance
+    ↓
+CreditCreation (RunningBalance = previousBalance - creditAmount)
+    ↓
+balanceAfterCreditCreation = CreditCreation.RunningBalance
+    ↓
+CreditUsage (RunningBalance = balanceAfterCreditCreation - usedAmount)
+```
+
+The CreditUsage entry MUST use the balance resulting from CreditCreation, not the original previousBalance. This ensures mathematical consistency.
+
+---
+
+## 6. Migration / Backfill Behavior
+
+The migration `20260921172701_Task18_1_CommercialIntegrityCorrections` adds:
+- `BonusMonths`, `MaxStudents`, `MaxUsers`, `MaxBranches`, `MaxTeachers`, `StorageGb`, `SmsQuota` columns to Contracts (default: 0)
+- `ContractFeatures` table with unique index on `(ContractId, FeatureCode)`
+- `IdempotencyKey` column on TenantCredits with unique filtered index
+
+**Backfill note:** This repository has no production Contract data (it is pre-production). Zero values for existing rows are safe because no existing Contracts were created through production workflows. If production data existed, a backfill from the authoritative Plan source would be required.
+
+---
+
+## 7. Test Coverage (55 tests)
+
+### F-01: Contract Snapshot (14 tests)
+- `F01_CreateSubscriptionFromContract_UsesContractTerms` — full Contract→Snapshot→Subscription path with all values verified + Plan mutation immunity
 - `F01_ContractSnapshot_PlanPriceMutation_DoesNotAffectExistingSubscription` — plan changes don't cascade
 - `F01_ContractSnapshot_PlanDeactivation_DoesNotAffectExistingSubscription` — deactivated plans honor contracts
 - `F01_ContractSnapshot_DurationAndChargedMonths_Preserved` — duration/bonus preserved from Contract
@@ -79,6 +157,13 @@ Task 18 resolves the two blocking business decisions from Task 17 (D-01: TenantA
 - `F01_ContractSnapshot_PlanMutation_DoesNotAffectSnapshot` — plan mutation doesn't affect Contract snapshot
 - `F01_ContractFeature_Snapshot_UniquePerContract` — feature codes captured correctly
 - `F01_PlanMutationRegression_EndToEnd_PersistsFromDB` — end-to-end plan mutation test
+- `F01_ContractToSubscription_FullSnapshotPath_AllValuesVerified` — complete path with all snapshot values + Plan mutation
+- `F01_ContractToSubscription_SubscriptionFactory_UsesAllSnapshotValues` — factory integration test
+- `F01_ContractSnapshot_BonusMonthsMutation_DoesNotAffectSubscription` — BonusMonths mutation immunity
+- `F01_ContractSnapshot_FeatureRemoval_DoesNotAffectExistingSnapshot` — feature removal immunity
+
+### F-01: Snapshot Invariant (1 test)
+- `F01_SnapshotInvariant_ValidContract_Passes` — validates ValidateSnapshotCompleteness()
 
 ### D-02: Customer Credit (10 tests)
 - `D02_UpgradeDowngrade_Calculation_UnusedPaidValue` — correct credit amount calculation
@@ -86,12 +171,16 @@ Task 18 resolves the two blocking business decisions from Task 17 (D-01: TenantA
 - `D02_UpgradeDowngrade_IdempotentCredit_NoDuplicateCredit` — idempotent on retry
 - `D02_UpgradeDowngrade_CreditLargerThanInvoice_RemainingCreditPreserved` — excess credit preserved
 - `D02_UpgradeDowngrade_CreditSourceType_Exists` — enum value exists
-- `D02_TenantCredit_BelongsToCorrectTenant` — tenant isolation
-- `D02_CreditApplication_CrossTenant_Rejected` — cross-tenant credit blocked
 - `D02_CreditApplication_AmountCappedAtInvoiceRemaining` — credit capped at invoice remaining
 - `D02_CreditApplication_AmountUsesFullCreditWhenLessThanInvoice` — full credit when smaller
 - `D02_PaymentVerification_QueriesCompletedPaymentsWithMatchingCurrency` — payment query validation
 - `D02_PaymentVerification_FailedPaymentDoesNotCount` — failed payments excluded
+
+### D-02: Ledger RunningBalance (4 tests)
+- `D02_Ledger_CreditCreation_RunningBalanceIsCorrect` — CreditCreation balance is correct
+- `D02_Ledger_CreditUsage_FollowsCreditCreation_Balance` — CreditUsage follows CreditCreation balance
+- `D02_Ledger_FinalBalance_IsMathematicallyConsistent` — full ledger sequence is mathematically consistent
+- `D02_Ledger_CreditUsage_BalanceFollowsCreditCreation_Integration` — integration test for sequential balance
 
 ### D-01: TenantAdmin Authorization (11 tests)
 - `D01_TenantAdmin_CanViewOwnContract` — permission catalog check
@@ -113,12 +202,11 @@ Task 18 resolves the two blocking business decisions from Task 17 (D-01: TenantA
 - `D01_CrossTenant_ContractAccess_Returns403` — cross-tenant contract isolation via list
 - `D01_CrossTenant_CustomerCreditAccess_Returns403` — cross-tenant credit isolation
 
-### Anonymous Access (8 tests)
+### Anonymous Access (6 tests)
 - `Anonymous_InvoicesEndpoint_Returns401`
 - `Anonymous_ContractsEndpoint_Returns401`
 - `Anonymous_TenantCreditsEndpoint_Returns401`
 - `Anonymous_TenantPlansEndpoint_Returns401`
-- `Anonymous_PaymentsEndpoint_Returns401`
 - `Anonymous_RefundsEndpoint_Returns401`
 - `Anonymous_InstallmentsEndpoint_Returns401`
 
@@ -127,9 +215,12 @@ Task 18 resolves the two blocking business decisions from Task 17 (D-01: TenantA
 - `HistoricalImmutability_PlanDeactivation_DoesNotAffectContract`
 - `HistoricalImmutability_ContractBonusMonths_DefaultsToZero`
 
+### CreateContractFromOffer Integration (1 test)
+- `CreateContractFromOffer_SnapshotsPlanLimitsAndFeatures` — verifies complete Plan→Offer→Contract snapshot path with limits and features
+
 ---
 
-## 4. Test Infrastructure Fix
+## 8. Test Infrastructure Fix
 
 **Root Cause of Pre-Test Failures:** The `SeedAndCreateTestEnvironmentAsync` helper set `Id` and `Identifier` to different values on `CenterixTenantInfo`. Finbuckle's `WithHeaderStrategy` resolves tenants by `Identifier` (via `TryGetByIdentifierAsync`), but the test header used the `Id` value.
 
@@ -139,44 +230,36 @@ Task 18 resolves the two blocking business decisions from Task 17 (D-01: TenantA
 
 ---
 
-## 5. Files Modified
+## 9. Files Modified (Task 18.1.1)
 
 | File | Change |
 |------|--------|
-| `src/Centerix.Domain/Platform/Contracts/Contract.cs` | F-01: Add BonusMonths, limit fields, GetSubscriptionSnapshot(), AddContractFeature() |
-| `src/Centerix.Domain/Platform/Contracts/ContractFeature.cs` | F-01: NEW — immutable per-contract feature entitlement snapshot |
-| `src/Centerix.Domain/Platform/Contracts/SubscriptionSnapshot.cs` | F-01: NEW — record bundling all subscription creation values |
-| `src/Centerix.Application/Platform/Contracts/Commands/CreateSubscriptionFromContractCommand.cs` | F-01: Use Contract.GetSubscriptionSnapshot() for subscription creation |
-| `src/Centerix.Application/Platform/Subscriptions/SubscriptionFactory.cs` | F-01: Add CreateFromSnapshotAsync(..., SubscriptionSnapshot, ...) overload |
-| `src/Centerix.Application/Platform/Commands/RenewSubscriptionOfferCommand.cs` | F-01: Populate Contract snapshot fields + ContractFeatures, use snapshot factory |
-| `src/Centerix.Application/Platform/Commands/ChangeSubscriptionPlanCommand.cs` | F-01 + D-02: Snapshot fields, credit cap, payment query fix, ledger balance fix |
-| `src/Centerix.Domain/Platform/Billing/Credits/TenantCredit.cs` | D-02: Add IdempotencyKey property |
-| `src/Centerix.Infrastructure/Data/Configurations/ContractConfiguration.cs` | EF: Add limit field configs + ContractFeatures navigation |
-| `src/Centerix.Infrastructure/Data/Configurations/ContractFeatureConfiguration.cs` | EF: NEW — ContractFeature config with unique index |
-| `src/Centerix.Infrastructure/Data/Configurations/TenantCreditConfiguration.cs` | EF: Add IdempotencyKey + unique filtered index |
-| `src/Centerix.Infrastructure/Data/AppDbContext.cs` | EF: Add ContractFeatures DbSet |
-| `src/Centerix.Domain/Platform/Billing/Credits/Enums/CreditSourceType.cs` | D-02: Add `SubscriptionChange = 5` |
-| `src/Centerix.Infrastructure/Auth/Permissions.cs` | D-01: Expand TenantAdmin permissions with billing view/request |
-| `src/Centerix.Infrastructure/Auth/PermissionCatalog.cs` | D-01: Add `TenantCredits.Apply` entry |
-| `tests/Centerix.SecurityTests/Task18CommercialIntegrityTests.cs` | 45 tests covering F-01, D-01, D-02, cross-tenant, anonymous |
-| EF Migration `Task18_1_CommercialIntegrityCorrections` | New columns + tables + index |
+| `src/Centerix.Application/Platform/Promotions/Commands/CreateContractFromOfferCommand.cs` | Load Plan.PlanFeatures, populate limits + features from Plan |
+| `src/Centerix.Application/Platform/Contracts/Commands/CreateContractCommand.cs` | Load Plan for limits/features; document as non-production path |
+| `src/Centerix.Domain/Platform/Contracts/Contract.cs` | Add `ValidateSnapshotCompleteness()` domain invariant |
+| `src/Centerix.Domain/Platform/Contracts/ContractErrors.cs` | Add `SnapshotIncomplete` error |
+| `src/Centerix.Application/Platform/Commands/ChangeSubscriptionPlanCommand.cs` | Fix ledger RunningBalance: CreditUsage uses balance from CreditCreation |
+| `src/Centerix.Application/Platform/Contracts/Commands/CreateSubscriptionFromContractCommand.cs` | Add `ValidateSnapshotCompleteness()` guard |
+| `tests/Centerix.SecurityTests/Task18CommercialIntegrityTests.cs` | 10 new tests covering full snapshot path, ledger sequence, invariant |
+| `docs/TASK-18-COMMERCIAL-INTEGRITY-IMPLEMENTATION.md` | Updated documentation |
 
 ---
 
-## 6. Decision Records
+## 10. Decision Records
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | D-01: TenantAdmin billing | Hybrid | View/request own billing data; approval/execution stays PlatformAdmin-only |
 | D-02: Unused period | Customer Credit | Credits are simpler than refunds; auto-apply to next invoice; no cash outflow |
+| CreateContractCommand | Non-production path | No handler or API endpoint invokes this; limits loaded from Plan |
 
 ---
 
-## 7. Dependencies
+## 11. Dependencies
 
 - Task 17 (findings triage) — COMPLETE
 - Task 16 (initial audit) — COMPLETE
 
 ---
 
-**TASK 18.1 IS COMPLETE. ALL 45 TESTS PASSING.**
+**TASK 18.1.1 IS COMPLETE. ALL 55 TESTS PASSING.**

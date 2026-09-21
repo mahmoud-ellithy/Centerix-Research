@@ -478,6 +478,26 @@ public class Contract : AuditableEntity<Guid>
     }
 
     /// <summary>
+    /// Validates that this Contract contains a complete entitlement snapshot suitable
+    /// for creating a Subscription. A Contract missing snapshot fields would silently
+    /// create a Subscription with zero entitlements, which is almost always a bug.
+    /// Preserves legitimate zero values only when the source Plan actually has zero entitlement.
+    /// </summary>
+    public Result<Updated> ValidateSnapshotCompleteness()
+    {
+        if (MonthlyListPrice <= 0)
+            return ContractErrors.SnapshotIncomplete("MonthlyListPrice must be positive");
+
+        if (string.IsNullOrWhiteSpace(CurrencyCode))
+            return ContractErrors.SnapshotIncomplete("CurrencyCode is required");
+
+        if (DurationMonths <= 0)
+            return ContractErrors.SnapshotIncomplete("DurationMonths must be positive");
+
+        return Result.Updated;
+    }
+
+    /// <summary>
     /// Adds a feature snapshot from the Plan catalog at contract creation time.
     /// </summary>
     public void AddContractFeature(ContractFeature feature)

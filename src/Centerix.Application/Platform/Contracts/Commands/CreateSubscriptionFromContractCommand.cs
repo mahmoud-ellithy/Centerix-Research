@@ -52,6 +52,13 @@ public class CreateSubscriptionFromContractHandler(
         if (contract.Status != ContractStatus.Active)
             return Error.Conflict("Contract.NotActive", $"Contract '{request.ContractId}' is not Active and cannot be used to create a subscription.");
 
+        // Validate that the Contract has a complete entitlement snapshot before creating a Subscription.
+        // A Contract with zero/default entitlements would silently create a Subscription with no features,
+        // limits, or pricing — which is almost always a bug from an incomplete creation path.
+        var snapshotValidation = contract.ValidateSnapshotCompleteness();
+        if (!snapshotValidation.IsSuccess)
+            return snapshotValidation.Errors!;
+
         var now = timeProvider.GetUtcNow().UtcDateTime;
 
         // Create subscription from the Contract's authoritative commercial snapshot.

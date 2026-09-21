@@ -5,6 +5,7 @@ using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Contracts.Enums;
 using MediatR;
+using Microsoft.EntityFrameworkCore;
 
 /// <summary>
 /// Command to create a new Contract with immutable commercial snapshot.
@@ -74,7 +75,16 @@ public class CreateContractHandler : IRequestHandler<CreateContractCommand, Resu
         if (string.IsNullOrWhiteSpace(tenantId))
             return ContractErrors.TenantNotResolved;
 
-        // Create the Contract aggregate
+        // NOTE: This command is NOT used by any production Contract creation workflow.
+        // Production paths: CreateContractFromOfferCommand, RenewSubscriptionOfferCommand,
+        // ChangeSubscriptionPlanCommand — all of which populate the full snapshot from
+        // authoritative Plan/Offer sources. This handler exists for testing/manual entry only.
+        // Limits and features are NOT accepted from the client; they are loaded from the Plan.
+        var plan = await _dbContext.Plans
+            .Include(p => p.PlanFeatures)
+            .FirstOrDefaultAsync(p => p.Id == request.PlanId, cancellationToken);
+
+        // Create the Contract aggregate — client-supplied commercial terms only (price, duration, etc.)
         var contractResult = Contract.Create(
             request.ContractId,
             tenantId,
@@ -91,7 +101,14 @@ public class CreateContractHandler : IRequestHandler<CreateContractCommand, Resu
             request.PromotionReference,
             request.PromotionId,
             request.PromotionType,
-            request.ChargedMonths);
+            request.ChargedMonths,
+            bonusMonths: plan?.BonusMonths ?? 0,
+            maxStudents: plan?.MaxStudents ?? 0,
+            maxUsers: plan?.MaxUsers ?? 0,
+            maxBranches: plan?.MaxBranches ?? 0,
+            maxTeachers: plan?.MaxTeachers ?? 0,
+            storageGb: plan?.StorageGB ?? 0,
+            smsQuota: plan?.SMSQuota ?? 0);
 
         if (!contractResult.IsSuccess)
             return contractResult.Errors!;
@@ -123,6 +140,25 @@ public class CreateContractHandler : IRequestHandler<CreateContractCommand, Resu
                 return ContractErrors.PricingTier.CurrencyMismatch(contract.CurrencyCode);
 
             contract.AddPricingTier(tierResult.Value);
+        }
+
+        // Snapshot feature entitlements from the Plan catalog into the Contract
+        if (plan is not null)
+        {
+            foreach (var pf in plan.PlanFeatures.Where(f => f.IsEnabled))
+            {
+                var feature = await _dbContext.Features
+                    .AsNoTracking()
+                    .Where(f => f.Id == pf.FeatureId)
+                    .Select(f => f.Code)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                if (feature is not null)
+                {
+                    contract.AddContractFeature(
+                        ContractFeature.Create(contract.Id, feature));
+                }
+            }
         }
 
         // Add benefit snapshots

@@ -225,8 +225,10 @@ public class Phase8BillingFoundationCommandTests
             plan.DurationMonths,
             plan.BonusMonths,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)).Value;
-        subscriptionFactory.CreateActivatedAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<DateTime>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
-            .Returns(mockSubscription);
+        subscriptionFactory.CreateFromSnapshotAsync(
+                Arg.Any<string>(), Arg.Any<int>(), Arg.Any<SubscriptionSnapshot>(),
+                Arg.Any<DateTime>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<Result<TenantPlan>>(mockSubscription));
 
         var auditWriter = Substitute.For<IAuditWriter>();
 

@@ -65,6 +65,10 @@ public static class ContractErrors
         Error.Validation("Contract.BenefitExceedsLimit",
             "The total value of benefits exceeds three months of the contract's contractual monthly value");
 
+    public static Error SnapshotIncomplete(string detail) =>
+        Error.Validation("Contract.SnapshotIncomplete",
+            $"Contract entitlement snapshot is incomplete: {detail}");
+
     public static class PricingTier
     {
         public static Error IdRequired =>

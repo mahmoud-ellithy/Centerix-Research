@@ -58,16 +58,26 @@ public class CreateContractFromOfferHandler(
         if (!offer.IsConvertible)
             return OfferErrors.InvalidStateTransition(offer.Status, "convert to contract");
 
-        // Load plan for pricing tier snapshot
+        // Load plan for pricing tier snapshot, limits, and feature entitlements
         var plan = await dbContext.Plans
             .Include(p => p.PricingTiers)
+            .Include(p => p.PlanFeatures)
             .FirstOrDefaultAsync(p => p.Id == offer.PlanId, cancellationToken);
 
         var utcNow = DateTime.UtcNow;
         var effectiveAt = request.EffectiveAtUtc ?? utcNow;
         var endsAt = effectiveAt.AddMonths(offer.DurationMonths);
 
-        // Create the Contract aggregate using ONLY Offer-derived values
+        // Resolve plan limits — defaults to 0 when plan is missing (shouldn't happen in production)
+        var bonusMonths = plan?.BonusMonths ?? 0;
+        var maxStudents = plan?.MaxStudents ?? 0;
+        var maxUsers = plan?.MaxUsers ?? 0;
+        var maxBranches = plan?.MaxBranches ?? 0;
+        var maxTeachers = plan?.MaxTeachers ?? 0;
+        var storageGb = plan?.StorageGB ?? 0;
+        var smsQuota = plan?.SMSQuota ?? 0;
+
+        // Create the Contract aggregate using Offer-derived commercial terms + Plan limits
         var contractResult = Contract.Create(
             id: Guid.NewGuid(),
             tenantId: tenantId,
@@ -84,7 +94,14 @@ public class CreateContractFromOfferHandler(
             promotionReference: offer.PromotionName,
             promotionId: offer.PromotionId,
             promotionType: offer.PromotionType,
-            chargedMonths: offer.ChargedMonths);
+            chargedMonths: offer.ChargedMonths,
+            bonusMonths: bonusMonths,
+            maxStudents: maxStudents,
+            maxUsers: maxUsers,
+            maxBranches: maxBranches,
+            maxTeachers: maxTeachers,
+            storageGb: storageGb,
+            smsQuota: smsQuota);
 
         if (!contractResult.IsSuccess)
             return contractResult.Errors!;
@@ -113,6 +130,25 @@ public class CreateContractFromOfferHandler(
                     return tierResult.Errors!;
 
                 contract.AddPricingTier(tierResult.Value);
+            }
+        }
+
+        // Snapshot feature entitlements from the Plan catalog into the Contract
+        if (plan is not null)
+        {
+            foreach (var pf in plan.PlanFeatures.Where(f => f.IsEnabled))
+            {
+                var feature = await dbContext.Features
+                    .AsNoTracking()
+                    .Where(f => f.Id == pf.FeatureId)
+                    .Select(f => f.Code)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                if (feature is not null)
+                {
+                    contract.AddContractFeature(
+                        ContractFeature.Create(contract.Id, feature));
+                }
             }
         }
 
