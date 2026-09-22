@@ -112,7 +112,28 @@ public class Task18FinalCommercialHardeningTests
             monthlyListPrice: plan.MonthlyPrice,
             currencyCode: "EGP",
             calculatedAtUtc: DateTime.UtcNow,
-            expiresAtUtc: DateTime.UtcNow.AddDays(1)).Value;
+            expiresAtUtc: DateTime.UtcNow.AddDays(1),
+            bonusMonths: plan.BonusMonths,
+            maxStudents: plan.MaxStudents,
+            maxUsers: plan.MaxUsers,
+            maxBranches: plan.MaxBranches,
+            maxTeachers: plan.MaxTeachers,
+            storageGb: plan.StorageGB,
+            smsQuota: plan.SMSQuota,
+            entitlementSnapshotVersion: Offer.CompleteEntitlementSnapshotVersion).Value;
+
+        // Mirror the production CalculateAndPersistOfferHandler: capture enabled
+        // Plan feature codes as immutable OfferFeature snapshot children.
+        var featureIds = plan.PlanFeatures.Where(f => f.IsEnabled).Select(f => f.FeatureId).ToList();
+        var featureCodes = db.Features.AsNoTracking()
+            .Where(f => featureIds.Contains(f.Id))
+            .Select(f => f.Code)
+            .ToList();
+        foreach (var code in featureCodes.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            offer.AddFeature(OfferFeature.Create(Guid.NewGuid(), offer.Id, code).Value);
+        }
+
         Assert.True(offer.Accept(DateTime.UtcNow).IsSuccess);
         db.Offers.Add(offer);
         db.StampAddedTenantIds(tenantId);

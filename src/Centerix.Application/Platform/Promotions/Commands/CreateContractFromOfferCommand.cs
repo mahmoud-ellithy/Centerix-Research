@@ -43,9 +43,12 @@ public class CreateContractFromOfferHandler(
         if (string.IsNullOrWhiteSpace(tenantId))
             return ContractErrors.TenantNotResolved;
 
-        // Load the offer with its benefits snapshot
+        // Load the offer with ALL its snapshot children — benefits, features, pricing tiers.
+        // These are the ONLY commercial/entitlement sources; the current Plan is never read.
         var offer = await dbContext.Offers
             .Include(o => o.Benefits)
+            .Include(o => o.Features)
+            .Include(o => o.PricingTiers)
             .FirstOrDefaultAsync(o => o.Id == request.OfferId, cancellationToken);
 
         if (offer is null)
@@ -59,32 +62,34 @@ public class CreateContractFromOfferHandler(
         if (!offer.IsConvertible)
             return OfferErrors.InvalidStateTransition(offer.Status, "convert to contract");
 
-        // Load plan for pricing tier snapshot, limits, and feature entitlements
-        var plan = await dbContext.Plans
-            .Include(p => p.PricingTiers)
-            .Include(p => p.PlanFeatures)
-            .FirstOrDefaultAsync(p => p.Id == offer.PlanId, cancellationToken);
-
-        if (plan is null)
-            return OfferErrors.PlanNotFound;
+        // The accepted Offer must be a complete commercial snapshot. Legacy
+        // (version-0) offers predate the full snapshot and CANNOT be safely
+        // converted — historical values are never fabricated from the current Plan.
+        if (!offer.HasCompleteEntitlementSnapshot)
+            return Error.Validation(
+                "Offer.IncompleteSnapshot",
+                $"Offer '{offer.Id}' does not carry a complete entitlement snapshot " +
+                $"(version {offer.EntitlementSnapshotVersion}, expected >= " +
+                $"{Offer.CompleteEntitlementSnapshotVersion}). It cannot be converted " +
+                "to a Contract; recalculate the Offer.");
 
         var utcNow = DateTime.UtcNow;
         var effectiveAt = request.EffectiveAtUtc ?? utcNow;
 
-        // Contract period must align with subscription period — sequential duration then bonus
+        // Contract period uses ONLY the Offer snapshot: DurationMonths + BonusMonths.
         // (identical semantics to TenantPlan's BaseEndsAtUtc → EffectiveEndsAt calculation).
-        var endsAt = TenantPlan.ComputeEffectiveEndsAtUtc(effectiveAt, offer.DurationMonths, plan.BonusMonths);
+        var endsAt = TenantPlan.ComputeEffectiveEndsAtUtc(effectiveAt, offer.DurationMonths, offer.BonusMonths);
 
-        // Resolve plan limits — fail if plan is missing (per prompt section #7)
-        var bonusMonths = plan.BonusMonths;
-        var maxStudents = plan.MaxStudents;
-        var maxUsers = plan.MaxUsers;
-        var maxBranches = plan.MaxBranches;
-        var maxTeachers = plan.MaxTeachers;
-        var storageGb = plan.StorageGB;
-        var smsQuota = plan.SMSQuota;
+        // Resolve entitlements — exclusively from the Offer snapshot
+        var bonusMonths = offer.BonusMonths;
+        var maxStudents = offer.MaxStudents;
+        var maxUsers = offer.MaxUsers;
+        var maxBranches = offer.MaxBranches;
+        var maxTeachers = offer.MaxTeachers;
+        var storageGb = offer.StorageGB;
+        var smsQuota = offer.SMSQuota;
 
-        // Create the Contract aggregate using Offer-derived commercial terms + Plan limits
+        // Create the Contract aggregate using ONLY Offer-derived commercial terms + Offer entitlements
         var contractResult = Contract.Create(
             id: Guid.NewGuid(),
             tenantId: tenantId,
@@ -121,22 +126,23 @@ public class CreateContractFromOfferHandler(
         if (!snapshotValidation.IsSuccess)
             return snapshotValidation.Errors!;
 
-        // Snapshot pricing tiers from the Plan catalog into the Contract
+        // Snapshot pricing tiers from the Offer snapshot into the Contract
+        // (historical tiers captured at Offer calculation time)
         {
             var seenDurations = new HashSet<int>();
-            foreach (var planTier in plan.PricingTiers.OrderBy(t => t.DisplayOrder))
+            foreach (var offerTier in offer.PricingTiers.OrderBy(t => t.DisplayOrder))
             {
-                if (!seenDurations.Add(planTier.DurationMonths))
+                if (!seenDurations.Add(offerTier.DurationMonths))
                     continue;
 
                 var tierResult = ContractPricingTier.Create(
                     id: Guid.NewGuid(),
                     contractId: contract.Id,
-                    durationMonths: planTier.DurationMonths,
-                    tierPrice: planTier.TierPrice,
+                    durationMonths: offerTier.DurationMonths,
+                    tierPrice: offerTier.TierPrice,
                     currencyCode: offer.CurrencyCode,
                     monthlyListPrice: offer.MonthlyListPrice,
-                    displayOrder: planTier.DisplayOrder);
+                    displayOrder: offerTier.DisplayOrder);
 
                 if (!tierResult.IsSuccess)
                     return tierResult.Errors!;
@@ -145,27 +151,21 @@ public class CreateContractFromOfferHandler(
             }
         }
 
-        // Snapshot feature entitlements from the Plan catalog into the Contract
-        if (plan is not null)
+        // Snapshot feature entitlements from the Offer snapshot into the Contract
         {
-            foreach (var pf in plan.PlanFeatures.Where(f => f.IsEnabled))
+            var seenCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var offerFeature in offer.Features)
             {
-                var feature = await dbContext.Features
-                    .AsNoTracking()
-                    .Where(f => f.Id == pf.FeatureId)
-                    .Select(f => f.Code)
-                    .FirstOrDefaultAsync(cancellationToken);
+                if (!seenCodes.Add(offerFeature.FeatureCode))
+                    continue;
 
-                if (feature is not null)
-                {
-                    var featureResult = ContractFeature.Create(contract.Id, feature);
-                    if (!featureResult.IsSuccess)
-                        return featureResult.Errors!;
+                var featureResult = ContractFeature.Create(contract.Id, offerFeature.FeatureCode);
+                if (!featureResult.IsSuccess)
+                    return featureResult.Errors!;
 
-                    var addFeatureResult = contract.AddContractFeature(featureResult.Value);
-                    if (!addFeatureResult.IsSuccess)
-                        return addFeatureResult.Errors!;
-                }
+                var addFeatureResult = contract.AddContractFeature(featureResult.Value);
+                if (!addFeatureResult.IsSuccess)
+                    return addFeatureResult.Errors!;
             }
         }
 

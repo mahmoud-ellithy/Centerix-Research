@@ -32,6 +32,7 @@ public class CalculateAndPersistOfferHandler(
 
         var plan = await dbContext.Plans
             .Include(p => p.PricingTiers)
+            .Include(p => p.PlanFeatures)
             .FirstOrDefaultAsync(p => p.Id == request.PlanId, cancellationToken);
 
         if (plan is null)
@@ -56,7 +57,21 @@ public class CalculateAndPersistOfferHandler(
 
         var calculated = offerResult.Value;
 
-        // Persist the Offer as an immutable snapshot
+        // Persist the Offer as an immutable snapshot.
+        // Plan IS authoritative at calculation time: all entitlement values,
+        // feature codes and pricing tiers are copied into the Offer here.
+        // AFTER this point the Offer is authoritative and Plan changes are irrelevant.
+        var featureIds = plan.PlanFeatures
+            .Where(f => f.IsEnabled)
+            .Select(f => f.FeatureId)
+            .ToList();
+
+        var featureCodes = await dbContext.Features
+            .AsNoTracking()
+            .Where(f => featureIds.Contains(f.Id))
+            .Select(f => f.Code)
+            .ToListAsync(cancellationToken);
+
         var offer = Domain.Platform.Promotions.Offer.Create(
             id: Guid.NewGuid(),
             tenantId: tenantId,
@@ -74,10 +89,43 @@ public class CalculateAndPersistOfferHandler(
             discountPercentage: calculated.DiscountPercentage,
             chargedMonths: calculated.ChargedMonths,
             calculatedAtUtc: calculated.CalculatedAtUtc,
-            expiresAtUtc: calculated.ExpiresAtUtc ?? calculated.CalculatedAtUtc.AddHours(24));
+            expiresAtUtc: calculated.ExpiresAtUtc ?? calculated.CalculatedAtUtc.AddHours(24),
+            bonusMonths: plan.BonusMonths,
+            maxStudents: plan.MaxStudents,
+            maxUsers: plan.MaxUsers,
+            maxBranches: plan.MaxBranches,
+            maxTeachers: plan.MaxTeachers,
+            storageGb: plan.StorageGB,
+            smsQuota: plan.SMSQuota,
+            entitlementSnapshotVersion: Domain.Platform.Promotions.Offer.CompleteEntitlementSnapshotVersion);
 
         if (!offer.IsSuccess)
             return offer.Errors!;
+
+        // Capture feature entitlements (immutable Offer-owned snapshot children)
+        foreach (var code in featureCodes.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var featureResult = OfferFeature.Create(Guid.NewGuid(), offer.Value.Id, code);
+            if (!featureResult.IsSuccess)
+                return featureResult.Errors!;
+
+            offer.Value.AddFeature(featureResult.Value);
+        }
+
+        // Capture historical pricing tiers (immutable Offer-owned snapshot children)
+        var seenDurations = new HashSet<int>();
+        foreach (var tier in plan.PricingTiers.OrderBy(t => t.DisplayOrder))
+        {
+            if (!seenDurations.Add(tier.DurationMonths))
+                continue;
+
+            var tierResult = OfferPricingTier.Create(
+                Guid.NewGuid(), offer.Value.Id, tier.DurationMonths, tier.TierPrice, tier.DisplayOrder);
+            if (!tierResult.IsSuccess)
+                return tierResult.Errors!;
+
+            offer.Value.AddPricingTier(tierResult.Value);
+        }
 
         dbContext.StampAddedTenantIds(tenantId);
         dbContext.Offers.Add(offer.Value);

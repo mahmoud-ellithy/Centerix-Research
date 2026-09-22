@@ -54,6 +54,34 @@ public class OfferConfiguration : IEntityTypeConfiguration<Offer>
             .HasMaxLength(3)
             .IsRequired();
 
+        // Entitlement snapshot (captured from the Plan at calculation time).
+        // Zero values are legitimate (e.g. BonusMonths = 0); snapshot completeness
+        // is expressed via EntitlementSnapshotVersion, never via numeric zeros.
+        builder.Property(o => o.BonusMonths)
+            .IsRequired();
+
+        builder.Property(o => o.MaxStudents)
+            .IsRequired();
+
+        builder.Property(o => o.MaxUsers)
+            .IsRequired();
+
+        builder.Property(o => o.MaxBranches)
+            .IsRequired();
+
+        builder.Property(o => o.MaxTeachers)
+            .IsRequired();
+
+        builder.Property(o => o.StorageGB)
+            .IsRequired();
+
+        builder.Property(o => o.SMSQuota)
+            .IsRequired();
+
+        builder.Property(o => o.EntitlementSnapshotVersion)
+            .IsRequired()
+            .HasDefaultValue(0);
+
         // Promotion snapshot
         builder.Property(o => o.PromotionId);
 

@@ -200,7 +200,9 @@ public class RenewSubscriptionOfferHandler(
 
             var calc = calculated.Value;
 
-            // ── Step 8: Persist the Offer as an immutable snapshot ──
+            // ── Step 8: Persist the Offer as an immutable snapshot.
+            // Plan IS authoritative at this moment: entitlement values and pricing
+            // tiers are captured into the Offer before acceptance.
             var offerResult = Offer.Create(
                 id: Guid.NewGuid(),
                 tenantId: oldSubscription.TenantId,
@@ -218,12 +220,35 @@ public class RenewSubscriptionOfferHandler(
                 discountPercentage: calc.DiscountPercentage,
                 chargedMonths: calc.ChargedMonths,
                 calculatedAtUtc: now,
-                expiresAtUtc: now.AddHours(24));
+                expiresAtUtc: now.AddHours(24),
+                bonusMonths: plan.BonusMonths,
+                maxStudents: plan.MaxStudents,
+                maxUsers: plan.MaxUsers,
+                maxBranches: plan.MaxBranches,
+                maxTeachers: plan.MaxTeachers,
+                storageGb: plan.StorageGB,
+                smsQuota: plan.SMSQuota,
+                entitlementSnapshotVersion: Offer.CompleteEntitlementSnapshotVersion);
 
             if (!offerResult.IsSuccess)
                 return offerResult.Errors!;
 
             var offer = offerResult.Value;
+
+            // Capture historical pricing tiers into the Offer snapshot
+            var offerSeenDurations = new HashSet<int>();
+            foreach (var planTier in plan.PricingTiers.OrderBy(t => t.DisplayOrder))
+            {
+                if (!offerSeenDurations.Add(planTier.DurationMonths))
+                    continue;
+
+                var offerTierResult = OfferPricingTier.Create(
+                    Guid.NewGuid(), offer.Id, planTier.DurationMonths, planTier.TierPrice, planTier.DisplayOrder);
+                if (!offerTierResult.IsSuccess)
+                    return offerTierResult.Errors!;
+
+                offer.AddPricingTier(offerTierResult.Value);
+            }
 
             var acceptResult = offer.Accept(now);
             if (!acceptResult.IsSuccess)
@@ -235,8 +260,8 @@ public class RenewSubscriptionOfferHandler(
             // For scheduled renewals, startsAt == oldSubscription.EffectiveEndsAtUtc,
             // so the new Contract does not start during the old service period.
             var effectiveAt = startsAt;
-            // Contract period must align with subscription period — sequential duration then bonus
-            var endsAt = TenantPlan.ComputeEffectiveEndsAtUtc(startsAt, durationMonths, plan.BonusMonths);
+            // Contract period uses the Offer snapshot: DurationMonths + BonusMonths
+            var endsAt = TenantPlan.ComputeEffectiveEndsAtUtc(startsAt, offer.DurationMonths, offer.BonusMonths);
 
             var contractResult = Contract.Create(
                 id: Guid.NewGuid(),
@@ -256,13 +281,13 @@ public class RenewSubscriptionOfferHandler(
                 promotionId: calc.PromotionId,
                 promotionType: calc.PromotionType,
                 chargedMonths: calc.ChargedMonths,
-                bonusMonths: plan.BonusMonths,
-                maxStudents: plan.MaxStudents,
-                maxUsers: plan.MaxUsers,
-                maxBranches: plan.MaxBranches,
-                maxTeachers: plan.MaxTeachers,
-                storageGb: plan.StorageGB,
-                smsQuota: plan.SMSQuota);
+                bonusMonths: offer.BonusMonths,
+                maxStudents: offer.MaxStudents,
+                maxUsers: offer.MaxUsers,
+                maxBranches: offer.MaxBranches,
+                maxTeachers: offer.MaxTeachers,
+                storageGb: offer.StorageGB,
+                smsQuota: offer.SMSQuota);
 
             if (!contractResult.IsSuccess)
                 return contractResult.Errors!;
@@ -276,21 +301,21 @@ public class RenewSubscriptionOfferHandler(
 
             contract.LinkToPreviousSubscription(oldSubscription.Id);
 
-            // Snapshot pricing tiers from the Plan catalog into the Contract
+            // Snapshot pricing tiers from the Offer snapshot into the Contract
             var seenDurations = new HashSet<int>();
-            foreach (var planTier in plan.PricingTiers.OrderBy(t => t.DisplayOrder))
+            foreach (var offerTier in offer.PricingTiers.OrderBy(t => t.DisplayOrder))
             {
-                if (!seenDurations.Add(planTier.DurationMonths))
+                if (!seenDurations.Add(offerTier.DurationMonths))
                     continue;
 
                 var tierResult = ContractPricingTier.Create(
                     id: Guid.NewGuid(),
                     contractId: contract.Id,
-                    durationMonths: planTier.DurationMonths,
-                    tierPrice: planTier.TierPrice,
-                    currencyCode: calc.CurrencyCode,
-                    monthlyListPrice: calc.MonthlyListPrice,
-                    displayOrder: planTier.DisplayOrder);
+                    durationMonths: offerTier.DurationMonths,
+                    tierPrice: offerTier.TierPrice,
+                    currencyCode: offer.CurrencyCode,
+                    monthlyListPrice: offer.MonthlyListPrice,
+                    displayOrder: offerTier.DisplayOrder);
 
                 if (!tierResult.IsSuccess)
                     return tierResult.Errors!;

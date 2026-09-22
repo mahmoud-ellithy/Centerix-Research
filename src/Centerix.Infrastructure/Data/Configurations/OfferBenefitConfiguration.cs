@@ -43,3 +43,61 @@ public class OfferBenefitConfiguration : IEntityTypeConfiguration<OfferBenefit>
             .HasDatabaseName("IX_OfferBenefits_OfferId");
     }
 }
+
+/// <summary>
+/// EF Core configuration for OfferFeature entity.
+/// Immutable snapshot of feature entitlements attached to an Offer, used as the
+/// authoritative source when creating a Contract from an Accepted Offer.
+/// </summary>
+public class OfferFeatureConfiguration : IEntityTypeConfiguration<OfferFeature>
+{
+    public void Configure(EntityTypeBuilder<OfferFeature> builder)
+    {
+        builder.ToTable("OfferFeatures", "Platform");
+
+        builder.HasKey(f => f.Id);
+
+        builder.Property(f => f.OfferId)
+            .IsRequired();
+
+        builder.Property(f => f.FeatureCode)
+            .HasMaxLength(100)
+            .IsRequired();
+
+        builder.HasIndex(f => f.OfferId)
+            .HasDatabaseName("IX_OfferFeatures_OfferId");
+
+        builder.HasIndex(f => new { f.OfferId, f.FeatureCode })
+            .HasDatabaseName("IX_OfferFeatures_OfferId_FeatureCode");
+    }
+}
+
+/// <summary>
+/// EF Core configuration for OfferPricingTier entity.
+/// Immutable snapshot of pricing tiers attached to an Offer, used as the
+/// authoritative source for refund/repricing calculations.
+/// </summary>
+public class OfferPricingTierConfiguration : IEntityTypeConfiguration<OfferPricingTier>
+{
+    public void Configure(EntityTypeBuilder<OfferPricingTier> builder)
+    {
+        builder.ToTable("OfferPricingTiers", "Platform");
+
+        builder.HasKey(t => t.Id);
+
+        builder.Property(t => t.OfferId)
+            .IsRequired();
+
+        builder.Property(t => t.DurationMonths)
+            .IsRequired();
+
+        builder.Property(t => t.TierPrice)
+            .HasPrecision(18, 2)
+            .IsRequired();
+
+        builder.Property(t => t.DisplayOrder);
+
+        builder.HasIndex(t => t.OfferId)
+            .HasDatabaseName("IX_OfferPricingTiers_OfferId");
+    }
+}
