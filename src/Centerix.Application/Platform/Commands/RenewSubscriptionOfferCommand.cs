@@ -164,7 +164,7 @@ public class RenewSubscriptionOfferHandler(
                 ? oldSubscription.EffectiveEndsAtUtc
                 : now;
 
-            var newEffectiveEndsAt = TenantPlan.AddCalendarMonths(startsAt, durationMonths + plan.BonusMonths);
+            var newEffectiveEndsAt = TenantPlan.ComputeEffectiveEndsAtUtc(startsAt, durationMonths, plan.BonusMonths);
 
             // ── Step 6: Temporal overlap guard ──
             // Reject if any non-terminal subscription for this tenant has a service period
@@ -235,8 +235,8 @@ public class RenewSubscriptionOfferHandler(
             // For scheduled renewals, startsAt == oldSubscription.EffectiveEndsAtUtc,
             // so the new Contract does not start during the old service period.
             var effectiveAt = startsAt;
-            // Contract period must align with subscription period: endsAt = startsAt + DurationMonths + BonusMonths
-            var endsAt = TenantPlan.AddCalendarMonths(startsAt, durationMonths + plan.BonusMonths);
+            // Contract period must align with subscription period — sequential duration then bonus
+            var endsAt = TenantPlan.ComputeEffectiveEndsAtUtc(startsAt, durationMonths, plan.BonusMonths);
 
             var contractResult = Contract.Create(
                 id: Guid.NewGuid(),
@@ -250,6 +250,7 @@ public class RenewSubscriptionOfferHandler(
                 contractualMonthlyValue: calc.MonthlyListPrice,
                 currencyCode: calc.CurrencyCode,
                 contractedAmount: calc.FinalAmount,
+                entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
                 discountAmount: calc.DiscountAmount,
                 promotionReference: calc.PromotionName,
                 promotionId: calc.PromotionId,
@@ -308,8 +309,13 @@ public class RenewSubscriptionOfferHandler(
 
                 if (feature is not null)
                 {
-                    contract.AddContractFeature(
-                        ContractFeature.Create(contract.Id, feature));
+                    var featureResult = ContractFeature.Create(contract.Id, feature);
+                    if (!featureResult.IsSuccess)
+                        return featureResult.Errors!;
+
+                    var addFeatureResult = contract.AddContractFeature(featureResult.Value);
+                    if (!addFeatureResult.IsSuccess)
+                        return addFeatureResult.Errors!;
                 }
             }
 

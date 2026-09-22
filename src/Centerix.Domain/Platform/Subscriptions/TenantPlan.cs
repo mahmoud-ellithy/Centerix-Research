@@ -128,6 +128,16 @@ public class TenantPlan : AuditableEntity<Guid>
     }
 
     /// <summary>
+    /// AUTHORITATIVE contract/subscription period end calculation: calendar-month addition of
+    /// duration first, then bonus (matching BaseEndsAtUtc → EffectiveEndsAt semantics exactly).
+    /// All Contract ends-date computations and overlap guards MUST use this helper so
+    /// Contract.EndsAtUtc and Subscription.EffectiveEndsAtUtc cannot diverge — e.g.
+    /// Jan 31 + 1 month + 1 month ≠ Jan 31 + 2 months when computed in one step.
+    /// </summary>
+    public static DateTime ComputeEffectiveEndsAtUtc(DateTime startsAtUtc, int durationMonths, int bonusMonths)
+        => AddCalendarMonths(AddCalendarMonths(startsAtUtc, durationMonths), bonusMonths);
+
+    /// <summary>
     /// Creates a PENDING subscription carrying the exact commercial terms to be granted.
     /// Calendar-month semantics are used throughout (never 30-day approximations):
     /// Jan 31 + 1 month = Feb 28/29, exactly like billing systems expect.

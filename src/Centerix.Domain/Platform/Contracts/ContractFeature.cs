@@ -1,6 +1,7 @@
 namespace Centerix.Domain.Platform.Contracts;
 
 using Centerix.Domain.Common;
+using Centerix.Domain.Common.Results;
 
 /// <summary>
 /// Immutable per-contract FEATURE ENTITLEMENT snapshot. Codes are copied from the plan's
@@ -23,12 +24,15 @@ public class ContractFeature : GlobalAuditableEntity<Guid>
         FeatureCode = featureCode;
     }
 
-    public static ContractFeature Create(Guid contractId, string featureCode)
+    /// <summary>
+    /// Creates a normalized feature entitlement snapshot (trimmed, upper-invariant code).
+    /// </summary>
+    public static Result<ContractFeature> Create(Guid contractId, string featureCode)
     {
         var trimmed = featureCode?.Trim();
         if (string.IsNullOrWhiteSpace(trimmed))
-            throw new ArgumentException("FeatureCode must not be null, empty, or whitespace.", nameof(featureCode));
+            return ContractErrors.FeatureCodeRequired;
 
-        return new(Guid.NewGuid(), contractId, trimmed.ToUpperInvariant());
+        return new ContractFeature(Guid.NewGuid(), contractId, trimmed.ToUpperInvariant());
     }
 }

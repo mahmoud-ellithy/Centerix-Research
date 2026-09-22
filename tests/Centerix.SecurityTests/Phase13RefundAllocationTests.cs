@@ -63,7 +63,7 @@ public class Phase13RefundAllocationTests
             monthlyListPrice: 1000m,
             contractualMonthlyValue: 1000m,
             currencyCode: currencyCode,
-            contractedAmount: 12000m);
+            contractedAmount: 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.True(result.IsSuccess);
         var contract = result.Value;

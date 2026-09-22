@@ -207,7 +207,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             maxBranches: 10,
             maxTeachers: 20,
             storageGb: 100,
-            smsQuota: 1000).Value;
+            smsQuota: 1000, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         contract.Activate(UtcNow);
         db.Contracts.Add(contract);
@@ -259,7 +259,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             contractualMonthlyValue: 800m,
             currencyCode: "EGP",
             contractedAmount: 9600m,
-            discountAmount: 0).Value;
+            discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         // Create Subscription from Contract (F-01 fix: uses Contract terms)
         var subscription = TenantPlan.Create(
@@ -301,7 +301,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             contractualMonthlyValue: 80m,
             currencyCode: "EGP",
             contractedAmount: 480m,
-            discountAmount: 0).Value;
+            discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         var subscription = TenantPlan.Create(
             Guid.NewGuid(), "tenant-1", plan.Id,
@@ -332,7 +332,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             currencyCode: "EGP",
             contractedAmount: 3000m,
             discountAmount: 0,
-            chargedMonths: 5).Value;
+            chargedMonths: 5, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         Assert.Equal(6, contract.DurationMonths);
         Assert.Equal(5, contract.ChargedMonths);
@@ -382,9 +382,9 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             maxBranches: 3,
             maxTeachers: 8,
             storageGb: 25,
-            smsQuota: 250).Value;
-        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEAT-X"));
-        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEAT-Y"));
+            smsQuota: 250, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEAT-X").Value);
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEAT-Y").Value);
         contract.Activate(UtcNow);
         db.Contracts.Add(contract);
         await db.SaveChangesAsync();
@@ -443,7 +443,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             contractualMonthlyValue: 400m,
             currencyCode: "EGP",
             contractedAmount: 2400m,
-            discountAmount: 0).Value;
+            discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         var subscription = TenantPlan.Create(
             Guid.NewGuid(), "tenant-1", plan.Id,
@@ -479,7 +479,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             Guid.NewGuid(), tenantId, "CTR-TA-VIEW",
             planId: 1, effectiveAtUtc: UtcNow, endsAtUtc: UtcNow.AddMonths(12),
             durationMonths: 12, monthlyListPrice: 1000m, contractualMonthlyValue: 1000m,
-            currencyCode: "EGP", contractedAmount: 12000m).Value;
+            currencyCode: "EGP", contractedAmount: 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
         db.Contracts.Add(contract);
         await db.SaveChangesAsync();
 
@@ -669,7 +669,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             Guid.NewGuid(), tenantIdA, "CTR-CT-A",
             planId: 1, effectiveAtUtc: UtcNow, endsAtUtc: UtcNow.AddMonths(12),
             durationMonths: 12, monthlyListPrice: 1000m, contractualMonthlyValue: 1000m,
-            currencyCode: "EGP", contractedAmount: 12000m).Value;
+            currencyCode: "EGP", contractedAmount: 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
         db.Contracts.Add(contract);
         await db.SaveChangesAsync();
 
@@ -756,7 +756,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
             contractedAmount: 12000m,
-            discountAmount: 0).Value;
+            discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         // 4 months elapsed
         var elapsedMonths = contract.GetElapsedMonths(UtcNow.AddMonths(4));
@@ -883,7 +883,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             maxBranches: 5,
             maxTeachers: 10,
             storageGb: 50,
-            smsQuota: 500).Value;
+            smsQuota: 500, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         Assert.Equal(2, contract.BonusMonths);
         Assert.Equal(50, contract.MaxStudents);
@@ -914,11 +914,11 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             maxBranches: 3,
             maxTeachers: 8,
             storageGb: 40,
-            smsQuota: 400).Value;
+            smsQuota: 400, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         // Add contract features
-        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEATURE-A"));
-        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEATURE-B"));
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEATURE-A").Value);
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEATURE-B").Value);
 
         var snapshot = contract.GetSubscriptionSnapshot();
 
@@ -959,7 +959,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             maxBranches: 5,
             maxTeachers: 10,
             storageGb: 50,
-            smsQuota: 500).Value;
+            smsQuota: 500, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         // Mutate the plan AFTER contract creation
         plan.Update(plan.Code, plan.DisplayName, plan.MonthlyPrice,
@@ -991,10 +991,10 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
             contractedAmount: 12000m,
-            discountAmount: 0).Value;
+            discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
-        contract.AddContractFeature(ContractFeature.Create(contract.Id, "F-A"));
-        contract.AddContractFeature(ContractFeature.Create(contract.Id, "F-B"));
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "F-A").Value);
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "F-B").Value);
 
         var snapshot = contract.GetSubscriptionSnapshot();
 
@@ -1030,10 +1030,10 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             maxBranches: 5,
             maxTeachers: 10,
             storageGb: 50,
-            smsQuota: 500).Value;
+            smsQuota: 500, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
-        contract.AddContractFeature(ContractFeature.Create(contract.Id, "F-REG-A"));
-        contract.AddContractFeature(ContractFeature.Create(contract.Id, "F-REG-B"));
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "F-REG-A").Value);
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "F-REG-B").Value);
 
         // Simulate what CreateSubscriptionFromContractHandler does
         var snapshot = contract.GetSubscriptionSnapshot();
@@ -1079,7 +1079,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
             contractedAmount: 12000m,
-            discountAmount: 0).Value;
+            discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
         contract.Activate(UtcNow);
         db.Contracts.Add(contract);
         db.StampAddedTenantIds(env.TenantId);
@@ -1204,7 +1204,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
             contractedAmount: 12000m,
-            discountAmount: 0).Value;
+            discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
         contract.Activate(UtcNow);
         db.Contracts.Add(contract);
         db.StampAddedTenantIds(env.TenantId);
@@ -1340,7 +1340,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             maxBranches: 5,
             maxTeachers: 10,
             storageGb: 50,
-            smsQuota: 500).Value;
+            smsQuota: 500, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         // Mutate plan
         plan.Update(plan.Code, plan.DisplayName, plan.MonthlyPrice,
@@ -1372,7 +1372,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             contractualMonthlyValue: 800m,
             currencyCode: "EGP",
             contractedAmount: 9600m,
-            discountAmount: 0).Value;
+            discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         // Deactivate plan
         plan.Deactivate();
@@ -1396,7 +1396,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
             contractedAmount: 12000m,
-            discountAmount: 0).Value;
+            discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         Assert.Equal(0, contract.BonusMonths);
         Assert.Equal(0, contract.MaxStudents);
@@ -1525,11 +1525,11 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             maxBranches: 5,
             maxTeachers: 10,
             storageGb: 50,
-            smsQuota: 500).Value;
+            smsQuota: 500, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
-        contract.AddContractFeature(ContractFeature.Create(contract.Id, "DASHBOARDS"));
-        contract.AddContractFeature(ContractFeature.Create(contract.Id, "REPORTS"));
-        contract.AddContractFeature(ContractFeature.Create(contract.Id, "API_ACCESS"));
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "DASHBOARDS").Value);
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "REPORTS").Value);
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "API_ACCESS").Value);
 
         var snapshot = contract.GetSubscriptionSnapshot();
 
@@ -1590,9 +1590,9 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             maxBranches: 3,
             maxTeachers: 8,
             storageGb: 25,
-            smsQuota: 250).Value;
-        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEAT-A"));
-        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEAT-B"));
+            smsQuota: 250, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEAT-A").Value);
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEAT-B").Value);
         contract.Activate(UtcNow);
         db.Contracts.Add(contract);
         await db.SaveChangesAsync();
@@ -1641,7 +1641,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             currencyCode: "EGP",
             contractedAmount: 3000m,
             discountAmount: 0,
-            bonusMonths: 2).Value;
+            bonusMonths: 2, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         var snapshot = contract.GetSubscriptionSnapshot();
         Assert.Equal(2, snapshot.BonusMonths);
@@ -1670,11 +1670,11 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             contractualMonthlyValue: 500m,
             currencyCode: "EGP",
             contractedAmount: 3000m,
-            discountAmount: 0).Value;
+            discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
-        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEAT-1"));
-        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEAT-2"));
-        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEAT-3"));
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEAT-1").Value);
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEAT-2").Value);
+        contract.AddContractFeature(ContractFeature.Create(contract.Id, "FEAT-3").Value);
 
         var snapshot = contract.GetSubscriptionSnapshot();
         Assert.Equal(3, snapshot.FeatureCodes.Count);
@@ -1706,7 +1706,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
             contractedAmount: 12000m,
-            discountAmount: 0).Value;
+            discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         var result = contract.ValidateSnapshotCompleteness();
         Assert.True(result.IsSuccess);
@@ -1913,7 +1913,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             maxBranches: plan.MaxBranches,
             maxTeachers: plan.MaxTeachers,
             storageGb: plan.StorageGB,
-            smsQuota: plan.SMSQuota);
+            smsQuota: plan.SMSQuota, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.True(contractResult.IsSuccess);
         var contract = contractResult.Value;
@@ -1927,7 +1927,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
                 .FirstOrDefaultAsync();
 
             if (feature is not null)
-                contract.AddContractFeature(ContractFeature.Create(contract.Id, feature));
+                contract.AddContractFeature(ContractFeature.Create(contract.Id, feature).Value);
         }
 
         Assert.Equal(1, contract.BonusMonths);

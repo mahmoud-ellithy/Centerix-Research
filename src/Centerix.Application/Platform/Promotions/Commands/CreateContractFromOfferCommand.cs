@@ -5,6 +5,7 @@ using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Contracts.Enums;
 using Centerix.Domain.Platform.Promotions;
+using Centerix.Domain.Platform.Subscriptions;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
@@ -70,8 +71,9 @@ public class CreateContractFromOfferHandler(
         var utcNow = DateTime.UtcNow;
         var effectiveAt = request.EffectiveAtUtc ?? utcNow;
 
-        // Contract period must align with subscription period: endsAt = effectiveAt + DurationMonths + BonusMonths
-        var endsAt = effectiveAt.AddMonths(offer.DurationMonths + plan.BonusMonths);
+        // Contract period must align with subscription period — sequential duration then bonus
+        // (identical semantics to TenantPlan's BaseEndsAtUtc → EffectiveEndsAt calculation).
+        var endsAt = TenantPlan.ComputeEffectiveEndsAtUtc(effectiveAt, offer.DurationMonths, plan.BonusMonths);
 
         // Resolve plan limits — fail if plan is missing (per prompt section #7)
         var bonusMonths = plan.BonusMonths;
@@ -95,6 +97,7 @@ public class CreateContractFromOfferHandler(
             contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode,
             contractedAmount: offer.FinalAmount,
+            entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
             discountAmount: offer.DiscountAmount,
             promotionReference: offer.PromotionName,
             promotionId: offer.PromotionId,
@@ -155,8 +158,13 @@ public class CreateContractFromOfferHandler(
 
                 if (feature is not null)
                 {
-                    contract.AddContractFeature(
-                        ContractFeature.Create(contract.Id, feature));
+                    var featureResult = ContractFeature.Create(contract.Id, feature);
+                    if (!featureResult.IsSuccess)
+                        return featureResult.Errors!;
+
+                    var addFeatureResult = contract.AddContractFeature(featureResult.Value);
+                    if (!addFeatureResult.IsSuccess)
+                        return addFeatureResult.Errors!;
                 }
             }
         }

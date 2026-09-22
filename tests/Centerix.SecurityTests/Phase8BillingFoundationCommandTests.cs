@@ -67,20 +67,25 @@ public class Phase8BillingFoundationCommandTests
     private static Contract CreateValidContract(
         string tenantId = "tenant-1",
         int planId = 1,
-        ContractStatus status = ContractStatus.Active)
+        ContractStatus status = ContractStatus.Active,
+        DateTime? effectiveAtUtc = null,
+        DateTime? endsAtUtc = null)
     {
+        var effective = effectiveAtUtc ?? new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var ends = endsAtUtc ?? new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
         var result = Contract.Create(
             id: Guid.NewGuid(),
             tenantId: tenantId,
             contractNumber: "CNT-" + Guid.NewGuid().ToString("N")[..8],
             planId: planId,
-            effectiveAtUtc: new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            endsAtUtc: new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            effectiveAtUtc: effective,
+            endsAtUtc: ends,
             durationMonths: 12,
             monthlyListPrice: 1000m,
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
-            contractedAmount: 12000m);
+            contractedAmount: 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.True(result.IsSuccess);
         var contract = result.Value;
@@ -94,6 +99,26 @@ public class Phase8BillingFoundationCommandTests
         }
 
         return contract;
+    }
+
+    private static (CreateSubscriptionFromContractHandler Handler, ISubscriptionFactory Factory, TimeProvider TimeProvider)
+        CreateSubscriptionHandler(AppDbContext dbContext)
+    {
+        var platformAdminGuard = Substitute.For<IPlatformAdminGuard>();
+        platformAdminGuard.EnsurePlatformAdmin().Returns(Result.Updated);
+
+        var subscriptionFactory = Substitute.For<ISubscriptionFactory>();
+        var auditWriter = Substitute.For<IAuditWriter>();
+        var timeProvider = Substitute.For<TimeProvider>();
+
+        var handler = new CreateSubscriptionFromContractHandler(
+            dbContext,
+            platformAdminGuard,
+            subscriptionFactory,
+            auditWriter,
+            timeProvider);
+
+        return (handler, subscriptionFactory, timeProvider);
     }
 
     private static BillingCycle CreateValidBillingCycle(
@@ -355,5 +380,167 @@ public class Phase8BillingFoundationCommandTests
         // Assert
         Assert.False(result.IsSuccess);
         Assert.Equal("Auth.Forbidden", result.Errors![0].Code);
+    }
+
+    // ------------------------------------------------------------------
+    // #4 Start alignment: subscription MUST start at contract.EffectiveAtUtc,
+    // never at wall-clock "now". Activation follows renewal semantics.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task CreateSubscriptionFromContract_HistoricalContract_StartsAtEffectiveDate_Activates()
+    {
+        // Arrange: effective in the past relative to controlled "now"
+        var tenantId = "tenant-1";
+        var now = new DateTime(2026, 1, 15, 0, 0, 0, DateTimeKind.Utc);
+        var effective = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var ends = new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        var dbContext = CreateDbContext(tenantId);
+        dbContext.StampAddedTenantIds(tenantId);
+
+        var plan = CreateValidPlan();
+        dbContext.Plans.Add(plan);
+        await dbContext.SaveChangesAsync();
+
+        var contract = CreateValidContract(
+            tenantId, plan.Id, ContractStatus.Active,
+            effectiveAtUtc: effective, endsAtUtc: ends);
+        dbContext.Contracts.Add(contract);
+        await dbContext.SaveChangesAsync();
+
+        var (handler, subscriptionFactory, timeProvider) = CreateSubscriptionHandler(dbContext);
+        timeProvider.GetUtcNow().Returns(new DateTimeOffset(now));
+
+        var mockSubscription = TenantPlan.Create(
+            Guid.NewGuid(), tenantId, plan.Id,
+            plan.MonthlyPrice, plan.CurrencyCode,
+            plan.DurationMonths, plan.BonusMonths,
+            startsAtUtc: effective).Value;
+        subscriptionFactory.CreateFromSnapshotAsync(
+                Arg.Any<string>(), Arg.Any<int>(), Arg.Any<SubscriptionSnapshot>(),
+                Arg.Any<DateTime>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<Result<TenantPlan>>(mockSubscription));
+
+        // Act
+        var result = await handler.Handle(
+            new CreateSubscriptionFromContractCommand(contract.Id), CancellationToken.None);
+
+        // Assert: startsAtUtc is the contract's effective date, NOT wall-clock now
+        Assert.True(result.IsSuccess);
+        await subscriptionFactory.Received(1).CreateFromSnapshotAsync(
+            tenantId,
+            plan.Id,
+            Arg.Any<SubscriptionSnapshot>(),
+            startsAtUtc: effective,
+            autoRenew: false,
+            activate: true,
+            Arg.Any<CancellationToken>());
+        Assert.NotEqual(now, effective); // wall clock must not be the start
+        Assert.Equal(contract.EffectiveAtUtc, effective);
+    }
+
+    [Fact]
+    public async Task CreateSubscriptionFromContract_FutureDatedContract_StartsAtEffectiveDate_StaysPending()
+    {
+        // Arrange: effective in the future relative to controlled "now"
+        var tenantId = "tenant-1";
+        var now = new DateTime(2026, 1, 15, 0, 0, 0, DateTimeKind.Utc);
+        var effective = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+        var ends = new DateTime(2027, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        var dbContext = CreateDbContext(tenantId);
+        dbContext.StampAddedTenantIds(tenantId);
+
+        var plan = CreateValidPlan();
+        dbContext.Plans.Add(plan);
+        await dbContext.SaveChangesAsync();
+
+        var contract = CreateValidContract(
+            tenantId, plan.Id, ContractStatus.Active,
+            effectiveAtUtc: effective, endsAtUtc: ends);
+        dbContext.Contracts.Add(contract);
+        await dbContext.SaveChangesAsync();
+
+        var (handler, subscriptionFactory, timeProvider) = CreateSubscriptionHandler(dbContext);
+        timeProvider.GetUtcNow().Returns(new DateTimeOffset(now));
+
+        var mockSubscription = TenantPlan.Create(
+            Guid.NewGuid(), tenantId, plan.Id,
+            plan.MonthlyPrice, plan.CurrencyCode,
+            plan.DurationMonths, plan.BonusMonths,
+            startsAtUtc: effective).Value;
+        subscriptionFactory.CreateFromSnapshotAsync(
+                Arg.Any<string>(), Arg.Any<int>(), Arg.Any<SubscriptionSnapshot>(),
+                Arg.Any<DateTime>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<Result<TenantPlan>>(mockSubscription));
+
+        // Act
+        var result = await handler.Handle(
+            new CreateSubscriptionFromContractCommand(contract.Id), CancellationToken.None);
+
+        // Assert: starts at effective date; activate=false (Pending) because effective > now
+        Assert.True(result.IsSuccess);
+        await subscriptionFactory.Received(1).CreateFromSnapshotAsync(
+            tenantId,
+            plan.Id,
+            Arg.Any<SubscriptionSnapshot>(),
+            startsAtUtc: effective,
+            autoRenew: false,
+            activate: false,
+            Arg.Any<CancellationToken>());
+        Assert.NotEqual(now, contract.EffectiveAtUtc);
+    }
+
+    [Fact]
+    public async Task CreateSubscriptionFromContract_ImmediateContract_StartsAtEffectiveDate_Activates()
+    {
+        // Arrange: effective == now (same instant)
+        var tenantId = "tenant-1";
+        var now = new DateTime(2026, 1, 15, 0, 0, 0, DateTimeKind.Utc);
+        var effective = now;
+        var ends = new DateTime(2027, 1, 15, 0, 0, 0, DateTimeKind.Utc);
+
+        var dbContext = CreateDbContext(tenantId);
+        dbContext.StampAddedTenantIds(tenantId);
+
+        var plan = CreateValidPlan();
+        dbContext.Plans.Add(plan);
+        await dbContext.SaveChangesAsync();
+
+        var contract = CreateValidContract(
+            tenantId, plan.Id, ContractStatus.Active,
+            effectiveAtUtc: effective, endsAtUtc: ends);
+        dbContext.Contracts.Add(contract);
+        await dbContext.SaveChangesAsync();
+
+        var (handler, subscriptionFactory, timeProvider) = CreateSubscriptionHandler(dbContext);
+        timeProvider.GetUtcNow().Returns(new DateTimeOffset(now));
+
+        var mockSubscription = TenantPlan.Create(
+            Guid.NewGuid(), tenantId, plan.Id,
+            plan.MonthlyPrice, plan.CurrencyCode,
+            plan.DurationMonths, plan.BonusMonths,
+            startsAtUtc: effective).Value;
+        subscriptionFactory.CreateFromSnapshotAsync(
+                Arg.Any<string>(), Arg.Any<int>(), Arg.Any<SubscriptionSnapshot>(),
+                Arg.Any<DateTime>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<Result<TenantPlan>>(mockSubscription));
+
+        // Act
+        var result = await handler.Handle(
+            new CreateSubscriptionFromContractCommand(contract.Id), CancellationToken.None);
+
+        // Assert: starts at effective date; activate=true because effective <= now
+        Assert.True(result.IsSuccess);
+        await subscriptionFactory.Received(1).CreateFromSnapshotAsync(
+            tenantId,
+            plan.Id,
+            Arg.Any<SubscriptionSnapshot>(),
+            startsAtUtc: effective,
+            autoRenew: false,
+            activate: true,
+            Arg.Any<CancellationToken>());
+        Assert.Equal(contract.EffectiveAtUtc, now);
     }
 }

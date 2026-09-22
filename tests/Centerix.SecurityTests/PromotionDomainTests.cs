@@ -4,6 +4,7 @@ using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Plans;
 using Centerix.Domain.Platform.Promotions;
 using Centerix.Domain.Platform.Promotions.Enums;
+using Contracts = Centerix.Domain.Platform.Contracts.Contract;
 using Xunit;
 
 /// <summary>
@@ -725,7 +726,7 @@ public class PromotionDomainTests
             promotionReference: offer.PromotionName,
             promotionId: offer.PromotionId,
             promotionType: offer.PromotionType,
-            chargedMonths: offer.ChargedMonths);
+            chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contracts.CompleteEntitlementSnapshotVersion);
 
         Assert.True(contractResult.IsSuccess);
         var contract = contractResult.Value;

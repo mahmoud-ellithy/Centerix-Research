@@ -81,7 +81,7 @@ public class Phase9_4_2CancellationConcurrencySqlServerTests
             Guid.NewGuid(), tenantId, "CNT-" + Guid.NewGuid().ToString("N")[..8], 1,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(months),
-            months, monthly, monthly, "EGP", monthly * months);
+            months, monthly, monthly, "EGP", monthly * months, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
         if (!contractResult.IsSuccess) throw new InvalidOperationException($"Contract creation failed: {string.Join(", ", contractResult.Errors.Select(e => e.Description))}");
         var contract = contractResult.Value;
         contract.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contract.Id, 1, monthly, "EGP", monthly, 1).Value);

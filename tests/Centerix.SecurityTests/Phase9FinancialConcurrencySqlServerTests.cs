@@ -1317,7 +1317,7 @@ public class Phase9FinancialConcurrencySqlServerTests
             var contractA = Contract.Create(
                 Guid.NewGuid(), tenantId, "CNT-A-ISOLATION", 1,
                 effectiveAt, effectiveAt.AddMonths(12), 12,
-                1000m, 1000m, "EGP", 10000m, 0, null).Value;
+                1000m, 1000m, "EGP", 10000m,Contract.CompleteEntitlementSnapshotVersion,  0, null).Value;
             contractA.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contractA.Id, 6, 5220m, "EGP", 1000m, 1).Value);
             contractA.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contractA.Id, 12, 10000m, "EGP", 1000m, 2).Value);
             db.Contracts.Add(contractA);
@@ -1327,7 +1327,7 @@ public class Phase9FinancialConcurrencySqlServerTests
             var contractB = Contract.Create(
                 Guid.NewGuid(), tenantId, "CNT-B-ISOLATION", 1,
                 effectiveAt, effectiveAt.AddMonths(12), 12,
-                500m, 500m, "EGP", 5000m, 0, null).Value;
+                500m, 500m, "EGP", 5000m,Contract.CompleteEntitlementSnapshotVersion,  0, null).Value;
             contractB.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contractB.Id, 6, 2610m, "EGP", 500m, 1).Value);
             contractB.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contractB.Id, 12, 5000m, "EGP", 500m, 2).Value);
             db.Contracts.Add(contractB);
@@ -1447,7 +1447,7 @@ public class Phase9FinancialConcurrencySqlServerTests
             var contractA = Contract.Create(
                 Guid.NewGuid(), tenantId, "CNT-A-SHARED-P0", 1,
                 effectiveAt, effectiveAt.AddMonths(12), 12,
-                1000m, 1000m, "EGP", 10000m, 0, null).Value;
+                1000m, 1000m, "EGP", 10000m,Contract.CompleteEntitlementSnapshotVersion,  0, null).Value;
             contractA.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contractA.Id, 6, 5220m, "EGP", 1000m, 1).Value);
             contractA.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contractA.Id, 12, 10000m, "EGP", 1000m, 2).Value);
             db.Contracts.Add(contractA);
@@ -1457,7 +1457,7 @@ public class Phase9FinancialConcurrencySqlServerTests
             var contractB = Contract.Create(
                 Guid.NewGuid(), tenantId, "CNT-B-SHARED-P0", 1,
                 effectiveAt, effectiveAt.AddMonths(12), 12,
-                500m, 500m, "EGP", 5000m, 0, null).Value;
+                500m, 500m, "EGP", 5000m,Contract.CompleteEntitlementSnapshotVersion,  0, null).Value;
             contractB.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contractB.Id, 6, 2610m, "EGP", 500m, 1).Value);
             contractB.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contractB.Id, 12, 5000m, "EGP", 500m, 2).Value);
             db.Contracts.Add(contractB);
@@ -1572,7 +1572,7 @@ public class Phase9FinancialConcurrencySqlServerTests
                 1000m,
                 1000m,
                 "EGP",
-                10000m,
+                10000m,Contract.CompleteEntitlementSnapshotVersion, 
                 0,
                 null).Value;
             // Add pricing tiers: 1=1000, 3=2700, 6=5220, 12=10000
@@ -1779,7 +1779,7 @@ public class Phase9FinancialConcurrencySqlServerTests
                 1000m,
                 1000m,
                 "EGP",
-                12000m).Value!;
+                12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value!;
             contract.SubmitForApproval();
             contract.Activate(DateTime.UtcNow);
             db.Contracts.Add(contract);
@@ -1864,7 +1864,7 @@ public class Phase9FinancialConcurrencySqlServerTests
                 1000m,
                 1000m,
                 "EGP",
-                12000m).Value!;
+                12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value!;
             contract.SubmitForApproval();
             contract.Activate(DateTime.UtcNow);
             db.Contracts.Add(contract);

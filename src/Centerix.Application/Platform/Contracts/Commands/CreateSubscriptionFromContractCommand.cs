@@ -62,24 +62,42 @@ public class CreateSubscriptionFromContractHandler(
         var now = timeProvider.GetUtcNow().UtcDateTime;
 
         // Create subscription from the Contract's authoritative commercial snapshot.
-        // The Plan catalog is mutable; the Contract is the historical commercial agreement.
-        // GetSubscriptionSnapshot() returns all limits, features, and commercial terms from the
-        // Contract itself — no Plan queries are made by the factory.
+        // Start alignment: the subscription MUST start at the contract's effective date —
+        // never at "now". The wall clock must not influence commercial period alignment.
+        // Activation follows renewal semantics: a future-dated contract creates a Pending
+        // subscription (it must not grant access or occupy the non-terminal unique index
+        // before its effective date); an immediate/historical contract activates.
         var snapshot = contract.GetSubscriptionSnapshot();
 
         var subscriptionResult = await subscriptionFactory.CreateFromSnapshotAsync(
             contract.TenantId,
             contract.PlanId,
             snapshot,
-            startsAtUtc: now,
+            startsAtUtc: contract.EffectiveAtUtc,
             autoRenew: false,
-            activate: true,
+            activate: contract.EffectiveAtUtc <= now,
             cancellationToken);
 
         if (!subscriptionResult.IsSuccess)
             return subscriptionResult.Errors!;
 
         var subscription = subscriptionResult.Value;
+
+        // Explicit commercial alignment invariant — never trust derivation alone:
+        //   Contract.EffectiveAtUtc == Subscription.StartsAtUtc
+        //   Contract.EndsAtUtc == Subscription.EffectiveEndsAtUtc
+        //   Contract.BonusMonths == Subscription.BonusMonths
+        if (subscription.StartsAtUtc != contract.EffectiveAtUtc)
+            return Error.Conflict("Contract.SubscriptionStartMismatch",
+                $"Subscription starts at {subscription.StartsAtUtc:O} but Contract is effective at {contract.EffectiveAtUtc:O}.");
+
+        if (subscription.EffectiveEndsAtUtc != contract.EndsAtUtc)
+            return Error.Conflict("Contract.SubscriptionEndMismatch",
+                $"Subscription ends at {subscription.EffectiveEndsAtUtc:O} but Contract ends at {contract.EndsAtUtc:O}.");
+
+        if (subscription.BonusMonths != contract.BonusMonths)
+            return Error.Conflict("Contract.SubscriptionBonusMismatch",
+                $"Subscription has {subscription.BonusMonths} bonus months but Contract has {contract.BonusMonths}.");
 
         // Link subscription to contract
         subscription.LinkToContract(contract.Id);

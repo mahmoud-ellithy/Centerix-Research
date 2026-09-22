@@ -157,7 +157,7 @@ public class Phase9_2SubscriptionInstallmentOwnershipFinalizationTests
             1000m,
             1000m,
             "USD",
-            contractedAmount).Value!;
+            contractedAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value!;
 
         contract.SubmitForApproval();
         contract.Activate(DateTime.UtcNow);

@@ -4,6 +4,7 @@ using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Contracts.Enums;
+using Centerix.Domain.Platform.Subscriptions;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,6 +12,16 @@ using Microsoft.EntityFrameworkCore;
 /// Command to create a new Contract with immutable commercial snapshot.
 /// Tenant is NOT accepted from the client; it is resolved from the authenticated tenant context.
 /// </summary>
+/// <remarks>
+/// NON-PRODUCTION PATH: no API controller, background job, or production workflow sends this
+/// command. Production Contract creation flows exclusively through
+/// CreateContractFromOfferCommand, RenewSubscriptionOfferCommand, and
+/// ChangeSubscriptionPlanCommand, which derive commercial terms from authoritative
+/// Offer/Plan sources. This handler exists for testing/manual entry only and loads
+/// entitlement limits and features from the Plan catalog (never from the client).
+/// The client-supplied <c>EndsAtUtc</c> is ignored; the period end is always derived
+/// authoritatively from effective date + duration + Plan bonus months.
+/// </remarks>
 public record CreateContractCommand(
     Guid ContractId,
     string ContractNumber,
@@ -80,9 +91,21 @@ public class CreateContractHandler : IRequestHandler<CreateContractCommand, Resu
         // ChangeSubscriptionPlanCommand — all of which populate the full snapshot from
         // authoritative Plan/Offer sources. This handler exists for testing/manual entry only.
         // Limits and features are NOT accepted from the client; they are loaded from the Plan.
+        // A missing Plan must fail creation — never fall back to zeroed entitlements.
         var plan = await _dbContext.Plans
             .Include(p => p.PlanFeatures)
             .FirstOrDefaultAsync(p => p.Id == request.PlanId, cancellationToken);
+
+        if (plan is null)
+            return ContractErrors.PlanNotFound(request.PlanId);
+
+        // The client MUST NOT control the commercial period end: derive it authoritatively
+        // from the effective date, duration, and the Plan's bonus months using the same
+        // calendar-month helper as every production path, so this command can never
+        // produce a Contract whose EndsAtUtc disagrees with its Subscription's
+        // EffectiveEndsAtUtc. The request.EndsAtUtc value is intentionally ignored.
+        var endsAtUtc = TenantPlan.ComputeEffectiveEndsAtUtc(
+            request.EffectiveAtUtc, request.DurationMonths, plan.BonusMonths);
 
         // Create the Contract aggregate — client-supplied commercial terms only (price, duration, etc.)
         var contractResult = Contract.Create(
@@ -91,29 +114,36 @@ public class CreateContractHandler : IRequestHandler<CreateContractCommand, Resu
             request.ContractNumber,
             request.PlanId,
             request.EffectiveAtUtc,
-            request.EndsAtUtc,
+            endsAtUtc,
             request.DurationMonths,
             request.MonthlyListPrice,
             request.ContractualMonthlyValue,
             request.CurrencyCode,
             request.ContractedAmount,
+            Contract.CompleteEntitlementSnapshotVersion,
             request.DiscountAmount,
             request.PromotionReference,
             request.PromotionId,
             request.PromotionType,
             request.ChargedMonths,
-            bonusMonths: plan?.BonusMonths ?? 0,
-            maxStudents: plan?.MaxStudents ?? 0,
-            maxUsers: plan?.MaxUsers ?? 0,
-            maxBranches: plan?.MaxBranches ?? 0,
-            maxTeachers: plan?.MaxTeachers ?? 0,
-            storageGb: plan?.StorageGB ?? 0,
-            smsQuota: plan?.SMSQuota ?? 0);
+            bonusMonths: plan.BonusMonths,
+            maxStudents: plan.MaxStudents,
+            maxUsers: plan.MaxUsers,
+            maxBranches: plan.MaxBranches,
+            maxTeachers: plan.MaxTeachers,
+            storageGb: plan.StorageGB,
+            smsQuota: plan.SMSQuota);
 
         if (!contractResult.IsSuccess)
             return contractResult.Errors!;
 
         var contract = contractResult.Value;
+
+        // Never stamp a complete snapshot version on incomplete data: even this
+        // non-production path must satisfy the production snapshot invariant.
+        var snapshotValidation = contract.ValidateSnapshotCompleteness();
+        if (!snapshotValidation.IsSuccess)
+            return snapshotValidation.Errors!;
 
         // Validate and add pricing tier snapshots
         var seenDurations = new HashSet<int>();
@@ -143,7 +173,6 @@ public class CreateContractHandler : IRequestHandler<CreateContractCommand, Resu
         }
 
         // Snapshot feature entitlements from the Plan catalog into the Contract
-        if (plan is not null)
         {
             foreach (var pf in plan.PlanFeatures.Where(f => f.IsEnabled))
             {
@@ -155,8 +184,13 @@ public class CreateContractHandler : IRequestHandler<CreateContractCommand, Resu
 
                 if (feature is not null)
                 {
-                    contract.AddContractFeature(
-                        ContractFeature.Create(contract.Id, feature));
+                    var featureResult = ContractFeature.Create(contract.Id, feature);
+                    if (!featureResult.IsSuccess)
+                        return featureResult.Errors!;
+
+                    var addFeatureResult = contract.AddContractFeature(featureResult.Value);
+                    if (!addFeatureResult.IsSuccess)
+                        return addFeatureResult.Errors!;
                 }
             }
         }

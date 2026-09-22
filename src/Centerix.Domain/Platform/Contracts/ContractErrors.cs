@@ -69,6 +69,20 @@ public static class ContractErrors
         Error.Validation("Contract.SnapshotIncomplete",
             $"Contract entitlement snapshot is incomplete: {detail}");
 
+    public static Error SnapshotVersionInvalid(int version) =>
+        Error.Validation("Contract.SnapshotVersion_Invalid",
+            $"Entitlement snapshot version '{version}' is not valid");
+
+    public static Error PlanNotFound(int planId) =>
+        Error.NotFound("Contract.PlanNotFound", $"Plan with ID '{planId}' was not found");
+
+    public static Error FeatureCodeRequired =>
+        Error.Validation("Contract.FeatureCode_Required", "Feature code must not be null, empty, or whitespace");
+
+    public static Error DuplicateContractFeature(string featureCode) =>
+        Error.Conflict("Contract.DuplicateFeature",
+            $"A contract feature with code '{featureCode}' already exists on this contract");
+
     public static class PricingTier
     {
         public static Error IdRequired =>

@@ -147,7 +147,7 @@ public class Phase11PlanChangeTests
             Guid.NewGuid(), "t-1", "CTR-TIER", 1,
             UtcNow, UtcNow.AddMonths(12), 12,
             offer.Value.MonthlyListPrice, offer.Value.MonthlyListPrice,
-            offer.Value.CurrencyCode, offer.Value.FinalAmount,
+            offer.Value.CurrencyCode, offer.Value.FinalAmount,Contract.CompleteEntitlementSnapshotVersion, 
             offer.Value.DiscountAmount).Value;
 
         Assert.Equal(10000m, contractResult.ContractedAmount);
@@ -185,7 +185,7 @@ public class Phase11PlanChangeTests
             Guid.NewGuid(), "t-1", "CTR-PAY", 2,
             UtcNow, UtcNow.AddMonths(12), 12,
             offer.Value.MonthlyListPrice, offer.Value.MonthlyListPrice,
-            offer.Value.CurrencyCode, offer.Value.FinalAmount,
+            offer.Value.CurrencyCode, offer.Value.FinalAmount,Contract.CompleteEntitlementSnapshotVersion, 
             offer.Value.DiscountAmount,
             chargedMonths: offer.Value.ChargedMonths).Value;
 
@@ -220,7 +220,7 @@ public class Phase11PlanChangeTests
             Guid.NewGuid(), "t-1", "CTR-PAYTIER", 3,
             UtcNow, UtcNow.AddMonths(12), 12,
             offer.Value.MonthlyListPrice, offer.Value.MonthlyListPrice,
-            offer.Value.CurrencyCode, finalAmount,
+            offer.Value.CurrencyCode, finalAmount,Contract.CompleteEntitlementSnapshotVersion, 
             offer.Value.DiscountAmount,
             chargedMonths: offer.Value.ChargedMonths).Value;
 
@@ -258,7 +258,7 @@ public class Phase11PlanChangeTests
             Guid.NewGuid(), "t-1", "CTR-PROMO", 4,
             UtcNow, UtcNow.AddMonths(12), 12,
             offer.Value.MonthlyListPrice, offer.Value.MonthlyListPrice,
-            offer.Value.CurrencyCode, offer.Value.FinalAmount,
+            offer.Value.CurrencyCode, offer.Value.FinalAmount,Contract.CompleteEntitlementSnapshotVersion, 
             offer.Value.DiscountAmount).Value;
 
         Assert.Equal(8000m, contractResult.ContractedAmount);
@@ -292,7 +292,7 @@ public class Phase11PlanChangeTests
             Guid.NewGuid(), "t-1", "CTR-NOPROMO", 5,
             UtcNow, UtcNow.AddMonths(12), 12,
             offer.Value.MonthlyListPrice, offer.Value.MonthlyListPrice,
-            offer.Value.CurrencyCode, offer.Value.FinalAmount,
+            offer.Value.CurrencyCode, offer.Value.FinalAmount,Contract.CompleteEntitlementSnapshotVersion, 
             offer.Value.DiscountAmount).Value;
 
         var invoice = Invoice.Create(
@@ -322,7 +322,7 @@ public class Phase11PlanChangeTests
             Guid.NewGuid(), "t-1", "CTR-PCT", 6,
             UtcNow, UtcNow.AddMonths(12), 12,
             offer.Value.MonthlyListPrice, offer.Value.MonthlyListPrice,
-            offer.Value.CurrencyCode, offer.Value.FinalAmount,
+            offer.Value.CurrencyCode, offer.Value.FinalAmount,Contract.CompleteEntitlementSnapshotVersion, 
             offer.Value.DiscountAmount).Value;
 
         var invoice = Invoice.Create(
@@ -352,7 +352,7 @@ public class Phase11PlanChangeTests
             Guid.NewGuid(), "t-1", "CTR-FIXED", 7,
             UtcNow, UtcNow.AddMonths(12), 12,
             offer.Value.MonthlyListPrice, offer.Value.MonthlyListPrice,
-            offer.Value.CurrencyCode, offer.Value.FinalAmount,
+            offer.Value.CurrencyCode, offer.Value.FinalAmount,Contract.CompleteEntitlementSnapshotVersion, 
             offer.Value.DiscountAmount).Value;
 
         var invoice = Invoice.Create(
@@ -381,7 +381,7 @@ public class Phase11PlanChangeTests
             Guid.NewGuid(), "t-1", "CTR-PAYX", 8,
             UtcNow, UtcNow.AddMonths(12), 12,
             offer.Value.MonthlyListPrice, offer.Value.MonthlyListPrice,
-            offer.Value.CurrencyCode, offer.Value.FinalAmount,
+            offer.Value.CurrencyCode, offer.Value.FinalAmount,Contract.CompleteEntitlementSnapshotVersion, 
             offer.Value.DiscountAmount,
             chargedMonths: offer.Value.ChargedMonths).Value;
 
@@ -411,7 +411,7 @@ public class Phase11PlanChangeTests
             Guid.NewGuid(), "t-1", "CTR-PP", 9,
             UtcNow, UtcNow.AddMonths(12), 12,
             offer.Value.MonthlyListPrice, offer.Value.MonthlyListPrice,
-            offer.Value.CurrencyCode, offer.Value.FinalAmount,
+            offer.Value.CurrencyCode, offer.Value.FinalAmount,Contract.CompleteEntitlementSnapshotVersion, 
             offer.Value.DiscountAmount).Value;
 
         var invoice = Invoice.Create(
@@ -440,7 +440,7 @@ public class Phase11PlanChangeTests
             Guid.NewGuid(), "t-1", "CTR-TIERONLY", 10,
             UtcNow, UtcNow.AddMonths(12), 12,
             offer.Value.MonthlyListPrice, offer.Value.MonthlyListPrice,
-            offer.Value.CurrencyCode, offer.Value.FinalAmount,
+            offer.Value.CurrencyCode, offer.Value.FinalAmount,Contract.CompleteEntitlementSnapshotVersion, 
             offer.Value.DiscountAmount).Value;
 
         var invoice = Invoice.Create(
@@ -474,7 +474,7 @@ public class Phase11PlanChangeTests
             Guid.NewGuid(), "t-1", "CTR-TIERPCT", 11,
             UtcNow, UtcNow.AddMonths(12), 12,
             offer.Value.MonthlyListPrice, offer.Value.MonthlyListPrice,
-            offer.Value.CurrencyCode, offer.Value.FinalAmount,
+            offer.Value.CurrencyCode, offer.Value.FinalAmount,Contract.CompleteEntitlementSnapshotVersion, 
             offer.Value.DiscountAmount).Value;
 
         var invoice = Invoice.Create(
@@ -524,7 +524,7 @@ public class Phase11PlanChangeTests
         var oldContract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-OLD", 1,
             UtcNow.AddMonths(-12), UtcNow, 12,
-            1000m, 1000m, "EGP", 10000m, 1000m,
+            1000m, 1000m, "EGP", 10000m,Contract.CompleteEntitlementSnapshotVersion,  1000m,
             promotionId: 1, promotionType: "PercentageDiscount").Value;
         var oldTier = ContractPricingTier.Create(
             Guid.NewGuid(), oldContract.Id, 12, 10000m, "EGP", 1000m, 1).Value;
@@ -588,7 +588,7 @@ public class Phase11PlanChangeTests
         var contract = Contract.Create(
             Guid.NewGuid(), oldSub.TenantId, "CTR-TRACE", 2,
             UtcNow, UtcNow.AddMonths(12), 12,
-            2000m, 2000m, "EGP", 24000m).Value;
+            2000m, 2000m, "EGP", 24000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         contract.LinkToPreviousSubscription(oldSub.Id);
 
@@ -601,7 +601,7 @@ public class Phase11PlanChangeTests
         var contract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-NEWLINK", 2,
             UtcNow, UtcNow.AddMonths(12), 12,
-            2000m, 2000m, "EGP", 24000m).Value;
+            2000m, 2000m, "EGP", 24000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         var sub = CreateActiveSubscription(planId: 2, price: 2000m, durationMonths: 12);
         sub.LinkToContract(contract.Id);
@@ -615,7 +615,7 @@ public class Phase11PlanChangeTests
         var oldContract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-BENEFITS", 1,
             UtcNow.AddMonths(-12), UtcNow, 12,
-            1000m, 1000m, "EGP", 10000m).Value;
+            1000m, 1000m, "EGP", 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         var benefit = ContractBenefit.Create(
             Guid.NewGuid(), oldContract.Id, ContractBenefitType.PhysicalGift, "Printer", null,
@@ -628,7 +628,7 @@ public class Phase11PlanChangeTests
         var newContract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-NOBEN", 2,
             UtcNow, UtcNow.AddMonths(12), 12,
-            2000m, 2000m, "EGP", 24000m).Value;
+            2000m, 2000m, "EGP", 24000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         Assert.Empty(newContract.Benefits);
     }
@@ -639,7 +639,7 @@ public class Phase11PlanChangeTests
         var oldContract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-TIEROLD", 1,
             UtcNow.AddMonths(-12), UtcNow, 12,
-            1000m, 1000m, "EGP", 10000m).Value;
+            1000m, 1000m, "EGP", 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
         var tier = ContractPricingTier.Create(
             Guid.NewGuid(), oldContract.Id, 12, 10000m, "EGP", 1000m, 1).Value;
         oldContract.AddPricingTier(tier);
@@ -734,7 +734,7 @@ public class Phase11PlanChangeTests
             Guid.NewGuid(), "t-1", "CTR-UPGRADE", 2,
             UtcNow, UtcNow.AddMonths(12), 12,
             offer.Value.MonthlyListPrice, offer.Value.MonthlyListPrice,
-            offer.Value.CurrencyCode, offer.Value.FinalAmount,
+            offer.Value.CurrencyCode, offer.Value.FinalAmount,Contract.CompleteEntitlementSnapshotVersion, 
             offer.Value.DiscountAmount).Value;
 
         Assert.Equal(24000m, contract.ContractedAmount);
@@ -754,7 +754,7 @@ public class Phase11PlanChangeTests
             Guid.NewGuid(), "t-1", "CTR-DOWNGRADE", 2,
             UtcNow, UtcNow.AddMonths(12), 12,
             offer.Value.MonthlyListPrice, offer.Value.MonthlyListPrice,
-            offer.Value.CurrencyCode, offer.Value.FinalAmount,
+            offer.Value.CurrencyCode, offer.Value.FinalAmount,Contract.CompleteEntitlementSnapshotVersion, 
             offer.Value.DiscountAmount).Value;
 
         Assert.Equal(6000m, contract.ContractedAmount);
@@ -820,7 +820,7 @@ public class Phase11PlanChangeTests
         var contract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-CAP", 1,
             UtcNow, UtcNow.AddMonths(12), 12,
-            1000m, 1000m, "EGP", 12000m).Value;
+            1000m, 1000m, "EGP", 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         var b1 = ContractBenefit.Create(
             Guid.NewGuid(), contract.Id, ContractBenefitType.PhysicalGift, "Bonus 1", null,
@@ -848,7 +848,7 @@ public class Phase11PlanChangeTests
         var contract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-NOBENEFIT", 1,
             UtcNow, UtcNow.AddMonths(12), 12,
-            1000m, 1000m, "EGP", 12000m).Value;
+            1000m, 1000m, "EGP", 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         Assert.Empty(contract.Benefits);
     }
@@ -867,7 +867,7 @@ public class Phase11PlanChangeTests
             Guid.NewGuid(), "t-1", "CTR-FRESHBEN", 1,
             UtcNow, UtcNow.AddMonths(12), 12,
             offer.Value.MonthlyListPrice, offer.Value.MonthlyListPrice,
-            offer.Value.CurrencyCode, offer.Value.FinalAmount,
+            offer.Value.CurrencyCode, offer.Value.FinalAmount,Contract.CompleteEntitlementSnapshotVersion, 
             offer.Value.DiscountAmount).Value;
 
         Assert.Empty(contract.Benefits);

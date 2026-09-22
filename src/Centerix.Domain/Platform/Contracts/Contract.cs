@@ -26,6 +26,18 @@ using Centerix.Domain.Platform.Subscriptions;
 /// </remarks>
 public class Contract : AuditableEntity<Guid>
 {
+    /// <summary>
+    /// Snapshot version for contracts created by production paths with a fully
+    /// populated commercial snapshot from an authoritative Plan/Offer source.
+    /// </summary>
+    public const int CompleteEntitlementSnapshotVersion = 1;
+
+    /// <summary>
+    /// Snapshot version for legacy/migration-era contracts whose snapshot was never
+    /// backfilled. Never fabricate version 1 for these rows.
+    /// </summary>
+    public const int IncompleteEntitlementSnapshotVersion = 0;
+
     /// <summary>Human-readable contract number/reference.</summary>
     public string ContractNumber { get; private set; } = default!;
 
@@ -152,7 +164,7 @@ public class Contract : AuditableEntity<Guid>
         int maxTeachers,
         int storageGb,
         int smsQuota,
-        int entitlementSnapshotVersion = 1)
+        int entitlementSnapshotVersion)
         : base(id)
     {
         TenantId = tenantId;
@@ -196,6 +208,7 @@ public class Contract : AuditableEntity<Guid>
         decimal contractualMonthlyValue,
         string currencyCode,
         decimal contractedAmount,
+        int entitlementSnapshotVersion,
         decimal discountAmount = 0,
         string? promotionReference = null,
         int? promotionId = null,
@@ -207,11 +220,13 @@ public class Contract : AuditableEntity<Guid>
         int maxBranches = 0,
         int maxTeachers = 0,
         int storageGb = 0,
-        int smsQuota = 0,
-        int entitlementSnapshotVersion = 1)
+        int smsQuota = 0)
     {
         if (id == Guid.Empty)
             return ContractErrors.PricingTier.IdRequired;
+
+        if (entitlementSnapshotVersion < IncompleteEntitlementSnapshotVersion)
+            return ContractErrors.SnapshotVersionInvalid(entitlementSnapshotVersion);
 
         if (string.IsNullOrWhiteSpace(tenantId))
             return ContractErrors.TenantIdRequired;
@@ -497,12 +512,15 @@ public class Contract : AuditableEntity<Guid>
     /// </summary>
     public Result<Updated> ValidateSnapshotCompleteness()
     {
-        if (EntitlementSnapshotVersion < 1)
+        if (EntitlementSnapshotVersion < CompleteEntitlementSnapshotVersion)
             return ContractErrors.SnapshotIncomplete(
-                $"EntitlementSnapshotVersion is {EntitlementSnapshotVersion}, expected >= 1");
+                $"EntitlementSnapshotVersion is {EntitlementSnapshotVersion}, expected >= {CompleteEntitlementSnapshotVersion}");
 
         if (MonthlyListPrice <= 0)
             return ContractErrors.SnapshotIncomplete("MonthlyListPrice must be positive");
+
+        if (ContractualMonthlyValue <= 0)
+            return ContractErrors.SnapshotIncomplete("ContractualMonthlyValue must be positive");
 
         if (string.IsNullOrWhiteSpace(CurrencyCode))
             return ContractErrors.SnapshotIncomplete("CurrencyCode is required");
@@ -510,15 +528,74 @@ public class Contract : AuditableEntity<Guid>
         if (DurationMonths <= 0)
             return ContractErrors.SnapshotIncomplete("DurationMonths must be positive");
 
+        if (EffectiveAtUtc == default)
+            return ContractErrors.SnapshotIncomplete("EffectiveAtUtc must be set");
+
+        if (BonusMonths < 0)
+            return ContractErrors.SnapshotIncomplete("BonusMonths must not be negative");
+
+        if (ChargedMonths is { } charged && (charged < 1 || charged > DurationMonths))
+            return ContractErrors.SnapshotIncomplete(
+                $"ChargedMonths is {ChargedMonths}, expected null or between 1 and {DurationMonths}");
+
+        if (EndsAtUtc == default)
+            return ContractErrors.SnapshotIncomplete("EndsAtUtc must be set");
+
+        // Contract period must equal the authoritative calendar-month calculation
+        // (sequential duration then bonus) so Contract.EndsAtUtc always matches the
+        // Subscription.EffectiveEndsAtUtc derived from the same snapshot.
+        var expectedEndsAtUtc = TenantPlan.ComputeEffectiveEndsAtUtc(EffectiveAtUtc, DurationMonths, BonusMonths);
+        if (EndsAtUtc != expectedEndsAtUtc)
+            return ContractErrors.SnapshotIncomplete(
+                $"EndsAtUtc is {EndsAtUtc:O}, expected {expectedEndsAtUtc:O} " +
+                $"(EffectiveAtUtc + {DurationMonths} months + {BonusMonths} bonus months)");
+
+        if (ContractedAmount < 0 || DiscountAmount < 0)
+            return ContractErrors.SnapshotIncomplete("ContractedAmount and DiscountAmount must not be negative");
+
+        if (MaxStudents < 0 || MaxUsers < 0 || MaxBranches < 0 ||
+            MaxTeachers < 0 || StorageGb < 0 || SmsQuota < 0)
+            return ContractErrors.SnapshotIncomplete("Entitlement limits must not be negative");
+
+        foreach (var feature in _contractFeatures)
+        {
+            if (string.IsNullOrWhiteSpace(feature.FeatureCode))
+                return ContractErrors.SnapshotIncomplete("Contract feature codes must not be empty");
+        }
+
+        foreach (var tier in _pricingTiers)
+        {
+            if (tier.DurationMonths <= 0)
+                return ContractErrors.SnapshotIncomplete("Pricing tier durations must be positive");
+
+            if (tier.TierPrice < 0)
+                return ContractErrors.SnapshotIncomplete("Pricing tier prices must not be negative");
+
+            if (!string.Equals(tier.CurrencyCode, CurrencyCode, StringComparison.OrdinalIgnoreCase))
+                return ContractErrors.SnapshotIncomplete(
+                    $"Pricing tier currency must match contract currency '{CurrencyCode}'");
+        }
+
         return Result.Updated;
     }
 
     /// <summary>
     /// Adds a feature snapshot from the Plan catalog at contract creation time.
+    /// Rejects duplicate feature codes (case-insensitive) within this contract.
     /// </summary>
-    public void AddContractFeature(ContractFeature feature)
+    public Result<Updated> AddContractFeature(ContractFeature feature)
     {
+        if (feature == null) throw new ArgumentNullException(nameof(feature));
+
+        if (string.IsNullOrWhiteSpace(feature.FeatureCode))
+            return ContractErrors.FeatureCodeRequired;
+
+        if (_contractFeatures.Any(f =>
+                f.FeatureCode.Equals(feature.FeatureCode, StringComparison.OrdinalIgnoreCase)))
+            return ContractErrors.DuplicateContractFeature(feature.FeatureCode);
+
         _contractFeatures.Add(feature);
+        return Result.Updated;
     }
 
     /// <summary>EF navigation mutator for rehydration of contract features.</summary>

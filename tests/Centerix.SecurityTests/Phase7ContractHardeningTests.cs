@@ -4,6 +4,7 @@ using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform.Contracts.Commands;
 using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Contracts.Enums;
+using Centerix.Domain.Platform.Plans;
 using Centerix.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
@@ -38,7 +39,7 @@ public class Phase7ContractHardeningTests
             monthlyListPrice: monthlyListPrice,
             contractualMonthlyValue: contractualMonthlyValue,
             currencyCode: "EGP",
-            contractedAmount: contractedAmount);
+            contractedAmount: contractedAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.True(result.IsSuccess);
         return result.Value;
@@ -78,6 +79,31 @@ public class Phase7ContractHardeningTests
             Benefits: []);
     }
 
+    private static Plan SeedPlan(AppDbContext dbContext)
+    {
+        var result = Plan.Create(
+            id: 1,
+            code: "TEST",
+            displayName: "Test Plan",
+            monthlyPrice: 1000m,
+            maxStudents: 100,
+            maxUsers: 10,
+            maxBranches: 5,
+            maxTeachers: 20,
+            storageGB: 50,
+            smsQuota: 1000,
+            isActive: true,
+            description: "Test plan",
+            currencyCode: "EGP",
+            durationMonths: 12,
+            bonusMonths: 0);
+
+        Assert.True(result.IsSuccess);
+        dbContext.Plans.Add(result.Value);
+        dbContext.SaveChanges();
+        return result.Value;
+    }
+
     // ------------------------------------------------------------------
     // Section 1: Tenant Security Tests
     // ------------------------------------------------------------------
@@ -92,6 +118,7 @@ public class Phase7ContractHardeningTests
 
         var dbContext = CreateDbContext("tenant-A");
         dbContext.StampAddedTenantIds("tenant-A");
+        SeedPlan(dbContext);
         var handler = new CreateContractHandler(dbContext, currentTenant);
         var command = CreateValidCommand();
 
@@ -147,6 +174,27 @@ public class Phase7ContractHardeningTests
         Assert.Contains(result.Errors!, e => e.Code == "Contract.TenantNotResolved");
     }
 
+    [Fact]
+    public async Task CreateContract_MissingPlan_FailsCreation_NoContractPersisted()
+    {
+        // Regression: a missing Plan must fail creation — never fall back to zeroed entitlements.
+        var currentTenant = Substitute.For<ICurrentTenant>();
+        currentTenant.TenantId.Returns("tenant-A");
+        currentTenant.IsAuthorized.Returns(true);
+
+        var dbContext = CreateDbContext("tenant-A");
+        dbContext.StampAddedTenantIds("tenant-A");
+        // Intentionally NO plan seeded — PlanId 1 does not exist.
+        var handler = new CreateContractHandler(dbContext, currentTenant);
+        var command = CreateValidCommand();
+
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Errors!, e => e.Code == "Contract.PlanNotFound");
+        Assert.Empty(dbContext.Contracts);
+    }
+
     // ------------------------------------------------------------------
     // Section 4: Commercial Snapshot Consistency Validation
     // ------------------------------------------------------------------
@@ -160,7 +208,7 @@ public class Phase7ContractHardeningTests
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             12, 1000m, 1000m, "EGP", 10000m,
-            discountAmount: 12001m);
+            discountAmount: 12001m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.Discount_Exceeds_GrossValue", result.Errors![0].Code);
@@ -175,7 +223,7 @@ public class Phase7ContractHardeningTests
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             12, 1000m, 1000m, "EGP", 12001m,
-            discountAmount: 0m);
+            discountAmount: 0m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.ContractedAmount_Exceeds_GrossValue", result.Errors![0].Code);
@@ -190,7 +238,7 @@ public class Phase7ContractHardeningTests
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             12, 1000m, 1000m, "EGP", 0m,
-            discountAmount: 12000m);
+            discountAmount: 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.True(result.IsSuccess);
     }
@@ -202,7 +250,7 @@ public class Phase7ContractHardeningTests
             Guid.NewGuid(), "tenant-1", "CNT-001", 1,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            12, 1000m, -1m, "EGP", 10000m);
+            12, 1000m, -1m, "EGP", 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.ContractualMonthlyValue_Invalid", result.Errors![0].Code);
@@ -440,6 +488,7 @@ public class Phase7ContractHardeningTests
 
         var dbContext = CreateDbContext("tenant-XYZ");
         dbContext.StampAddedTenantIds("tenant-XYZ");
+        SeedPlan(dbContext);
         var handler = new CreateContractHandler(dbContext, currentTenant);
         var command = CreateValidCommand();
 

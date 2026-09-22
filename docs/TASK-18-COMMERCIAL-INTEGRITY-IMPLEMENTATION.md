@@ -1,9 +1,8 @@
 # TASK 18 — Commercial Integrity & Tenant Billing Authorization
 
-**Date:** 2026-09-20
+**Date:** 2026-09-20 (final hardening: 2026-09-22)
 **Author:** Implementation Team
-**Status:** COMPLETE (Task 18.1.1 Corrections Applied)
-**Tests:** 55/55 passing
+**Status:** COMPLETE (Final commercial integrity hardening)
 
 ---
 
@@ -20,7 +19,7 @@ Task 18 resolves the two blocking business decisions from Task 17 (D-01: TenantA
 **Problem:** `CreateSubscriptionFromContractCommand` called `SubscriptionFactory.CreateActivatedAsync()` which used the Plan's current price/duration, discarding the Contract's negotiated terms.
 
 **Fix (Task 18):**
-- Changed `CreateSubscriptionFromContractCommand.cs` to call `subscriptionFactory.CreateFromSnapshotAsync()` with Contract's `MonthlyListPrice`, `CurrencyCode`, `DurationMonths`, `bonusMonths: 0`
+- Changed `CreateSubscriptionFromContractCommand.cs` to call `subscriptionFactory.CreateFromSnapshotAsync()` with the Contract's snapshot (`MonthlyListPrice`, `CurrencyCode`, `DurationMonths`, `BonusMonths`, limits, features)
 - Removed `plan.IsActive` check from `SubscriptionFactory.CreateFromSnapshotAsync()` — deactivated plans must still honor existing Contracts
 
 **Fix (Task 18.1 — Complete Contract Snapshot):**
@@ -140,7 +139,35 @@ The migration `20260921172701_Task18_1_CommercialIntegrityCorrections` adds:
 - `ContractFeatures` table with unique index on `(ContractId, FeatureCode)`
 - `IdempotencyKey` column on TenantCredits with unique filtered index
 
-**Backfill note:** This repository has no production Contract data (it is pre-production). Zero values for existing rows are safe because no existing Contracts were created through production workflows. If production data existed, a backfill from the authoritative Plan source would be required.
+The migration `20260921205843_Task18_2_EntitlementSnapshotVersion` adds:
+- `EntitlementSnapshotVersion` column to Contracts (default: 0)
+
+**Legacy version 0 behavior (authoritative):**
+
+```
+Existing contracts with version 0 are legacy/incomplete snapshots.
+
+They cannot be used to create a new Subscription until their historical
+commercial snapshot is explicitly reconstructed/verified through an approved process.
+```
+
+- Version `0` (`Contract.IncompleteEntitlementSnapshotVersion`) marks legacy/migration-era
+  rows whose snapshot was never backfilled. Historical snapshot data is NEVER fabricated:
+  no migration or code path upgrades a version-0 row to version 1.
+- `Contract.ValidateSnapshotCompleteness()` rejects version-0 contracts, and
+  `CreateSubscriptionFromContractHandler` refuses to create a Subscription from them.
+- Repository evidence: this codebase is pre-production — no production Contract data
+  exists, so zero/default values on existing rows predate production workflows and are
+  safe. If production data existed, backfill from the authoritative Plan source would
+  be required instead of defaulting.
+
+**Superseded rule:** earlier reports (e.g. Task 9.3) stated "Contract ends after
+DurationMonths only" with bonus months as a Subscription-only concept. That is NO
+LONGER TRUE. The authoritative rule is sequential calendar-month addition —
+`Contract.EndsAtUtc == ComputeEffectiveEndsAtUtc(EffectiveAtUtc, DurationMonths, BonusMonths)` —
+identical to `Subscription.EffectiveEndsAtUtc`, and every production path uses the
+single `TenantPlan.ComputeEffectiveEndsAtUtc` helper so the two sides cannot diverge
+(e.g. Jan 31 + 1 month + 1 month ≠ Jan 31 + 2 months when computed in one step).
 
 ---
 
@@ -262,4 +289,100 @@ The migration `20260921172701_Task18_1_CommercialIntegrityCorrections` adds:
 
 ---
 
-**TASK 18.1.1 IS COMPLETE. ALL 55 TESTS PASSING.**
+---
+
+## 12. Final Commercial Integrity Hardening (2026-09-22)
+
+### 12.1 Contract ↔ Subscription alignment invariants
+
+For every production Contract → Subscription workflow:
+
+```
+Contract.EffectiveAtUtc == Subscription.StartsAtUtc
+Contract.EndsAtUtc      == Subscription.EffectiveEndsAtUtc
+Contract.BonusMonths    == Subscription.BonusMonths
+```
+
+- `CreateSubscriptionFromContractHandler` starts the Subscription exactly at
+  `Contract.EffectiveAtUtc` — never at wall-clock `now`. A future-dated Contract
+  yields a Pending subscription; an immediate/historical Contract activates.
+  After creation the handler explicitly validates all three equalities and fails
+  the operation on any mismatch.
+- `CreateContractFromOfferCommand`, `RenewSubscriptionOfferCommand`,
+  `ChangeSubscriptionPlanCommand`, and `CreateContractHandler` all compute the
+  period end with the single authoritative helper
+  `TenantPlan.ComputeEffectiveEndsAtUtc(startsAt, durationMonths, bonusMonths)`
+  (sequential duration-then-bonus calendar-month addition, matching
+  `BaseEndsAtUtc → EffectiveEndsAtUtc` semantics exactly). No path duplicates a
+  different formula.
+- `Contract.ValidateSnapshotCompleteness()` additionally proves end alignment
+  (`EndsAtUtc == ComputeEffectiveEndsAtUtc(EffectiveAtUtc, DurationMonths, BonusMonths)`),
+  so a misaligned snapshot can never become a Subscription.
+
+### 12.2 EntitlementSnapshotVersion semantics
+
+- `Contract.Create()` takes `entitlementSnapshotVersion` as a REQUIRED parameter —
+  there is no default, so a Contract can never become "snapshot complete" because a
+  caller omitted the version.
+- `Contract.CompleteEntitlementSnapshotVersion (1)`: stamped ONLY by production
+  paths that populate the full snapshot from authoritative Plan/Offer sources
+  (after passing `ValidateSnapshotCompleteness()`).
+- `Contract.IncompleteEntitlementSnapshotVersion (0)`: legacy/migration rows (see §6).
+- Legitimate zeros (`MaxStudents/MaxUsers/SmsQuota/BonusMonths == 0`) remain valid:
+  validation rejects only negative limits and uses the version marker — never
+  zero-value heuristics — to distinguish a real zero entitlement from a missing snapshot.
+
+### 12.3 Production vs legacy Contract creation paths
+
+| Path | Reachability | Commercial authority | Status |
+|------|--------------|----------------------|--------|
+| `CreateContractFromOfferCommand` | `POST /api/contracts/from-offer` | Offer snapshot + Plan catalog | **Production** |
+| `RenewSubscriptionOfferCommand` | Platform workflow | Current Plan + promotions | **Production** |
+| `ChangeSubscriptionPlanCommand` | Platform workflow | Current target Plan + promotions | **Production** |
+| `CreateSubscriptionFromContractCommand` | Platform workflow | Contract snapshot only (no Plan reads) | **Production** |
+| `CreateContractCommand` | No controller, job, or workflow sends it (verified by repository search) | Plan-required; period end derived authoritatively; client `EndsAtUtc` ignored; snapshot validated before persistence | **Non-production (testing/manual entry only)** |
+
+`CreateContractCommand` can no longer produce a valid production commercial Contract
+from arbitrary client values: a missing Plan fails creation with no persistence
+(`Contract.PlanNotFound`), `plan?.X ?? 0` fallbacks are gone, and the complete
+snapshot version is stamped only on Plan-backed, validated data.
+
+### 12.4 Plan mutation independence
+
+`SubscriptionFactory.CreateFromSnapshotAsync` performs zero Plan catalog reads —
+limits, features, pricing, duration, and `BonusMonths` come exclusively from the
+Contract's `SubscriptionSnapshot`. Mutating a Plan afterwards (price, bonus, limits,
+features, `IsActive`) cannot alter existing Contracts or Subscriptions. Proven by
+handler-level regressions that run `CreateContractFromOfferHandler` followed by
+`CreateSubscriptionFromContractHandler` around a full Plan mutation.
+
+### 12.5 Customer Credit idempotency (subscription change)
+
+`ChangeSubscriptionPlanHandler` derives the unused eligible paid value from the old
+Contract, mints at most one `TenantCredit` (`SubscriptionChange`, idempotency key
+`sub-change-{oldSubscriptionId:N}`, unique index
+`UX_TenantCredits_TenantId_SourceType_SourceId`), applies at most
+`min(credit, invoiceRemaining)` via one `CreditApplication`
+(`subscription-change-{oldSubscriptionId:N}`, unique index on
+`(TenantId, IdempotencyKey)`), and writes the `CreditCreation`/`CreditUsage` ledger
+pair with `B1 = B0 - C`, `B2 = B1 - U`.
+
+- First request: exactly one credit, one application, one creation + one usage entry.
+- Retry: returns the EXISTING contract id (replay); creates no second credit,
+  application, ledger entry, contract, subscription, or invoice.
+- Concurrent duplicates: SERIALIZABLE transaction + eligibility + unique indexes;
+  the loser detaches its failed unit of work and observes/reuses the winner's
+  result (duplicate-key 2601/2627 handling). Exactly one financial creation.
+
+### 12.6 ContractFeature normalization
+
+`ContractFeature.Create()` follows the domain-result pattern (no exceptions):
+trims, upper-invariant normalizes (`" students "`/`"STUDENTS"`/`"Students"` →
+`"STUDENTS"`), and rejects null/empty/whitespace. `Contract.AddContractFeature()`
+rejects duplicate normalized codes within the same Contract before persistence;
+the database unique index `UX_ContractFeatures_ContractId_FeatureCode` remains as
+a second layer.
+
+---
+
+**FINAL HARDENING IS COMPLETE. Full suite: 1302 InMemory + SQL Server concurrency tests passing.**

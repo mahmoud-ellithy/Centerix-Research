@@ -210,7 +210,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
             discountAmount: 1000m,
             promotionId: 1,
             promotionType: "PercentageDiscount",
-            chargedMonths: 10).Value;
+            chargedMonths: 10, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         var oldBenefit = ContractBenefit.Create(
             Guid.NewGuid(), oldContract.Id, ContractBenefitType.PhysicalGift,
@@ -240,7 +240,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
             contractualMonthlyValue: 1200m,
             currencyCode: "EGP",
             contractedAmount: 14400m,
-            discountAmount: 0m).Value;
+            discountAmount: 0m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         // Old contract remains unchanged
         Assert.Equal(oldMonthly, oldContract.MonthlyListPrice);
@@ -269,7 +269,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
         var contract = Contract.Create(
             Guid.NewGuid(), tenantId, "CTR-ALIGN-001", 1,
             subStart, subStart.AddMonths(12), 12,
-            1000m, 1000m, "EGP", 12000m).Value;
+            1000m, 1000m, "EGP", 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
         sub.LinkToContract(contract.Id);
 
         // BillingCycle aligned with subscription
@@ -311,7 +311,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
         var contract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-DUR-001", 1,
             startsAt, endsAt, durationMonths,
-            1000m, 1000m, "EGP", 12000m).Value;
+            1000m, 1000m, "EGP", 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         // Contract end is based on DurationMonths using AddCalendarMonths
         Assert.Equal(startsAt, contract.EffectiveAtUtc);
@@ -355,13 +355,13 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
             Guid.NewGuid(), "t-1", "CTR-OLD-001", 1,
             new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            12, 1000m, 1000m, "EGP", 12000m).Value;
+            12, 1000m, 1000m, "EGP", 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         var newStart = oldContract.EndsAtUtc;
         var newContract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-NEW-001", 1,
             newStart, newStart.AddMonths(12),
-            12, 1000m, 1000m, "EGP", 12000m).Value;
+            12, 1000m, 1000m, "EGP", 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         // New contract starts at or after old contract ends
         Assert.True(newContract.EffectiveAtUtc >= oldContract.EndsAtUtc);
@@ -840,7 +840,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentSqlServerTests
             var oldContract = Contract.Create(
                 Guid.NewGuid(), tenantId, "CTR-HIST-OLD", planId,
                 oldContractStart, oldContractStart.AddMonths(12), 12,
-                1000m, 1000m, "EGP", 10000m, 1000m,
+                1000m, 1000m, "EGP", 10000m,Contract.CompleteEntitlementSnapshotVersion,  1000m,
                 promotionId: 1, promotionType: "PercentageDiscount", chargedMonths: 10).Value;
             db.Contracts.Add(oldContract);
             oldContractId = oldContract.Id;

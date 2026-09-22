@@ -525,7 +525,7 @@ public class Phase8InstallmentHardeningTests : IClassFixture<TestWebApplicationF
             1000m,
             1000m,
             "EGP",
-            contractedAmount);
+            contractedAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         contract.Value!.SubmitForApproval();
         contract.Value!.Activate(DateTime.UtcNow);

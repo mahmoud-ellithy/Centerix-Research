@@ -115,7 +115,17 @@ public class ChangeSubscriptionPlanHandler(
 
         var eligibilityResult = ValidateChangePlanEligibility(oldSubscription);
         if (!eligibilityResult.IsSuccess)
+        {
+            // Idempotent replay: a prior successful change for this subscription always leaves
+            // a SubscriptionChange credit keyed by the old subscription id (same SaveChanges as
+            // the new contract). A retry must observe the existing financial result instead of
+            // failing while leaving callers to retry blindly.
+            var replayResult = await TryResolveReplayResultAsync(oldSubscription, cancellationToken);
+            if (replayResult is not null)
+                return replayResult;
+
             return eligibilityResult.Errors!;
+        }
 
         await using var transaction = dbContext.IsRelational
             ? await dbContext.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
@@ -135,7 +145,15 @@ public class ChangeSubscriptionPlanHandler(
 
                 eligibilityResult = ValidateChangePlanEligibility(oldSubscription);
                 if (!eligibilityResult.IsSuccess)
+                {
+                    // Same idempotent-replay rule inside the transaction: a concurrent
+                    // winner may have cancelled this subscription after our first read.
+                    var replayResult = await TryResolveReplayResultAsync(oldSubscription, cancellationToken);
+                    if (replayResult is not null)
+                        return replayResult;
+
                     return eligibilityResult.Errors!;
+                }
             }
 
             var plan = await dbContext.Plans
@@ -151,7 +169,7 @@ public class ChangeSubscriptionPlanHandler(
 
             var startsAt = now;
             var durationMonths = plan.DurationMonths;
-            var newEffectiveEndsAt = TenantPlan.AddCalendarMonths(startsAt, durationMonths + plan.BonusMonths);
+            var newEffectiveEndsAt = TenantPlan.ComputeEffectiveEndsAtUtc(startsAt, durationMonths, plan.BonusMonths);
 
             var hasOverlap = await dbContext.TenantPlans
                 .IgnoreQueryFilters()
@@ -210,8 +228,8 @@ public class ChangeSubscriptionPlanHandler(
                 return acceptResult.Errors!;
 
             var effectiveAt = startsAt;
-            // Contract period must align with subscription period: endsAt = startsAt + DurationMonths + BonusMonths
-            var endsAt = TenantPlan.AddCalendarMonths(startsAt, durationMonths + plan.BonusMonths);
+            // Contract period must align with subscription period — sequential duration then bonus
+            var endsAt = TenantPlan.ComputeEffectiveEndsAtUtc(startsAt, durationMonths, plan.BonusMonths);
 
             var contractResult = Contract.Create(
                 id: Guid.NewGuid(),
@@ -225,6 +243,7 @@ public class ChangeSubscriptionPlanHandler(
                 contractualMonthlyValue: calc.MonthlyListPrice,
                 currencyCode: calc.CurrencyCode,
                 contractedAmount: calc.FinalAmount,
+                entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
                 discountAmount: calc.DiscountAmount,
                 promotionReference: calc.PromotionName,
                 promotionId: calc.PromotionId,
@@ -282,8 +301,13 @@ public class ChangeSubscriptionPlanHandler(
 
                 if (feature is not null)
                 {
-                    contract.AddContractFeature(
-                        ContractFeature.Create(contract.Id, feature));
+                    var featureResult = ContractFeature.Create(contract.Id, feature);
+                    if (!featureResult.IsSuccess)
+                        return featureResult.Errors!;
+
+                    var addFeatureResult = contract.AddContractFeature(featureResult.Value);
+                    if (!addFeatureResult.IsSuccess)
+                        return addFeatureResult.Errors!;
                 }
             }
 
@@ -558,15 +582,91 @@ public class ChangeSubscriptionPlanHandler(
 
             return contract.Id;
         }
+        catch (DbUpdateException ex) when (transaction is not null && IsDuplicateKeyException(ex))
+        {
+            // Concurrent duplicate lost the race at the database unique constraint
+            // (UX_TenantCredits_TenantId_SourceType_SourceId or the non-terminal
+            // subscription index): the winner has committed the credit + contract.
+            // Detach the failed unit of work and observe/reuse the existing result
+            // instead of surfacing a constraint violation.
+            if (dbContext is DbContext efContext)
+            {
+                foreach (var entry in efContext.ChangeTracker.Entries()
+                    .Where(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+                    .ToList())
+                {
+                    entry.State = EntityState.Detached;
+                }
+            }
+
+            var loserOld = await dbContext.TenantPlans
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(tp => tp.Id == request.SubscriptionId, cancellationToken);
+
+            if (loserOld is not null)
+            {
+                var replayResult = await TryResolveReplayResultAsync(loserOld, cancellationToken);
+                if (replayResult is not null)
+                    return replayResult;
+            }
+
+            return TenantPlanErrors.ConcurrentRenewalConflict;
+        }
         catch (Exception ex) when (transaction is not null && IsDeadlockException(ex))
         {
             return TenantPlanErrors.ConcurrentRenewalConflict;
         }
     }
 
+    private async Task<Result<Guid>?> TryResolveReplayResultAsync(
+        TenantPlan oldSubscription,
+        CancellationToken cancellationToken)
+    {
+        // Only a subscription cancelled by a previous plan change can have a replay result:
+        // SubscriptionChange credits are created exclusively by this handler.
+        if (oldSubscription.Status != SubscriptionStatus.Cancelled)
+            return null;
+
+        var priorCreditExists = await dbContext.TenantCredits
+            .AnyAsync(tc =>
+                tc.TenantId == oldSubscription.TenantId &&
+                tc.SourceType == CreditSourceType.SubscriptionChange &&
+                tc.SourceId == oldSubscription.Id,
+                cancellationToken);
+
+        if (!priorCreditExists)
+            return null;
+
+        var priorContract = await dbContext.Contracts
+            .IgnoreQueryFilters()
+            .Where(c =>
+                c.TenantId == oldSubscription.TenantId &&
+                c.PreviousSubscriptionId == oldSubscription.Id)
+            .OrderByDescending(c => c.CreatedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return priorContract is not null ? priorContract.Id : null;
+    }
+
     private static bool IsDeadlockException(Exception ex)
     {
         return ex is Microsoft.Data.SqlClient.SqlException sqlEx && sqlEx.Number is 1205;
+    }
+
+    /// <summary>
+    /// SQL Server error 2601 = duplicate key in unique index.
+    /// SQL Server error 2627 = UNIQUE KEY constraint violation.
+    /// </summary>
+    private static bool IsDuplicateKeyException(DbUpdateException ex)
+    {
+        var sqlEx = ex.InnerException as Microsoft.Data.SqlClient.SqlException;
+        while (sqlEx is null && ex.InnerException is DbUpdateException innerDbEx)
+        {
+            ex = innerDbEx;
+            sqlEx = ex.InnerException as Microsoft.Data.SqlClient.SqlException;
+        }
+
+        return sqlEx is not null && (sqlEx.Number == 2601 || sqlEx.Number == 2627);
     }
 
     private static Result<Updated> ValidateChangePlanEligibility(TenantPlan oldSubscription)

@@ -294,7 +294,7 @@ public class Phase8InstallmentAllocationTests : IClassFixture<TestWebApplication
             1000m,
             1000m,
             "EGP",
-            12000m);
+            12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         contract.Value!.SubmitForApproval();
         contract.Value!.Activate(DateTime.UtcNow);
@@ -314,7 +314,7 @@ public class Phase8InstallmentAllocationTests : IClassFixture<TestWebApplication
             1000m,
             1000m,
             "EGP",
-            12000m);
+            12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         contract.Value!.SubmitForApproval();
         contract.Value!.Activate(DateTime.UtcNow);

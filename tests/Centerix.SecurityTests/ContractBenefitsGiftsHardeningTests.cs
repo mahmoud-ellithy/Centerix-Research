@@ -52,7 +52,7 @@ public class ContractBenefitsGiftsHardeningTests
             currencyCode: "EGP",
             contractedAmount: contractedAmount,
             discountAmount: 0,
-            promotionReference: null);
+            promotionReference: null, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.True(result.IsSuccess, $"Contract creation failed: {string.Join(",", result.Errors?.Select(e => e.Code) ?? [])}");
         return result.Value;
