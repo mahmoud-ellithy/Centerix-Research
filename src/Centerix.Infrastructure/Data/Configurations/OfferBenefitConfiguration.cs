@@ -67,8 +67,12 @@ public class OfferFeatureConfiguration : IEntityTypeConfiguration<OfferFeature>
         builder.HasIndex(f => f.OfferId)
             .HasDatabaseName("IX_OfferFeatures_OfferId");
 
+        // Commercial snapshot integrity: one feature code per Offer, enforced at the
+        // database level (not only in application code). FeatureCode is normalized to
+        // upper invariant at creation, so a binary/case-sensitive comparison is correct.
         builder.HasIndex(f => new { f.OfferId, f.FeatureCode })
-            .HasDatabaseName("IX_OfferFeatures_OfferId_FeatureCode");
+            .IsUnique()
+            .HasDatabaseName("UX_OfferFeatures_OfferId_FeatureCode");
     }
 }
 

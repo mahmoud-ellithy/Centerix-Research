@@ -352,10 +352,15 @@ public class Offer : AuditableEntity<Guid>
     /// <summary>
     /// Adds a benefit snapshot to this offer. Benefits stored here are the
     /// authoritative source when creating a Contract from this Offer.
+    /// Only allowed while the Offer has not been accepted (snapshot freeze) —
+    /// once accepted or converted, the commercial snapshot is immutable.
     /// </summary>
     public Result<Updated> AddBenefit(OfferBenefit benefit)
     {
         if (benefit == null) throw new ArgumentNullException(nameof(benefit));
+
+        if (Status != OfferStatus.Calculated)
+            return OfferErrors.InvalidStateTransition(Status, "add benefit snapshot to");
 
         _benefits.Add(benefit);
         return Result.Updated;

@@ -11,6 +11,7 @@ using Centerix.Domain.Platform.Billing.Credits.Enums;
 using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Billing.Payments;
 using Centerix.Domain.Platform.Billing.Payments.Enums;
+using Centerix.Domain.Platform.Billing.Refunds.Enums;
 using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Contracts.Enums;
 using Centerix.Domain.Platform.Plans;
@@ -425,8 +426,18 @@ public class ChangeSubscriptionPlanHandler(
 
                     if (unusedValue > 0)
                     {
-                        // Verify the old subscription has been paid (check completed payments with matching currency)
-                        var paidAmount = await dbContext.Payments
+                        // ── Eligible PAID SETTLEMENT of the old contract ──
+                        // Settlement = active PaymentAllocations on the old contract's invoices
+                        //            + valid CreditApplications on the old contract's invoices
+                        //            − executed Refunds associated with the old contract.
+                        //
+                        // 1) CreditApplication IS monetary settlement: Invoice.GetRemainingAmount()
+                        //    = Total - Paid - AppliedCredit (Task 10/12 financial model), so credit
+                        //    consumed an invoice it settled part of it.
+                        // 2) ExecuteRefund does NOT reverse PaymentAllocations (they stay Active),
+                        //    so refunded money must be subtracted explicitly via Refund.ContractId
+                        //    (Refund carries an exact contract link — no pro-rating is invented).
+                        var paymentAllocated = await dbContext.Payments
                             .Where(p => p.TenantId == oldSubscription.TenantId
                                      && p.Status == PaymentStatus.Completed
                                      && p.CurrencyCode == oldContract.CurrencyCode)
@@ -434,6 +445,24 @@ public class ChangeSubscriptionPlanHandler(
                                 a.Status == PaymentAllocationStatus.Active
                                 && a.Invoice.ContractId == oldContract.Id))
                             .SumAsync(a => a.AllocatedAmount, cancellationToken);
+
+                        var creditApplied = await dbContext.CreditApplications
+                            .Where(ca => ca.TenantId == oldSubscription.TenantId
+                                     && dbContext.Invoices.Any(i =>
+                                         i.TenantId == oldSubscription.TenantId
+                                         && i.Id == ca.InvoiceId
+                                         && i.ContractId == oldContract.Id))
+                            .SumAsync(ca => ca.Amount, cancellationToken);
+
+                        var refunded = await dbContext.Refunds
+                            .Where(r => r.TenantId == oldSubscription.TenantId
+                                     && r.ContractId == oldContract.Id
+                                     && r.Status == RefundStatus.Completed
+                                     && r.CurrencyCode == oldContract.CurrencyCode)
+                            .SumAsync(r => r.Amount, cancellationToken);
+
+                        var paidAmount = paymentAllocated + creditApplied - refunded;
+                        if (paidAmount < 0) paidAmount = 0;
 
                         var creditAmount = Math.Min(unusedValue, paidAmount);
 
