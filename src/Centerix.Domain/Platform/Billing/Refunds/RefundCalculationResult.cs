@@ -49,13 +49,26 @@ public sealed record RefundCalculationResult
     /// <summary>The total amount actually paid by the customer (successful payments only).</summary>
     public decimal AmountActuallyPaid { get; init; }
 
-    /// <summary>The refundable amount (AmountActuallyPaid - CustomerEconomicObligation).</summary>
+    /// <summary>
+    /// The SubscriptionChange credit already issued for this contract's subscription(s).
+    /// Task 18.4.2: value already converted into this credit is not refundable as cash again.
+    /// </summary>
+    public decimal AlreadyConvertedSubscriptionChangeCredit { get; init; }
+
+    /// <summary>
+    /// The genuinely refundable amount
+    /// (AmountActuallyPaid - CustomerEconomicObligation - AlreadyConvertedSubscriptionChangeCredit).
+    /// </summary>
     public decimal RefundableAmount { get; init; }
 
     /// <summary>The actual refund amount (0 if customer owes money).</summary>
     public decimal RefundAmount { get; init; }
 
-    /// <summary>The outstanding amount the customer owes (0 if refund is due).</summary>
+    /// <summary>
+    /// The outstanding amount the customer owes (0 if refund is due).
+    /// Computed from AmountActuallyPaid - CustomerEconomicObligation only: an
+    /// already-converted SubscriptionChange credit is not customer debt.
+    /// </summary>
     public decimal CustomerOutstandingAmount { get; init; }
 
     /// <summary>Indicates whether the customer is entitled to a refund.</summary>

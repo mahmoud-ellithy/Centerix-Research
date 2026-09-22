@@ -36,7 +36,7 @@ using Xunit;
 /// - Scenario 4: different Offer + same FeatureCode → allowed;
 /// - Scenario 5: contract 12000, consumed 4000, unused 8000, paid 10000 → credit 8000;
 /// - Scenario 6: contract 12000, consumed 4000, unused 8000, paid 5000 → credit 5000;
-/// - Scenario 7: payment 5000 + CreditApplication 7000 → settled 12000, credit 8000;
+/// - Scenario 7: payment 5000 + eligible (Overpayment) CreditApplication 7000 → settled 12000, credit 8000;
 /// - Scenario 8: refunded 5000 is NOT counted as paid settlement.
 /// </summary>
 [Collection("SqlServerIntegration")]
@@ -131,10 +131,12 @@ public class Task18_4CommercialIntegritySqlServerTests
             Guid.NewGuid(), payment.Id, invoice.Id, paymentAmount, DateTime.UtcNow).Value);
 
         // Optional prior settlement via a Customer Credit (CreditApplication = settlement).
+        // Task 18.4.2 policy: only cash-origin credits (Overpayment / SubscriptionChange)
+        // count as eligible paid settlement in D-02, so the seeded credit uses Overpayment.
         if (creditAppliedAmount > 0m)
         {
             var priorCredit = TenantCredit.Create(
-                Guid.NewGuid(), creditAppliedAmount, CreditSourceType.Manual,
+                Guid.NewGuid(), creditAppliedAmount, CreditSourceType.Overpayment,
                 sourceId: null, "EGP", idempotencyKey: $"seed-{contract.Id:N}").Value;
             db.TenantCredits.Add(priorCredit);
             db.CreditApplications.Add(CreditApplication.Create(
@@ -339,8 +341,10 @@ public class Task18_4CommercialIntegritySqlServerTests
     [Trait("Category", "SqlServer")]
     public async Task Scenario7_Payment5000_Plus_CreditApplication7000_Settled12000_Credit8000()
     {
-        // Payment 5,000 + prior CreditApplication 7,000 = settled 12,000 → credit 8,000.
-        // Proves CreditApplication IS paid settlement AND no double counting occurs.
+        // Payment 5,000 + prior eligible (Overpayment) CreditApplication 7,000 = settled 12,000
+        // → credit 8,000. Proves CreditApplication from an eligible source IS paid settlement
+        // AND no double counting occurs. (Task 18.4.2: a non-eligible source here would
+        // settle only the 5,000 cash → credit 5,000.)
         var tenantId = "B7C1E9D2-4A5F-4B6C-8D9E-000000001847";
         await SeedTenantAsync(tenantId);
         var oldPlanId = await EnsurePlanAsync("P184E", price: 1000m, duration: 12);

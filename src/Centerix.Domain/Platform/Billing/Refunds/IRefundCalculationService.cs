@@ -13,6 +13,7 @@ using Centerix.Domain.Platform.Contracts;
 /// <remarks>
 /// The calculation follows the financial invariant:
 /// RefundableAmount = AmountActuallyPaid - CustomerEconomicObligation
+///                    - AlreadyConvertedSubscriptionChangeCredit
 /// where CustomerEconomicObligation = UsedSubscriptionAmount + RemainingBenefitValue
 ///
 /// Important rules:
@@ -21,6 +22,10 @@ using Centerix.Domain.Platform.Contracts;
 /// - Gift recovery is based on unconsumed economic value (not physical return)
 /// - Refund is based on actual successful payments, NOT Invoice.Total
 /// - Negative refundable amount means customer owes money (do NOT clamp to zero)
+/// - Value already converted into a SubscriptionChange credit for this contract
+///   must NOT be refunded again as cash (Task 18.4.2): the converted value was
+///   already returned to the customer as credit (available balance or settlement
+///   of the new invoice), so it is deducted from the refundable base.
 /// </remarks>
 public interface IRefundCalculationService
 {
@@ -31,10 +36,16 @@ public interface IRefundCalculationService
     /// <param name="asOfUtc">The cancellation date.</param>
     /// <param name="payments">The successful payments with their allocations.</param>
     /// <param name="benefits">The benefits granted under the contract.</param>
+    /// <param name="alreadyIssuedSubscriptionChangeCredit">
+    /// The total SubscriptionChange credit already issued for this contract's subscription(s)
+    /// (Task 18.4.2: value already converted into credit is not refundable as cash again).
+    /// Zero when the contract has no plan-change credit.
+    /// </param>
     /// <returns>A deterministic result containing all calculation details.</returns>
     RefundCalculationResult Calculate(
         Contract contract,
         DateTime asOfUtc,
         IReadOnlyList<Payment> payments,
-        IReadOnlyList<ContractBenefit> benefits);
+        IReadOnlyList<ContractBenefit> benefits,
+        decimal alreadyIssuedSubscriptionChangeCredit = 0m);
 }

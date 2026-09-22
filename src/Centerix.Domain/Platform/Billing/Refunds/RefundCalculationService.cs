@@ -32,8 +32,15 @@ using Centerix.Domain.Platform.Contracts;
 /// 5. Refund Calculation:
 ///    - CustomerEconomicObligation = UsedSubscriptionAmount + RemainingBenefitValue
 ///    - RefundableAmount = AmountActuallyPaid - CustomerEconomicObligation
+///                         - AlreadyConvertedSubscriptionChangeCredit
 ///    - RefundAmount = max(0, RefundableAmount)
-///    - CustomerOutstandingAmount = max(0, -RefundableAmount)
+///    - CustomerOutstandingAmount = max(0, -(AmountActuallyPaid - CustomerEconomicObligation))
+///
+/// 6. Already-converted value (Task 18.4.2):
+///    - A plan change converts the old contract's eligible unused paid value into
+///      a SubscriptionChange credit. That value has already been returned to the
+///      customer (as an available credit balance and/or as settlement of the new
+///      invoice) and MUST NOT be refunded again as cash.
 /// </remarks>
 public sealed class RefundCalculationService : IRefundCalculationService
 {
@@ -41,7 +48,8 @@ public sealed class RefundCalculationService : IRefundCalculationService
         Contract contract,
         DateTime asOfUtc,
         IReadOnlyList<Payment> payments,
-        IReadOnlyList<ContractBenefit> benefits)
+        IReadOnlyList<ContractBenefit> benefits,
+        decimal alreadyIssuedSubscriptionChangeCredit = 0m)
     {
         // Calculate elapsed duration
         var elapsedMonths = contract.GetElapsedMonths(asOfUtc);
@@ -145,13 +153,27 @@ public sealed class RefundCalculationService : IRefundCalculationService
 
         // Calculate final refund
         var customerEconomicObligation = usedSubscriptionAmount + remainingBenefitValue;
-        var refundableAmount = amountActuallyPaid - customerEconomicObligation;
+        var paidMinusObligation = amountActuallyPaid - customerEconomicObligation;
+
+        // Task 18.4.2 — value already converted into SubscriptionChange credit:
+        // the plan-change credit for this contract was issued from exactly this paid value
+        // (D-02: credit = MIN(unused value, eligible paid settlement)), so the credited amount
+        // is subtracted from the refundable base. Subtracting the FULL issued amount (not just
+        // the unconsumed remainder) is deliberate: the consumed portion already settled the
+        // new contract's invoice and must not reappear as cash either.
+        var alreadyConvertedCredit = alreadyIssuedSubscriptionChangeCredit > 0m
+            ? alreadyIssuedSubscriptionChangeCredit
+            : 0m;
+
+        var refundableAmount = paidMinusObligation - alreadyConvertedCredit;
 
         // Refund amount is the positive part (what customer receives back)
         var refundAmount = refundableAmount > 0 ? refundableAmount : 0;
 
-        // Customer outstanding is the negative part (what customer owes)
-        var customerOutstandingAmount = refundableAmount < 0 ? -refundableAmount : 0;
+        // Customer outstanding is the negative part of paid - obligation (what the customer owes
+        // for consumed value). The already-converted credit is NOT customer debt: it was already
+        // delivered to the customer, so it must not create a phantom outstanding balance.
+        var customerOutstandingAmount = paidMinusObligation < 0 ? -paidMinusObligation : 0;
 
         return new RefundCalculationResult
         {
@@ -166,6 +188,7 @@ public sealed class RefundCalculationService : IRefundCalculationService
             RemainingBenefitValue = remainingBenefitValue,
             CustomerEconomicObligation = customerEconomicObligation,
             AmountActuallyPaid = amountActuallyPaid,
+            AlreadyConvertedSubscriptionChangeCredit = alreadyConvertedCredit,
             RefundableAmount = refundableAmount,
             RefundAmount = refundAmount,
             CustomerOutstandingAmount = customerOutstandingAmount,

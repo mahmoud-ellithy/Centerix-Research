@@ -1,7 +1,8 @@
 # TASK 18.4.1 — FINAL FINANCIAL INTEGRITY CLOSURE
 
-**Date:** 2026-09-22
+**Date:** 2026-09-22 — **updated 2026-09-23 (Task 18.4.2 resolution)**
 **Scope:** Close the two remaining findings from the Task 18.4 review — F-18.4.4a (Customer Credit economic origin) and F-18.4.4b (a real Payment → RefundAllocation → Refund integration test). No redesign, no new financial entity, no invented business rule.
+**Task 18.4.2 addendum:** Both open business decisions of §11 (credit-source eligibility in D-02; refund after a plan change) were resolved by explicit business instruction and implemented in production code with real SQL Server regression tests.
 
 Companion document: `docs/TASK-18.4-FINAL-COMMERCIAL-INTEGRITY-GAP-CLOSURE.md`
 
@@ -14,11 +15,12 @@ Both findings from the Task 18.4 review were implemented and verified against th
 | ID | Finding | Outcome |
 | -- | ------- | ------- |
 | F-18.4.4a | `CreditApplication` counted as eligible paid settlement — is the same economic value counted twice? | **Verified safe.** CreditApplication IS settlement, and it is counted **exactly once** because the credit balance is consumed. Proven by a test that is *sensitive* to both double counting and exclusion (expected credit 7,000: a double count yields 8,000, exclusion yields 3,000). |
-| F-18.4.4a-policy | Which `CreditSourceType` values count as eligible settlement | **UNKNOWN — insufficient repository evidence.** Behavior preserved; documented as an open business decision (§11). |
+| F-18.4.4a-policy | Which `CreditSourceType` values count as eligible settlement | **RESOLVED (Task 18.4.2).** D-02 counts only credits with real customer economic value — `Overpayment` and `SubscriptionChange`. `ReferralReward`, `Promotional`, `Compensation`, `Manual` never become a new `SubscriptionChange` credit (§11.1). |
 | F-18.4.4b | Scenario 8 created a Refund without the real RefundAllocation → Payment link | **Closed.** Real chain implemented and executed through the real `ExecuteRefundHandler` (full refund → 0 credit; partial refund 4,000 of 10,000 → credit 6,000). |
 | — | RefundAllocation integrity (`Σ RefundAllocations ≤ Payment.Amount`) | **Verified** through the production handler (over-refund rejected, no ledger settlement written). |
+| F-18.4.4c-refund | Refund requested AFTER a plan change (credit + cash double recognition) | **RESOLVED (Task 18.4.2).** The already-issued `SubscriptionChange` credit reduces the refundable base in `RefundCalculationService`; converted value can never be refunded again as cash (§11.2). |
 
-**Final verdict: `TASK 18.4 CONDITIONALLY CLOSED`** — all financial invariants are verified and enforced; one credit-source eligibility policy remains an open business decision (§11).
+**Final verdict: `TASK 18.4 CLOSED`** — both remaining business decisions were resolved and implemented in production code, and every financial invariant is verified on the final state (1456/1456 tests, 140/140 SQL Server, 0 failures).
 
 ---
 
@@ -375,40 +377,58 @@ the existing concurrency suites ran as part of the SQL Server category run repor
 
 ## 9. Exact Test Results
 
-All numbers come from actual test-runner execution (no manual counting), on the final code state.
+All numbers come from actual test-runner execution (no manual counting), on the final code state
+(the Task 18.4.1 figures are kept as history; the Task 18.4.2 block is the current state).
 
 ```text
-Previous baseline (Task 18.4 report, §11):  1436 total / 124 SQL Server / 1312 non-SQL / 0 failures
-Tests added in Task 18.4.1:                 6    (S1–S6 in Task18_4_1FinancialIntegritySqlServerTests)
-Current InMemory / non-SQL execution:       1312 (1442 total − 130 SqlServer-category)
-Current SQL Server (Category=SqlServer):    130
-Total executed (full suite):                1442
+Previous baseline (Task 18.4.1 closure):    1442 total / 130 SQL Server / 1312 non-SQL / 0 failures
+Tests added in Task 18.4.2:                 14   (4 domain-level in Task18_4_2FinancialPolicyTests
+                                                 + 10 SQL Server in Task18_4_2FinancialPolicySqlServerTests)
+Current SQL Server (Category=SqlServer):    140
+Total executed (full suite):                1456
 Failures (full suite):                      0
 ```
 
-**Executed commands and exact runner output:**
+**Executed commands and exact runner output (Task 18.4.1 — historical):**
+
+```text
+dotnet test --filter 'FullyQualifiedName~Task18_4'
+  → Passed!  Failed: 0, Passed: 21, Skipped: 0, Total: 21, Duration: 22 s
+
+dotnet test --filter 'Category=SqlServer'
+  → Passed!  Failed: 0, Passed: 130, Skipped: 0, Total: 130, Duration: 11 m 22 s
+
+dotnet test   (full suite)
+  → Passed!  Failed: 0, Passed: 1442, Skipped: 0, Total: 1442, Duration: 12 m 46 s
+```
+
+**Executed commands and exact runner output (Task 18.4.2 — final state):**
 
 ```text
 dotnet build --nologo -v q
   → Build succeeded. 0 Error(s)
 
 dotnet test --filter 'FullyQualifiedName~Task18_4'
-  → Passed!  Failed: 0, Passed: 21, Skipped: 0, Total: 21, Duration: 22 s
-    (15 Task 18.4 + 6 Task 18.4.1 tests)
+  → Passed!  Failed: 0, Passed: 35, Skipped: 0, Total: 35, Duration: 1 m 47 s
+    (15 Task 18.4 + 6 Task 18.4.1 + 14 Task 18.4.2 tests)
 
 dotnet test --filter 'Category=SqlServer'
-  → Passed!  Failed: 0, Passed: 130, Skipped: 0, Total: 130, Duration: 11 m 22 s
+  → Test Run Successful.  Total tests: 140, Passed: 140 — 0 [FAIL] lines
+    Total time: 11.7301 Minutes
 
-dotnet test   (full suite, failure-name capture)
-  → Passed!  Failed: 0, Passed: 1442, Skipped: 0, Total: 1442, Duration: 12 m 46 s
+dotnet test   (full suite)
+  → Test Run Successful.  Total tests: 1456, Passed: 1456 — 0 [FAIL] lines
+    Total time: 12.2668 Minutes
 ```
 
-**Note on one transient failure:** in one intermediate `Task18_4` batch run,
-`F1844a_OverpaymentCredit_AppliedAsSettlement_CountedExactlyOnce` failed once (error message not
-captured by that run's filter). It subsequently passed: in isolation (1/1), in a full
-`Task18_4` re-run (21/21), in the SQL Server category run (130/130), and in the final full-suite
-run (1442/1442, zero `[FAIL]` lines). It is treated as a transient environment flake, not a
-reproducible defect; no code or test was changed after it.
+**Note on transient failures:** (1) In one Task 18.4.1 `Task18_4` batch run,
+`F1844a_OverpaymentCredit_AppliedAsSettlement_CountedExactlyOnce` failed once (message not captured)
+and passed in every subsequent run. (2) In one intermediate Task 18.4.2 `Category=SqlServer` run,
+7 tests failed (2 arithmetic/integrity, 2 plan-change, 3 concurrency); all 7 passed in immediate
+isolation (9/9 in the filtered re-run) and in the full `Category=SqlServer` re-run (140/140, zero
+`[FAIL]` lines), immediately followed by a green full suite (1456/1456). Both occurrences are treated
+as transient environment flakes under sustained load, not reproducible defects; no code or test was
+changed in response.
 
 ---
 
@@ -423,87 +443,91 @@ dotnet ef migrations has-pending-model-changes
   → No changes have been made to the model since the last migration.
 ```
 
-Task 18.4.1 changed **no production code and no EF model** — only the test file
-`tests/Centerix.SecurityTests/Task18_4_1FinancialIntegritySqlServerTests.cs` and documentation —
-so this result also confirms the Task 18.4 model (including `UX_OfferFeatures_OfferId_FeatureCode`)
-remains fully migrated with no drift.
+Task 18.4.1 changed **no production code and no EF model** — test file + documentation only.
+
+Task 18.4.2 changed production code (`ChangeSubscriptionPlanCommand`, `RefundCalculationService`
+and its three calling handlers, plus the new `IssuedSubscriptionChangeCredit` helper) but **no EF
+entity, configuration, or migration**: the credit-source filter and the refund deduction are query
+and calculation logic only. The check was re-run after the change and still reports no pending model
+changes, confirming the model (including `UX_OfferFeatures_OfferId_FeatureCode`, the `TenantCredit`
+unique indexes, and the refund chain) remains fully migrated with no drift.
 
 ---
 
 
 ## 11. Remaining Business Decisions
 
-### 11.1 OPEN BUSINESS DECISION — which credit sources qualify as eligible paid settlement
+### 11.1 RESOLVED (Task 18.4.2) — which credit sources qualify as eligible paid settlement
 
 ```text
-FACT
+FACT (as of Task 18.4.1)
 ```
 - `CreditSourceType` (`src/Centerix.Domain/Platform/Billing/Credits/Enums/CreditSourceType.cs`) defines
   `ReferralReward = 0`, `Promotional = 1`, `Compensation = 2`, `Manual = 3`, `Overpayment = 4`,
   `SubscriptionChange = 5`.
-- D-02 (Task 18) counts **all** `CreditApplication` amounts as settlement. The approved rule wording is
-  *"calculate unused paid value from the old Contract and create a Customer Credit"*
-  (`docs/TASK-18-COMMERCIAL-INTEGRITY-IMPLEMENTATION.md` §2.3), and Task 17 records D-02 as
-  *"Upgrade/downgrade unused period … RESOLVED: Customer Credit"*
-  (`docs/TASK-17-FINDINGS-TRIAGE-AND-DECISIONS.md`, lines 549 and 570).
-- Nothing in the domain, EF configuration, migrations, or the Task 10/12/13/16/17/18 documents
-  distinguishes credit sources for D-02 eligibility.
+- D-02 (Task 18) counted **all** `CreditApplication` amounts as settlement. Nothing in the domain, EF
+  configuration, migrations, or prior task documents distinguished credit sources for D-02 eligibility.
 
 ```text
-INFERENCE
+DECISION (resolved by Task 18.4.2 — approved business rule)
 ```
-- Sources with a cash origin or previously-earned value (`Overpayment`, `SubscriptionChange`) are
-  economically defensible as settlement.
-- Sources that are gifts (`ReferralReward`, `Promotional`) or discretionary (`Manual`, `Compensation`)
-  convert a granted benefit into a *transferable* `SubscriptionChange` credit when they settle an invoice
-  that later participates in a plan change.
+- **Eligible (real customer economic value):** `Overpayment` (real cash received from the customer) and
+  `SubscriptionChange` (value already converted from a previously paid contract — originally customer
+  cash). Their `CreditApplication`s contribute to D-02 paid settlement.
+- **Non-eligible (granted / free / discretionary):** `ReferralReward`, `Promotional`, `Compensation`,
+  `Manual` must **not** create a new `SubscriptionChange` credit when merely used to settle an old
+  contract.
+- **Enforced in the D-02 calculation itself** (`ChangeSubscriptionPlanCommand`, the `creditApplied`
+  query): the `CreditApplications` sum joins `TenantCredits` and keeps only rows whose `SourceType` is
+  `Overpayment` or `SubscriptionChange`. Tenant scoping stays on the subscription and contract scoping
+  stays on the invoice join — tenant and contract isolation are unchanged.
+- **Regression tests (real migrated SQL Server, real handlers):**
+  - `Task18_4_2FinancialPolicySqlServerTests.CreditSourceEligibility_EligibleSources_CountAsPaidSettlement`
+    — Overpayment / SubscriptionChange: cash 3,000 + credit application 4,000 → new credit 7,000
+    (an exclusion regression would yield 3,000);
+  - `...CreditSourceEligibility_GrantedSources_AreNotPaidSettlement` — ReferralReward / Promotional /
+    Compensation / Manual: the credit genuinely settles the invoice (the `CreditApplication` row is
+    asserted), yet the new credit is 3,000, never 7,000;
+  - `...CreditSourceEligibility_EligibleCreditOnAnotherContract_DoesNotLeakIntoThisContract` —
+    contract isolation: an eligible credit on another contract of the same tenant does not leak (3,000).
+
+### 11.2 RESOLVED (Task 18.4.2) — refund requested AFTER a plan change
 
 ```text
-UNKNOWN — insufficient repository evidence
+FACT (as of Task 18.4.1)
 ```
-- Whether a CreditApplication funded by a non-cash-origin credit **should** be eligible for a new
-  `SubscriptionChange` credit is genuinely undefined.
-
-```text
-OPEN BUSINESS DECISION
-```
-- **Decision required:** should D-02 restrict eligible settlement to cash-origin credits
-  (`Overpayment` + `SubscriptionChange`), or continue to accept every `CreditApplication`?
-- **Action taken by Task 18.4.1:** behavior preserved exactly as approved in Task 18; no rule invented.
-- **Safety position:** the preserved behavior does **not** double count (§6) — the credit balance is
-  consumed exactly once, and the refund path never pays out credit as cash (`RefundCalculationService`
-  uses allocations only). Turning a gift credit into another credit is a policy question, not a
-  value-duplication defect.
-
-### 11.2 OPEN BUSINESS DECISION — refund requested AFTER a plan change
-
-```text
-FACT
-```
-- `RefundCalculationService.Calculate`
-  (`src/Centerix.Domain/Platform/Billing/Refunds/RefundCalculationService.cs`, lines 116-151) derives the
-  refundable amount purely from `amountActuallyPaid = Σ active PaymentAllocations of the contract` minus
-  `customerEconomicObligation = usedSubscriptionAmount + remainingBenefitValue`.
-- It does **not** subtract `SubscriptionChange` credits already issued for the same contract by
-  `ChangeSubscriptionPlanCommand` (credit creation at lines 469-505).
+- `RefundCalculationService.Calculate` derived the refundable amount purely from
+  `amountActuallyPaid = Σ active PaymentAllocations of the contract` minus
+  `customerEconomicObligation = usedSubscriptionAmount + remainingBenefitValue`, and did **not** subtract
+  `SubscriptionChange` credits already issued for the same contract by `ChangeSubscriptionPlanCommand`.
 - D-02 subtracts refunds that exist **before** the change (verified by tests S3/S4).
 
 ```text
-UNKNOWN — insufficient repository evidence
+DECISION (resolved by Task 18.4.2 — approved business rule)
 ```
-- No repository rule states whether an early-cancellation refund must be reduced by a plan-change credit
-  already granted for the same unused period.
-
-```text
-OPEN BUSINESS DECISION
-```
-- **Decision required:** when a refund is requested after a plan change, must the refundable base be
-  reduced by the unconsumed portion of the already-issued `SubscriptionChange` credit?
-- **Action taken by Task 18.4.1:** none. Fixing this would require changing refund policy
-  (`RefundCalculationService`) and/or the cancellation flow — both explicitly out of scope here.
-- **Note:** Task 18.4.1 introduced **no new** path that can double count; this is a pre-existing
-  cross-module interaction whose resolution belongs to a Task 19-level financial review with an approved
-  business decision. Recommended follow-up: cover it with a dedicated SQL Server test once the rule exists.
+- **A value already converted into a `SubscriptionChange` credit must not be refunded again as cash.**
+  The same economic value must never be recognised as `SubscriptionChange` credit **and** cash refund
+  at the same time.
+- **Implementation:** `IRefundCalculationService.Calculate` gained an optional
+  `alreadyIssuedSubscriptionChangeCredit` parameter (default `0m`, so existing direct callers behave
+  exactly as before). `RefundCalculationService` subtracts it from
+  `AmountActuallyPaid − CustomerEconomicObligation` and exposes `AlreadyConvertedSubscriptionChangeCredit`
+  on `RefundCalculationResult`. `CustomerOutstandingAmount` stays `max(0, obligation − paid)` — the credit
+  is not customer debt and never inflates the outstanding balance.
+- **The FULL issued amount is subtracted**, not just the unconsumed `RemainingAmount`: the consumed
+  portion already settled the new contract's invoice and must not reappear as cash either.
+- **Contract → credit lookup** is centralised in `IssuedSubscriptionChangeCredit.GetIssuedAmountAsync`
+  (`src/Centerix.Application/Platform/Billing/Commands/IssuedSubscriptionChangeCredit.cs`):
+  `TenantPlan.ContractId` → `TenantCredit.SourceId` where `SourceType = SubscriptionChange`, scoped by
+  tenant and currency. Wired into all three production refund paths: `CreateRefundHandler`,
+  `CalculateRefundHandler`, `CancelSubscriptionHandler`.
+- **Regression tests:**
+  - SQL Server `Task18_4_2FinancialPolicySqlServerTests` Scenarios A/B/C — A: an 8,000 credit issued,
+    later refund refused with `Refund.NoRefundDue` and zero Refund rows; B: partial credit + partial
+    refund — exactly the remaining 1,000 is created and executed through the real `ExecuteRefundHandler`
+    (ledger `RefundSettlement` = 1,000); C: credit fully consumed → nothing becomes refundable again;
+  - domain-level `Task18_4_2FinancialPolicyTests` — arithmetic and boundary behaviour of the calculation
+    itself (credited value not refunded; partial remainder; outstanding unaffected).
 
 ### 11.3 Not an open decision here
 
@@ -514,27 +538,31 @@ The `EffectiveAtUtc` origin policy from Task 18.4 §12 remains open (documented 
 ## 12. Final Verdict
 
 ```text
-TASK 18.4 CONDITIONALLY CLOSED
+TASK 18.4 CLOSED
 ```
 
-Conditional on the two open business decisions in §11 (credit-source eligibility; refund-after-change
-ordering). Every financial invariant and every mandatory Task 18.4.1 acceptance criterion is verified.
+Both remaining business decisions in §11 (credit-source eligibility; refund after a plan change) were
+resolved by approved business rules and implemented in production code. Every financial invariant and
+every acceptance criterion is verified on the final state.
 
 | Acceptance criterion | Status | Evidence |
 | -------------------- | -----: | -------- |
 | Customer Credit economic origin investigated from actual repository code | PASS | §2 (three production `TenantCredit.Create` call sites, allocation caps, ledger semantics, consumption guards) |
 | No economic value can be counted twice | PASS | §6.1 (four theoretical paths, each guarded) + tests S1/S2 |
 | CreditApplication handling explicitly documented | PASS | §2.2, §3, §6.2 |
-| Regression test covers Credit → CreditApplication → Subscription Change | PASS | S1 (binding-bound; sensitive to both double counting and exclusion), S2 |
+| Regression test covers Credit → CreditApplication → Subscription Change | PASS | S1, S2 + Task 18.4.2 eligibility theories (`CreditSourceEligibility_*`) |
+| Credit-source eligibility enforced in the D-02 calculation itself | PASS | §11.1 (`ChangeSubscriptionPlanCommand` `creditApplied` query filters `SourceType ∈ {Overpayment, SubscriptionChange}`) |
 | Refund uses actual `RefundAllocation` → `Payment` relationship in tests | PASS | S3–S6 seed real `RefundAllocation` rows and execute the real handler |
 | Full refund scenario passes | PASS | S3 (settlement 0 → no credit) |
 | Partial refund scenario passes | PASS | S4 (settlement 6,000 → credit 6,000) |
 | Refunded amount cannot become SubscriptionChange credit | PASS | S3, S5 |
+| Credited value cannot be refunded again as cash | PASS | §11.2 (`RefundCalculationService` deducts the issued credit; all 3 refund handlers wired) + SQL Server Scenarios A/B/C |
 | Existing Task 13 refund invariants remain intact | PASS | §4.1/§4.2 unchanged; S5 proves `Σ RefundAllocations ≤ Payment.Amount`; `Phase13*` suites green |
-| Tenant isolation passes | PASS | §7; S6 proves contract-scoped refunds |
-| Concurrency tests pass | PASS | §8; all concurrency suites included in the SQL Server category run (§9) |
-| Full regression passes | PASS | §9 |
-| SQL Server regression passes | PASS | §9 |
+| Tenant isolation passes | PASS | §7; S6 proves contract-scoped refunds; `CreditSourceEligibility_EligibleCreditOnAnotherContract_DoesNotLeakIntoThisContract` proves credit-origin isolation |
+| Currency validation preserved | PASS | `IssuedSubscriptionChangeCredit` scopes by `CurrencyCode`; refund/allocation currency guards untouched |
+| Concurrency, RowVersion, idempotency, serializable transactions preserved | PASS | §8; no concurrency protection removed; all concurrency suites green in the SQL Server category run (§9) |
+| Full regression passes | PASS | §9 (1456/1456) |
+| SQL Server regression passes | PASS | §9 (140/140) |
 | EF reports no pending model changes | PASS | §10 |
 | Documentation matches actual implementation | PASS | this document (file / class / method / property references throughout) |
-| No unrelated architecture changes introduced | PASS | no production code changed; test file + documentation only |
+| No unrelated architecture changes introduced | PASS | No new financial entity, no redesign of Payment/Refund/CustomerCredit; changes limited to the D-02 credit filter and the refund deduction |

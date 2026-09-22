@@ -428,7 +428,7 @@ public class ChangeSubscriptionPlanHandler(
                     {
                         // ── Eligible PAID SETTLEMENT of the old contract ──
                         // Settlement = active PaymentAllocations on the old contract's invoices
-                        //            + valid CreditApplications on the old contract's invoices
+                        //            + eligible CreditApplications on the old contract's invoices
                         //            − executed Refunds associated with the old contract.
                         //
                         // 1) CreditApplication IS monetary settlement: Invoice.GetRemainingAmount()
@@ -437,6 +437,15 @@ public class ChangeSubscriptionPlanHandler(
                         // 2) ExecuteRefund does NOT reverse PaymentAllocations (they stay Active),
                         //    so refunded money must be subtracted explicitly via Refund.ContractId
                         //    (Refund carries an exact contract link — no pro-rating is invented).
+                        //
+                        // Task 18.4.2 — credit-source eligibility (approved business rule):
+                        //    Only credits with real customer economic value count as paid settlement:
+                        //      • Overpayment        — real cash already received from the customer
+                        //      • SubscriptionChange — value already converted from a previous
+                        //                             paid contract (originally customer cash)
+                        //    Granted/free/discretionary sources (ReferralReward, Promotional,
+                        //    Compensation, Manual) are NOT customer-paid value and must never be
+                        //    re-recognised as a new SubscriptionChange credit.
                         var paymentAllocated = await dbContext.Payments
                             .Where(p => p.TenantId == oldSubscription.TenantId
                                      && p.Status == PaymentStatus.Completed
@@ -448,6 +457,11 @@ public class ChangeSubscriptionPlanHandler(
 
                         var creditApplied = await dbContext.CreditApplications
                             .Where(ca => ca.TenantId == oldSubscription.TenantId
+                                     && dbContext.TenantCredits.Any(tc =>
+                                         tc.Id == ca.CreditId
+                                         && tc.TenantId == oldSubscription.TenantId
+                                         && (tc.SourceType == CreditSourceType.Overpayment
+                                             || tc.SourceType == CreditSourceType.SubscriptionChange))
                                      && dbContext.Invoices.Any(i =>
                                          i.TenantId == oldSubscription.TenantId
                                          && i.Id == ca.InvoiceId

@@ -50,12 +50,19 @@ public class CalculateRefundHandler(
                     && a.Invoice.ContractId == contract.Id))
             .ToListAsync(cancellationToken);
 
+        // Task 18.4.2 — refund-after-subscription-change policy: the preview must match the
+        // real refund calculation, so the already-issued SubscriptionChange credit for this
+        // contract is deducted from the refundable base here as well.
+        var alreadyIssuedSubscriptionChangeCredit = await IssuedSubscriptionChangeCredit.GetIssuedAmountAsync(
+            dbContext, contract.TenantId!, contract.Id, contract.CurrencyCode, cancellationToken);
+
         // Perform the deterministic calculation
         var result = calculationService.Calculate(
             contract,
             request.AsOfUtc,
             payments,
-            contract.Benefits);
+            contract.Benefits,
+            alreadyIssuedSubscriptionChangeCredit);
 
         return result;
     }

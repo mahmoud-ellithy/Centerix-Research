@@ -207,11 +207,18 @@ public class CancelSubscriptionHandler(
                             && a.Invoice.ContractId == contract.Id))
                     .ToListAsync(cancellationToken);
 
+                // Task 18.4.2 — refund-after-subscription-change policy: value already
+                // converted into a SubscriptionChange credit for this contract must not be
+                // refunded again as cash; the issued credit is deducted from the refundable base.
+                var alreadyIssuedSubscriptionChangeCredit = await IssuedSubscriptionChangeCredit.GetIssuedAmountAsync(
+                    dbContext, contract.TenantId!, contract.Id, contract.CurrencyCode, cancellationToken);
+
                 calculation = calculationService.Calculate(
                     contract,
                     request.CancellationDateUtc,
                     payments,
-                    contract.Benefits);
+                    contract.Benefits,
+                    alreadyIssuedSubscriptionChangeCredit);
 
                 if (calculation.IsRefundDue)
                 {

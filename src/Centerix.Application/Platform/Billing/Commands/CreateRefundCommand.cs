@@ -101,12 +101,19 @@ public class CreateRefundHandler(
                     && a.Invoice.ContractId == request.ContractId))
             .ToListAsync(cancellationToken);
 
+        // Task 18.4.2 — refund-after-subscription-change policy:
+        // value already converted into a SubscriptionChange credit for this contract must not
+        // be refunded again as cash; the issued credit is deducted from the refundable base.
+        var alreadyIssuedSubscriptionChangeCredit = await IssuedSubscriptionChangeCredit.GetIssuedAmountAsync(
+            dbContext, contract.TenantId!, request.ContractId, contract.CurrencyCode, cancellationToken);
+
         // Derive the refund amount from the calculation service
         var calculation = calculationService.Calculate(
             contract,
             DateTime.UtcNow,
             payments,
-            contract.Benefits);
+            contract.Benefits,
+            alreadyIssuedSubscriptionChangeCredit);
 
         // If no refund is due (RefundAmount = 0, meaning customer owes money),
         // return an error with the CustomerOutstandingAmount preserved.
@@ -174,6 +181,7 @@ public class CreateRefundHandler(
                 refund.CurrencyCode,
                 refund.Reason,
                 CustomerOutstandingAmount = calculation.CustomerOutstandingAmount,
+                AlreadyConvertedSubscriptionChangeCredit = calculation.AlreadyConvertedSubscriptionChangeCredit,
                 Status = refund.Status.ToString()
             }),
             cancellationToken: cancellationToken);
