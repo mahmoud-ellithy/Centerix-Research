@@ -273,8 +273,33 @@ dotnet test --filter 'Category=SqlServer'
 ## 13. Final Verdict
 
 ```text
-TASK 18.4 CLOSED
+TASK 18.4 CONDITIONALLY CLOSED
 ```
+
+Superseded by the Task 18.4.1 review: `docs/TASK-18.4.1-FINAL-FINANCIAL-INTEGRITY-CLOSURE.md`.
+
+The conditional status reflects two **business policy** questions that the repository does not answer
+(they are not implementation defects, and no rule was invented):
+
+1. **Which `CreditSourceType` values qualify as eligible paid settlement.** The implemented calculation
+   counts every `CreditApplication` and was verified value-conserving (the credit balance is consumed
+   exactly once), but no business document states whether non-cash-origin credits (`ReferralReward`,
+   `Promotional`, `Compensation`, `Manual`) should be eligible for a new `SubscriptionChange` credit.
+2. **A refund requested *after* a plan change.** `RefundCalculationService` derives the refundable amount
+   from payment allocations only and does not reduce it by an already-issued `SubscriptionChange` credit.
+   Whether it must do so is not defined anywhere in the repository.
+
+Both are recorded as `OPEN BUSINESS DECISION / UNKNOWN — insufficient repository evidence` in
+`docs/TASK-18.4.1-FINAL-FINANCIAL-INTEGRITY-CLOSURE.md` §11. All financial invariants, all SQL Server
+scenarios and the full regression are verified — see that document §9 and §12.
+
+Additional hardening delivered by Task 18.4.1:
+
+- F-18.4.4b: the refund test now uses the genuine
+  `Payment → PaymentAllocation → Invoice → Refund → RefundAllocation → Payment` chain executed through the
+  real `ExecuteRefundHandler` (the Task 18.4 Scenario 8 refund carried no `RefundAllocation`).
+- F-18.4.4a: a binding-bound double-count regression test (expected `SubscriptionChange` credit 7,000 —
+  a double count yields 8,000, exclusion yields 3,000) plus a consumption-once mechanism test.
 
 Acceptance criteria mapping (evidence in sections above):
 
