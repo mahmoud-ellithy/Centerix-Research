@@ -476,7 +476,13 @@ public class ChangeSubscriptionPlanHandler(
                                          && i.ContractId == oldContract.Id))
                             .SumAsync(ca => ca.Amount, cancellationToken);
 
-                        var subscriptionChangeCreditApplied = await dbContext.CreditApplications
+                        // Task 18.5.1 — lineage propagation: fetch individual CreditApplications for
+                        // SubscriptionChange credits to compute proportional transferred-origin
+                        // contribution from each consumed credit's TransferredPaidAmount.
+                        // The total subscriptionChangeCreditApplied (legacy variable name) is needed
+                        // for paidAmount calculation (total economic settlement), but transferred
+                        // lineage must be derived proportionally per credit consumed.
+                        var subscriptionChangeApplications = await dbContext.CreditApplications
                             .Where(ca => ca.TenantId == oldSubscription.TenantId
                                      && dbContext.TenantCredits.Any(tc =>
                                          tc.Id == ca.CreditId
@@ -487,7 +493,10 @@ public class ChangeSubscriptionPlanHandler(
                                          i.TenantId == oldSubscription.TenantId
                                          && i.Id == ca.InvoiceId
                                          && i.ContractId == oldContract.Id))
-                            .SumAsync(ca => ca.Amount, cancellationToken);
+                            .Select(ca => new { ca.CreditId, ca.Amount })
+                            .ToListAsync(cancellationToken);
+
+                        var subscriptionChangeCreditApplied = subscriptionChangeApplications.Sum(ca => ca.Amount);
 
                         var refunded = await dbContext.Refunds
                             .Where(r => r.TenantId == oldSubscription.TenantId
@@ -501,12 +510,39 @@ public class ChangeSubscriptionPlanHandler(
 
                         var creditAmount = Math.Min(unusedValue, paidAmount);
 
-                        // Task 18.5 — economic-origin lineage: the transferred portion of the new
-                        // credit can never exceed the value prior-generation SubscriptionChange
-                        // credits actually settled on this contract, so multi-generation value
-                        // can move between contracts but never multiply. The remainder is direct
-                        // customer-paid origin (cash + Overpayment credits settled here).
-                        var transferredPaidAmount = Math.Min(creditAmount, subscriptionChangeCreditApplied);
+                        // Task 18.5.1 — proportional transferred-origin lineage:
+                        // For each consumed SubscriptionChange credit, calculate its proportional
+                        // contribution to transferred lineage: (Application.Amount / Credit.Amount) *
+                        // Credit.TransferredPaidAmount. This ensures the new credit never attributes
+                        // more transferred origin than the predecessor credits actually contained.
+                        decimal transferredPaidAmount = 0m;
+                        if (creditAmount > 0 && subscriptionChangeApplications.Count > 0)
+                        {
+                            var consumedCreditIds = subscriptionChangeApplications.Select(ca => ca.CreditId).Distinct().ToList();
+                            var consumedCredits = await dbContext.TenantCredits
+                                .Where(tc => consumedCreditIds.Contains(tc.Id))
+                                .Select(tc => new { tc.Id, tc.Amount, tc.TransferredPaidAmount })
+                                .ToDictionaryAsync(tc => tc.Id, cancellationToken);
+
+                            foreach (var application in subscriptionChangeApplications)
+                            {
+                                if (consumedCredits.TryGetValue(application.CreditId, out var credit))
+                                {
+                                    // Proportional transferred contribution from this credit
+                                    var proportion = credit.Amount > 0
+                                        ? application.Amount / credit.Amount
+                                        : 0m;
+                                    transferredPaidAmount += proportion * credit.TransferredPaidAmount;
+                                }
+                            }
+                        }
+
+                        // Task 18.5 — economic-origin lineage invariant:
+                        // transferredPaidAmount cannot exceed the total SubscriptionChange settlement
+                        // (cap at subscriptionChangeCreditApplied if creditAmount > it, which
+                        // happens when unusedValue > paidAmount — an edge case).
+                        if (transferredPaidAmount > subscriptionChangeCreditApplied)
+                            transferredPaidAmount = subscriptionChangeCreditApplied;
 
                         if (creditAmount > 0)
                         {
