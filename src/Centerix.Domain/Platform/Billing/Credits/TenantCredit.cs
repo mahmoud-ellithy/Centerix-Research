@@ -15,6 +15,40 @@ public class TenantCredit : AuditableEntity<Guid>
     public string CurrencyCode { get; private set; } = "EGP";
     public string? IdempotencyKey { get; private set; }
 
+    /// <summary>
+    /// Task 18.5 — economic-origin lineage (immutable after creation).
+    /// The portion of <see cref="Amount"/> that is customer-paid value TRANSFERRED from prior
+    /// <see cref="CreditSourceType.SubscriptionChange"/> credits (value that already existed as
+    /// customer-paid economic value on a predecessor contract). The remainder of a
+    /// SubscriptionChange credit's amount is DIRECT customer-paid origin (payments and
+    /// Overpayment credits settled on the old contract).
+    /// Always 0 for Overpayment (direct, payment-backed: <see cref="SourceId"/> = payment id)
+    /// and for non-customer-paid sources (ReferralReward, Promotional, Compensation, Manual).
+    /// Bound: 0 &lt;= TransferredPaidAmount &lt;= Amount.
+    /// </summary>
+    public decimal TransferredPaidAmount { get; private set; }
+
+    /// <summary>
+    /// Task 18.5 — the portion of <see cref="Amount"/> that is DIRECT customer-paid origin
+    /// (not transferred through a prior SubscriptionChange credit). Computed, not persisted.
+    /// </summary>
+    public decimal DirectPaidAmount =>
+        SourceType == CreditSourceType.SubscriptionChange
+            ? Amount - TransferredPaidAmount
+            : CustomerPaidEconomicValue;
+
+    /// <summary>
+    /// Task 18.5 — the customer-paid economic value represented by this credit. Task 18.4.2
+    /// business rule: only <see cref="CreditSourceType.Overpayment"/> (real cash received from
+    /// the customer) and <see cref="CreditSourceType.SubscriptionChange"/> (value converted from
+    /// a previously paid contract) carry customer economic value. Granted/free/discretionary
+    /// sources always represent 0 customer-paid economic value. Computed, not persisted.
+    /// </summary>
+    public decimal CustomerPaidEconomicValue =>
+        SourceType == CreditSourceType.Overpayment || SourceType == CreditSourceType.SubscriptionChange
+            ? Amount
+            : 0m;
+
     // Optimistic-concurrency token (SQL Server rowversion, store-generated)
     public byte[] RowVersion { get; internal set; } = [];
 
@@ -27,7 +61,8 @@ public class TenantCredit : AuditableEntity<Guid>
         Guid? sourceId,
         CreditStatus status,
         string currencyCode,
-        string? idempotencyKey = null)
+        string? idempotencyKey,
+        decimal transferredPaidAmount = 0m)
         : base(id)
     {
         Amount = amount;
@@ -37,6 +72,7 @@ public class TenantCredit : AuditableEntity<Guid>
         Status = status;
         CurrencyCode = currencyCode;
         IdempotencyKey = idempotencyKey;
+        TransferredPaidAmount = transferredPaidAmount;
     }
 
     public static Result<TenantCredit> Create(
@@ -56,7 +92,47 @@ public class TenantCredit : AuditableEntity<Guid>
         if (string.IsNullOrWhiteSpace(currencyCode))
             return Error.Validation("TenantCredit.CurrencyRequired", "Currency code is required.");
 
+        // Generic creation path: no explicit lineage composition is known, so the credit is
+        // classified without transferred origin (direct customer-paid for eligible sources,
+        // zero customer-paid value for granted sources). The plan-change handler always uses
+        // CreateSubscriptionChange to persist the exact multi-generation composition.
         return new TenantCredit(id, amount, sourceType, sourceId, CreditStatus.Available, currencyCode.ToUpperInvariant(), idempotencyKey);
+    }
+
+    /// <summary>
+    /// Task 18.5 — creates a SubscriptionChange credit carrying its immutable economic-origin
+    /// lineage. <paramref name="transferredPaidAmount"/> is the portion of <paramref name="amount"/>
+    /// that is customer-paid value transferred from prior SubscriptionChange credits which
+    /// settled the old contract; the remainder is direct customer-paid origin. This guarantees
+    /// generation N+1 can never attribute more transferred value than the prior generation
+    /// credits actually contributed (no multiplication across generations).
+    /// </summary>
+    public static Result<TenantCredit> CreateSubscriptionChange(
+        Guid id,
+        decimal amount,
+        Guid sourceId,
+        decimal transferredPaidAmount,
+        string currencyCode = "EGP",
+        string? idempotencyKey = null)
+    {
+        if (amount <= 0)
+            return TenantCreditErrors.InvalidAmount;
+
+        if (string.IsNullOrWhiteSpace(currencyCode))
+            return Error.Validation("TenantCredit.CurrencyRequired", "Currency code is required.");
+
+        if (transferredPaidAmount < 0 || transferredPaidAmount > amount)
+            return TenantCreditErrors.InvalidTransferredPaidAmount;
+
+        return new TenantCredit(
+            id,
+            amount,
+            CreditSourceType.SubscriptionChange,
+            sourceId,
+            CreditStatus.Available,
+            currencyCode.ToUpperInvariant(),
+            idempotencyKey,
+            transferredPaidAmount);
     }
 
     public Result<Updated> Apply(Guid invoiceLineId)

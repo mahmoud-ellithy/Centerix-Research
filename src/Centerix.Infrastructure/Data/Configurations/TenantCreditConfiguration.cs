@@ -24,6 +24,18 @@ public class TenantCreditConfiguration : IEntityTypeConfiguration<TenantCredit>
         builder.Property(tc => tc.RemainingAmount)
             .HasPrecision(10, 2);
 
+        // Task 18.5 — immutable economic-origin lineage: the portion of Amount that is
+        // customer-paid value transferred from prior SubscriptionChange credits.
+        // The invariant 0 <= TransferredPaidAmount <= Amount is additionally enforced by
+        // CK_TenantCredits_TransferredPaidAmount_Bounded (see Task18_5 migration).
+        builder.Property(tc => tc.TransferredPaidAmount)
+            .HasPrecision(10, 2);
+
+        // Computed lineage classifiers — derived from SourceType/TransferredPaidAmount,
+        // never persisted.
+        builder.Ignore(tc => tc.DirectPaidAmount);
+        builder.Ignore(tc => tc.CustomerPaidEconomicValue);
+
         builder.Property(tc => tc.SourceType)
             .HasConversion<string>()
             .HasMaxLength(20)

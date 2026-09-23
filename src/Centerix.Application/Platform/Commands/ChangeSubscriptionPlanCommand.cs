@@ -446,6 +446,14 @@ public class ChangeSubscriptionPlanHandler(
                         //    Granted/free/discretionary sources (ReferralReward, Promotional,
                         //    Compensation, Manual) are NOT customer-paid value and must never be
                         //    re-recognised as a new SubscriptionChange credit.
+                        //
+                        // Task 18.5 — the eligible settlement is split by economic origin so the
+                        // new credit can carry immutable lineage metadata:
+                        //      • Overpayment applications        → direct customer-paid origin
+                        //      • SubscriptionChange applications  → transferred customer-paid origin
+                        //    Currency scoping mirrors the payment/refund queries (Task 18.5 §20.13:
+                        //    a credit in one currency must never contribute to another currency's
+                        //    settlement).
                         var paymentAllocated = await dbContext.Payments
                             .Where(p => p.TenantId == oldSubscription.TenantId
                                      && p.Status == PaymentStatus.Completed
@@ -455,13 +463,26 @@ public class ChangeSubscriptionPlanHandler(
                                 && a.Invoice.ContractId == oldContract.Id))
                             .SumAsync(a => a.AllocatedAmount, cancellationToken);
 
-                        var creditApplied = await dbContext.CreditApplications
+                        var overpaymentCreditApplied = await dbContext.CreditApplications
                             .Where(ca => ca.TenantId == oldSubscription.TenantId
                                      && dbContext.TenantCredits.Any(tc =>
                                          tc.Id == ca.CreditId
                                          && tc.TenantId == oldSubscription.TenantId
-                                         && (tc.SourceType == CreditSourceType.Overpayment
-                                             || tc.SourceType == CreditSourceType.SubscriptionChange))
+                                         && tc.SourceType == CreditSourceType.Overpayment
+                                         && tc.CurrencyCode == oldContract.CurrencyCode)
+                                     && dbContext.Invoices.Any(i =>
+                                         i.TenantId == oldSubscription.TenantId
+                                         && i.Id == ca.InvoiceId
+                                         && i.ContractId == oldContract.Id))
+                            .SumAsync(ca => ca.Amount, cancellationToken);
+
+                        var subscriptionChangeCreditApplied = await dbContext.CreditApplications
+                            .Where(ca => ca.TenantId == oldSubscription.TenantId
+                                     && dbContext.TenantCredits.Any(tc =>
+                                         tc.Id == ca.CreditId
+                                         && tc.TenantId == oldSubscription.TenantId
+                                         && tc.SourceType == CreditSourceType.SubscriptionChange
+                                         && tc.CurrencyCode == oldContract.CurrencyCode)
                                      && dbContext.Invoices.Any(i =>
                                          i.TenantId == oldSubscription.TenantId
                                          && i.Id == ca.InvoiceId
@@ -475,10 +496,17 @@ public class ChangeSubscriptionPlanHandler(
                                      && r.CurrencyCode == oldContract.CurrencyCode)
                             .SumAsync(r => r.Amount, cancellationToken);
 
-                        var paidAmount = paymentAllocated + creditApplied - refunded;
+                        var paidAmount = paymentAllocated + overpaymentCreditApplied + subscriptionChangeCreditApplied - refunded;
                         if (paidAmount < 0) paidAmount = 0;
 
                         var creditAmount = Math.Min(unusedValue, paidAmount);
+
+                        // Task 18.5 — economic-origin lineage: the transferred portion of the new
+                        // credit can never exceed the value prior-generation SubscriptionChange
+                        // credits actually settled on this contract, so multi-generation value
+                        // can move between contracts but never multiply. The remainder is direct
+                        // customer-paid origin (cash + Overpayment credits settled here).
+                        var transferredPaidAmount = Math.Min(creditAmount, subscriptionChangeCreditApplied);
 
                         if (creditAmount > 0)
                         {
@@ -492,11 +520,11 @@ public class ChangeSubscriptionPlanHandler(
 
                             if (existingCredit is null)
                             {
-                                var creditResult = TenantCredit.Create(
+                                var creditResult = TenantCredit.CreateSubscriptionChange(
                                     Guid.NewGuid(),
                                     creditAmount,
-                                    CreditSourceType.SubscriptionChange,
-                                    sourceId: oldSubscription.Id,
+                                    oldSubscription.Id,
+                                    transferredPaidAmount,
                                     oldContract.CurrencyCode,
                                     idempotencyKey: $"sub-change-{oldSubscription.Id:N}");
 
@@ -526,47 +554,61 @@ public class ChangeSubscriptionPlanHandler(
 
                                 dbContext.CustomerLedgerEntries.Add(ledgerEntry.Value);
 
-                                // Apply credit to the new invoice — cap at invoice remaining amount
-                                var invoiceRemaining = invoice.GetRemainingAmount();
-                                var applicationAmount = Math.Min(creditAmount, invoiceRemaining);
-
-                                var creditApplicationResult = CreditApplication.Create(
-                                    Guid.NewGuid(),
-                                    unusedCredit.Id,
-                                    invoice.Id,
-                                    applicationAmount,
-                                    now,
-                                    $"subscription-change-{oldSubscription.Id:N}");
-
-                                if (!creditApplicationResult.IsSuccess)
-                                    return creditApplicationResult.Errors!;
-
-                                dbContext.CreditApplications.Add(creditApplicationResult.Value);
-
-                                var consumeResult = unusedCredit.ConsumeAmount(applicationAmount);
-                                if (!consumeResult.IsSuccess)
-                                    return consumeResult.Errors!;
-
-                                creditAppliedToInvoice = applicationAmount;
-
-                                // Create CreditUsage ledger entry — fail-fast per section #17
-                                var balanceAfterCreditCreation = ledgerEntry.Value.RunningBalance;
-
-                                var usageLedgerEntry = CustomerLedgerEntry.CreateCreditUsage(
-                                    Guid.NewGuid(),
-                                    unusedCredit.Id,
-                                    creditApplicationResult.Value.Id,
-                                    invoice.Id,
-                                    applicationAmount,
+                                // Task 18.5 §20.13 — currency isolation: the credit carries the
+                                // OLD contract's currency and must never settle an invoice whose
+                                // contract is denominated in a different currency. On a cross-
+                                // currency plan change the credit stays Available for invoices in
+                                // its own currency instead of contaminating the new settlement.
+                                var newInvoiceCurrencyMatches = string.Equals(
                                     oldContract.CurrencyCode,
-                                    balanceAfterCreditCreation,
-                                    now,
-                                    $"Credit applied to invoice from subscription change: {applicationAmount} {oldContract.CurrencyCode}");
+                                    contract.CurrencyCode,
+                                    StringComparison.OrdinalIgnoreCase);
 
-                                if (!usageLedgerEntry.IsSuccess)
-                                    return usageLedgerEntry.Errors!;
+                                if (newInvoiceCurrencyMatches)
+                                {
+                                    // Apply credit to the new invoice — cap at invoice remaining amount
+                                    var invoiceRemaining = invoice.GetRemainingAmount();
+                                    var applicationAmount = Math.Min(creditAmount, invoiceRemaining);
 
-                                dbContext.CustomerLedgerEntries.Add(usageLedgerEntry.Value);
+                                    var creditApplicationResult = CreditApplication.Create(
+                                        Guid.NewGuid(),
+                                        unusedCredit.Id,
+                                        invoice.Id,
+                                        applicationAmount,
+                                        now,
+                                        $"subscription-change-{oldSubscription.Id:N}");
+
+                                    if (!creditApplicationResult.IsSuccess)
+                                        return creditApplicationResult.Errors!;
+
+                                    dbContext.CreditApplications.Add(creditApplicationResult.Value);
+
+                                    var consumeResult = unusedCredit.ConsumeAmount(applicationAmount);
+                                    if (!consumeResult.IsSuccess)
+                                        return consumeResult.Errors!;
+
+                                    creditAppliedToInvoice = applicationAmount;
+
+                                    // Create CreditUsage ledger entry — fail-fast per section #17
+                                    var balanceAfterCreditCreation = ledgerEntry.Value.RunningBalance;
+
+                                    var usageLedgerEntry = CustomerLedgerEntry.CreateCreditUsage(
+                                        Guid.NewGuid(),
+                                        unusedCredit.Id,
+                                        creditApplicationResult.Value.Id,
+                                        invoice.Id,
+                                        applicationAmount,
+                                        oldContract.CurrencyCode,
+                                        balanceAfterCreditCreation,
+                                        now,
+                                        $"Credit applied to invoice from subscription change: {applicationAmount} {oldContract.CurrencyCode}");
+
+                                    if (!usageLedgerEntry.IsSuccess)
+                                        return usageLedgerEntry.Errors!;
+
+                                    dbContext.CustomerLedgerEntries.Add(usageLedgerEntry.Value);
+                                }
+
                                 dbContext.TenantCredits.Add(unusedCredit);
                             }
                             else
@@ -642,6 +684,7 @@ public class ChangeSubscriptionPlanHandler(
                     invoice.TotalAmount,
                     UnusedCreditId = unusedCredit?.Id,
                     UnusedCreditAmount = unusedCredit?.Amount ?? 0m,
+                    UnusedCreditTransferredPaidAmount = unusedCredit?.TransferredPaidAmount ?? 0m,
                     CreditAppliedToInvoice = creditAppliedToInvoice
                 }),
                 cancellationToken: cancellationToken);
@@ -716,7 +759,22 @@ public class ChangeSubscriptionPlanHandler(
 
     private static bool IsDeadlockException(Exception ex)
     {
-        return ex is Microsoft.Data.SqlClient.SqlException sqlEx && sqlEx.Number is 1205;
+        // SQL Server error 1205 = deadlock victim. EF Core (and its execution strategy) wrap
+        // the SqlException in DbUpdateException/InvalidOperationException while saving inside
+        // the SERIALIZABLE transaction, so the whole inner-exception chain must be inspected —
+        // mirroring IsDuplicateKeyException's unwrapping (Task 18.5 §20.14: a concurrent
+        // deadlock loser must resolve through the existing conflict/idempotency behavior,
+        // never escape as an unhandled exception).
+        var current = ex;
+        while (current is not null)
+        {
+            if (current is Microsoft.Data.SqlClient.SqlException sqlEx && sqlEx.Number is 1205)
+                return true;
+
+            current = current.InnerException;
+        }
+
+        return false;
     }
 
     /// <summary>

@@ -10,6 +10,10 @@ public static class TenantCreditErrors
     public static Error InvalidSourceType =>
         Error.Validation("TenantCredit.InvalidSourceType", "Invalid credit source type");
 
+    public static Error InvalidTransferredPaidAmount =>
+        Error.Validation("TenantCredit.InvalidTransferredPaidAmount",
+            "Transferred customer-paid amount must be between zero and the credit amount.");
+
     public static Error NotAvailable =>
         Error.Conflict("TenantCredit.NotAvailable", "Credit is not available for this operation");
 
