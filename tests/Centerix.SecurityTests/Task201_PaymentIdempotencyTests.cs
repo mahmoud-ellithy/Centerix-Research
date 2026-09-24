@@ -78,14 +78,15 @@ public class Task201_PaymentIdempotencyTests
         var cmdB = new CreatePaymentCommand("PAY-B001", 2000m, "EGP", PaymentMethod.Cash, "key-b");
         var resultB = await handler.Handle(cmdB, CancellationToken.None);
 
-        // Same key + different payload behavior:
-        // - InMemory: pre-check uses AsNoTracking() which may not see recently added entities,
-        //   so both may succeed (no unique constraint enforcement).
-        // - SQL Server: UX_Payments_TenantId_IdempotencyKey enforces conflict.
-        // The handler correctly detects same key + different payload and returns conflict.
-        // See Task201_PaymentIdempotencySqlServerTests for SQL Server verification.
-        Assert.True(resultB.IsSuccess || !resultB.IsSuccess,
-            "Handler must not crash regardless of idempotency key enforcement mode");
+        // Case B — Same key + different payload:
+        // InMemory limitation: AsNoTracking() pre-check doesn't see entities added in the same
+        // DbContext instance, so both requests succeed (no unique constraint enforcement).
+        // The handler does NOT crash — it processes both requests deterministically.
+        // SQL Server verification: See Payment_ConcurrentSameKeyDifferentPayload_ExactlyOneConflict
+        // in Task201_PaymentIdempotencySqlServerTests for actual conflict detection proof.
+        Assert.True(resultA.IsSuccess);
+        Assert.True(resultB.IsSuccess, "InMemory: AsNoTracking() pre-check doesn't see existing entity");
+        Assert.NotEqual(resultA.Value, resultB.Value);
     }
 
     // ==================================================================
