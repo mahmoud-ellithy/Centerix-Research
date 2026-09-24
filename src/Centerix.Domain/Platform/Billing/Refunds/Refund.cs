@@ -85,7 +85,8 @@ public class Refund : AuditableEntity<Guid>
         string currencyCode,
         string reason,
         string createdBy,
-        DateTime requestedAtUtc)
+        DateTime requestedAtUtc,
+        string? idempotencyKey)
         : base(id)
     {
         RefundNumber = refundNumber;
@@ -98,6 +99,7 @@ public class Refund : AuditableEntity<Guid>
         Reason = reason;
         CreatedBy = createdBy;
         RequestedAtUtc = requestedAtUtc;
+        IdempotencyKey = idempotencyKey;
     }
 
     /// <summary>
@@ -113,7 +115,8 @@ public class Refund : AuditableEntity<Guid>
         string currencyCode,
         string reason,
         string createdBy,
-        DateTime requestedAtUtc)
+        DateTime requestedAtUtc,
+        string? idempotencyKey = null)
     {
         if (id == Guid.Empty)
             return RefundErrors.IdRequired;
@@ -146,7 +149,8 @@ public class Refund : AuditableEntity<Guid>
             currencyCode.Trim().ToUpperInvariant(),
             reason.Trim(),
             createdBy,
-            requestedAtUtc);
+            requestedAtUtc,
+            idempotencyKey);
     }
 
     /// <summary>

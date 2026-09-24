@@ -22,7 +22,8 @@ public record CreateRefundCommand(
     Guid ContractId,
     Guid? SubscriptionId,
     Guid? InvoiceId,
-    string Reason) : IRequest<Result<Guid>>;
+    string Reason,
+    string? IdempotencyKey = null) : IRequest<Result<Guid>>;
 
 public class CreateRefundHandler(
     IAppDbContext dbContext,
@@ -34,6 +35,36 @@ public class CreateRefundHandler(
         CreateRefundCommand request,
         CancellationToken cancellationToken)
     {
+        // Task 19 — IDEMPOTENCY CHECK (key-based, BEFORE contract lookup).
+        // The same IdempotencyKey + same payload must return the same refund id. Without
+        // this, a client retry would create a duplicate Refund (and RefundAllocations),
+        // which would double-refund the customer. The UX_Refunds_TenantId_IdempotencyKey
+        // filtered unique index is the database backstop.
+        if (!string.IsNullOrWhiteSpace(request.IdempotencyKey))
+        {
+            var existingRefund = await dbContext.Refunds
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    r => r.IdempotencyKey == request.IdempotencyKey,
+                    cancellationToken);
+
+            if (existingRefund is not null)
+            {
+                // Same key + matching payload → idempotent retry. Return existing id.
+                if (existingRefund.ContractId == request.ContractId
+                    && existingRefund.SubscriptionId == request.SubscriptionId
+                    && existingRefund.InvoiceId == request.InvoiceId
+                    && existingRefund.RefundNumber == request.RefundNumber)
+                {
+                    return existingRefund.Id;
+                }
+
+                return Error.Conflict(
+                    "Refund.IdempotencyKeyConflict",
+                    "A refund with the same IdempotencyKey but different parameters already exists.");
+            }
+        }
+
         // Verify the contract exists
         var contract = await dbContext.Contracts
             .Include(c => c.PricingTiers)
@@ -134,7 +165,8 @@ public class CreateRefundHandler(
             contract.CurrencyCode,
             request.Reason,
             currentUserService.UserId!,
-            DateTime.UtcNow);
+            DateTime.UtcNow,
+            request.IdempotencyKey);
 
         if (!refundResult.IsSuccess)
         {
@@ -165,7 +197,47 @@ public class CreateRefundHandler(
         }
 
         dbContext.StampAddedTenantIds(contract.TenantId!);
-        await dbContext.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // TOCTOU race: a concurrent request inserted a Refund with the same
+            // IdempotencyKey between our pre-check and our SaveChanges. Re-read the
+            // persisted Refund and compare the full payload.
+            if (!string.IsNullOrWhiteSpace(request.IdempotencyKey))
+            {
+                if (dbContext is DbContext dbc)
+                {
+                    dbc.ChangeTracker.Clear();
+                }
+
+                var persistedRefund = await dbContext.Refunds
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        r => r.IdempotencyKey == request.IdempotencyKey,
+                        cancellationToken);
+
+                if (persistedRefund is not null)
+                {
+                    if (persistedRefund.ContractId == request.ContractId
+                        && persistedRefund.SubscriptionId == request.SubscriptionId
+                        && persistedRefund.InvoiceId == request.InvoiceId
+                        && persistedRefund.RefundNumber == request.RefundNumber)
+                    {
+                        return persistedRefund.Id;
+                    }
+
+                    return Error.Conflict(
+                        "Refund.IdempotencyKeyConflict",
+                        "A refund with the same IdempotencyKey but different parameters already exists.");
+                }
+            }
+
+            throw;
+        }
 
         await auditWriter.WriteAsync(
             action: "Refund.Create",

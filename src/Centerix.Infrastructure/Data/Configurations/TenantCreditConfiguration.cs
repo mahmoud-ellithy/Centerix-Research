@@ -90,5 +90,14 @@ public class TenantCreditConfiguration : IEntityTypeConfiguration<TenantCredit>
             .IsUnique()
             .HasDatabaseName("UX_TenantCredits_TenantId_SourceType_SourceId")
             .HasFilter("[SourceId] IS NOT NULL");
+
+        // Task 19 — client-supplied idempotency key, unique per tenant.
+        // Filtered unique index allows NULL IdempotencyKey (legacy / pre-19 rows and
+        // SourceId-keyed credits covered by the structural constraint above) while
+        // preventing duplicate execution of the same logical request within a tenant.
+        builder.HasIndex(tc => new { tc.TenantId, tc.IdempotencyKey })
+            .IsUnique()
+            .HasFilter("[IdempotencyKey] IS NOT NULL")
+            .HasDatabaseName("UX_TenantCredits_TenantId_IdempotencyKey");
     }
 }

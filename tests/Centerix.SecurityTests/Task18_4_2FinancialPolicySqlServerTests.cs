@@ -248,7 +248,9 @@ public class Task18_4_2FinancialPolicySqlServerTests
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns("test-admin");
         currentUser.IsAuthenticated.Returns(true);
-        var handler = new ExecuteRefundHandler(db, currentUser, Substitute.For<IAuditWriter>());
+        var platformAdminGuard = Substitute.For<IPlatformAdminGuard>();
+        platformAdminGuard.EnsurePlatformAdmin().Returns(Result.Updated);
+        var handler = new ExecuteRefundHandler(db, currentUser, platformAdminGuard, Substitute.For<IAuditWriter>());
         using var cts = new CancellationTokenSource(TestTimeout);
         return await handler.Handle(
             new ExecuteRefundCommand(refundId, $"1842-execute-{refundId:N}"), cts.Token);

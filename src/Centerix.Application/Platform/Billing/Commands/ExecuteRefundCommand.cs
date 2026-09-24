@@ -1,4 +1,4 @@
-﻿namespace Centerix.Application.Platform.Billing.Commands;
+namespace Centerix.Application.Platform.Billing.Commands;
 
 using System.Data;
 using Centerix.Application.Common.Interfaces;
@@ -37,6 +37,7 @@ public record ExecuteRefundCommand(
 public class ExecuteRefundHandler(
     IAppDbContext dbContext,
     ICurrentUser currentUserService,
+    IPlatformAdminGuard platformAdminGuard,
     IAuditWriter auditWriter) : IRequestHandler<ExecuteRefundCommand, Result<Updated>>
 {
     private const int MaxDeadlockRetries = 3;
@@ -45,6 +46,14 @@ public class ExecuteRefundHandler(
         ExecuteRefundCommand request,
         CancellationToken cancellationToken)
     {
+        // Task 19 — PLATFORM authorization boundary.
+        // Refund execution moves real money out of the platform's payment sources.
+        // Controller-level HasPermission is necessary but not sufficient: tenant admins
+        // must not be able to execute refunds through any alternative path.
+        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        if (!guardResult.IsSuccess)
+            return guardResult.Errors!;
+
         for (int attempt = 0; attempt <= MaxDeadlockRetries; attempt++)
         {
             if (dbContext is DbContext dbc)

@@ -16,12 +16,22 @@ public record ApproveRefundCommand(
 public class ApproveRefundHandler(
     IAppDbContext dbContext,
     ICurrentUser currentUserService,
+    IPlatformAdminGuard platformAdminGuard,
     IAuditWriter auditWriter) : IRequestHandler<ApproveRefundCommand, Result<Updated>>
 {
     public async Task<Result<Updated>> Handle(
         ApproveRefundCommand request,
         CancellationToken cancellationToken)
     {
+        // Task 19 — PLATFORM authorization boundary.
+        // Refund approval is a platform-side commercial authority decision, not a
+        // tenant-side operation. Controller-level HasPermission is necessary but not
+        // sufficient: a tenant admin holding an over-broad tenant permission must not
+        // be able to approve a refund by reaching the handler through a different route.
+        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        if (!guardResult.IsSuccess)
+            return guardResult.Errors!;
+
         var refund = await dbContext.Refunds
             .FirstOrDefaultAsync(r => r.Id == request.RefundId, cancellationToken);
 

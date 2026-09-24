@@ -19,6 +19,7 @@ public class Payment : AuditableEntity<Guid>
     public DateTime? CompletedAtUtc { get; private set; }
     public string? ExternalReference { get; private set; }
     public string? Notes { get; private set; }
+    public string? IdempotencyKey { get; private set; }
 
     // Optimistic-concurrency token (SQL Server rowversion, store-generated)
     public byte[] RowVersion { get; internal set; } = [];
@@ -38,7 +39,8 @@ public class Payment : AuditableEntity<Guid>
         string currencyCode,
         PaymentMethod method,
         string? externalReference,
-        string? notes)
+        string? notes,
+        string? idempotencyKey)
         : base(id)
     {
         PaymentNumber = paymentNumber;
@@ -48,6 +50,7 @@ public class Payment : AuditableEntity<Guid>
         Status = PaymentStatus.Pending;
         ExternalReference = externalReference;
         Notes = notes;
+        IdempotencyKey = idempotencyKey;
     }
 
     /// <summary>
@@ -60,7 +63,8 @@ public class Payment : AuditableEntity<Guid>
         string currencyCode,
         PaymentMethod method,
         string? externalReference = null,
-        string? notes = null)
+        string? notes = null,
+        string? idempotencyKey = null)
     {
         if (string.IsNullOrWhiteSpace(paymentNumber))
             return PaymentErrors.ReceiptNumberRequired;
@@ -71,7 +75,7 @@ public class Payment : AuditableEntity<Guid>
         if (!Enum.IsDefined(method))
             return PaymentErrors.MethodRequired;
 
-        return new Payment(id, paymentNumber, amount, currencyCode, method, externalReference, notes);
+        return new Payment(id, paymentNumber, amount, currencyCode, method, externalReference, notes, idempotencyKey);
     }
 
     /// <summary>

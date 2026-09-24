@@ -19,7 +19,8 @@ public record CreateTenantCreditCommand(
     decimal Amount,
     byte SourceType,
     Guid? SourceId,
-    string CurrencyCode = "EGP") : IRequest<Result<Created>>;
+    string CurrencyCode = "EGP",
+    string? IdempotencyKey = null) : IRequest<Result<Created>>;
 
 public class CreateTenantCreditHandler(
     IAppDbContext dbContext,
@@ -29,12 +30,42 @@ public class CreateTenantCreditHandler(
         CreateTenantCreditCommand request,
         CancellationToken cancellationToken)
     {
+        // Task 19 — IDEMPOTENCY CHECK (key-based, BEFORE insert).
+        // The existing UX_TenantCredits_TenantId_SourceType_SourceId filtered unique index
+        // is a structural guard (one credit per source). A client-supplied IdempotencyKey
+        // is the authoritative logical retry token, and is required for callers that
+        // create credits without a SourceId (e.g. Manual / Compensation credits).
+        if (!string.IsNullOrWhiteSpace(request.IdempotencyKey))
+        {
+            var existingCredit = await dbContext.TenantCredits
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    tc => tc.IdempotencyKey == request.IdempotencyKey,
+                    cancellationToken);
+
+            if (existingCredit is not null)
+            {
+                if (existingCredit.Amount == request.Amount
+                    && existingCredit.SourceType == (CreditSourceType)request.SourceType
+                    && existingCredit.SourceId == request.SourceId
+                    && existingCredit.CurrencyCode == request.CurrencyCode)
+                {
+                    return Result.Created;
+                }
+
+                return Error.Conflict(
+                    "TenantCredit.IdempotencyKeyConflict",
+                    "A tenant credit with the same IdempotencyKey but different parameters already exists.");
+            }
+        }
+
         var creditResult = TenantCredit.Create(
             Guid.NewGuid(),
             request.Amount,
             (CreditSourceType)request.SourceType,
             request.SourceId,
-            request.CurrencyCode);
+            request.CurrencyCode,
+            request.IdempotencyKey);
 
         if (!creditResult.IsSuccess)
         {
@@ -42,7 +73,44 @@ public class CreateTenantCreditHandler(
         }
 
         dbContext.TenantCredits.Add(creditResult.Value);
-        await dbContext.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            if (!string.IsNullOrWhiteSpace(request.IdempotencyKey))
+            {
+                if (dbContext is DbContext dbc)
+                {
+                    dbc.ChangeTracker.Clear();
+                }
+
+                var persisted = await dbContext.TenantCredits
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        tc => tc.IdempotencyKey == request.IdempotencyKey,
+                        cancellationToken);
+
+                if (persisted is not null)
+                {
+                    if (persisted.Amount == request.Amount
+                        && persisted.SourceType == (CreditSourceType)request.SourceType
+                        && persisted.SourceId == request.SourceId
+                        && persisted.CurrencyCode == request.CurrencyCode)
+                    {
+                        return Result.Created;
+                    }
+
+                    return Error.Conflict(
+                        "TenantCredit.IdempotencyKeyConflict",
+                        "A tenant credit with the same IdempotencyKey but different parameters already exists.");
+                }
+            }
+
+            throw;
+        }
 
         await auditWriter.WriteAsync(
             action: "TenantCredit.Create",

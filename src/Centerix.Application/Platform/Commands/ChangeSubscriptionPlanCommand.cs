@@ -81,6 +81,17 @@ public class ChangeSubscriptionPlanHandler(
 
         for (var attempt = 0; attempt < MaxDeadlockRetries; attempt++)
         {
+            // Task 19 — hygiene: clear tracked entities on each retry so a rolled-back
+            // attempt's Added/Modified entities do not leak into the next attempt's save.
+            // Without this, a DbUpdateConcurrencyException-then-retry could re-insert
+            // tracked Added offers/contracts/subscriptions and produce duplicate-key
+            // errors that mask the real conflict. Mirrors the hardened pattern used in
+            // AllocatePaymentCommand / ExecuteRefundCommand / ApplyCreditToInvoiceHandler.
+            if (dbContext is Microsoft.EntityFrameworkCore.DbContext dbc)
+            {
+                dbc.ChangeTracker.Clear();
+            }
+
             try
             {
                 return await ExecuteChangePlanCoreAsync(request, now, cancellationToken);

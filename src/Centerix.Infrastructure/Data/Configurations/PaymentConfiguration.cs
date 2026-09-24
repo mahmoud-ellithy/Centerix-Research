@@ -68,6 +68,17 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.Property(p => p.RowVersion)
             .IsRowVersion();
 
+        // Task 19 — client-supplied idempotency key, unique per tenant.
+        // Filtered unique index allows NULL IdempotencyKey (legacy / pre-19 rows) while
+        // preventing duplicate execution of the same logical request within a tenant.
+        builder.Property(p => p.IdempotencyKey)
+            .HasMaxLength(256);
+
+        builder.HasIndex(p => new { p.TenantId, p.IdempotencyKey })
+            .IsUnique()
+            .HasFilter("[IdempotencyKey] IS NOT NULL")
+            .HasDatabaseName("UX_Payments_TenantId_IdempotencyKey");
+
         builder.HasIndex(p => p.TenantId);
         builder.HasIndex(p => new { p.TenantId, p.Status });
         builder.HasIndex(p => new { p.TenantId, p.CompletedAtUtc });

@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform.Billing.Commands;
 using Centerix.Domain.Common.Results;
@@ -195,7 +195,9 @@ public class Phase13RefundAllocationSqlServerTests
                 AuthorizeTenant(scope.ServiceProvider, tenantId);
                 var currentUser = Substitute.For<ICurrentUser>();
                 currentUser.UserId.Returns("user-1");
-                var handler = new ExecuteRefundHandler(db, currentUser, Substitute.For<IAuditWriter>());
+                var platformAdminGuard = Substitute.For<IPlatformAdminGuard>();
+                platformAdminGuard.EnsurePlatformAdmin().Returns(Result.Updated);
+                var handler = new ExecuteRefundHandler(db, currentUser, platformAdminGuard, Substitute.For<IAuditWriter>());
                 return await handler.Handle(new ExecuteRefundCommand(refundIdA), ct);
             },
             async ct =>
@@ -205,7 +207,9 @@ public class Phase13RefundAllocationSqlServerTests
                 AuthorizeTenant(scope.ServiceProvider, tenantId);
                 var currentUser = Substitute.For<ICurrentUser>();
                 currentUser.UserId.Returns("user-1");
-                var handler = new ExecuteRefundHandler(db, currentUser, Substitute.For<IAuditWriter>());
+                var platformAdminGuardB = Substitute.For<IPlatformAdminGuard>();
+                platformAdminGuardB.EnsurePlatformAdmin().Returns(Result.Updated);
+                var handler = new ExecuteRefundHandler(db, currentUser, platformAdminGuardB, Substitute.For<IAuditWriter>());
                 return await handler.Handle(new ExecuteRefundCommand(refundIdB), ct);
             },
             CancellationToken.None);
@@ -296,7 +300,9 @@ public class Phase13RefundAllocationSqlServerTests
                 AuthorizeTenant(scope.ServiceProvider, tenantId);
                 var currentUser = Substitute.For<ICurrentUser>();
                 currentUser.UserId.Returns("user-1");
-                var handler = new ExecuteRefundHandler(db, currentUser, Substitute.For<IAuditWriter>());
+                var platformAdminGuardShared1 = Substitute.For<IPlatformAdminGuard>();
+                platformAdminGuardShared1.EnsurePlatformAdmin().Returns(Result.Updated);
+                var handler = new ExecuteRefundHandler(db, currentUser, platformAdminGuardShared1, Substitute.For<IAuditWriter>());
                 return await handler.Handle(new ExecuteRefundCommand(refundId, sharedKey), ct);
             },
             async ct =>
@@ -306,7 +312,9 @@ public class Phase13RefundAllocationSqlServerTests
                 AuthorizeTenant(scope.ServiceProvider, tenantId);
                 var currentUser = Substitute.For<ICurrentUser>();
                 currentUser.UserId.Returns("user-1");
-                var handler = new ExecuteRefundHandler(db, currentUser, Substitute.For<IAuditWriter>());
+                var platformAdminGuardShared2 = Substitute.For<IPlatformAdminGuard>();
+                platformAdminGuardShared2.EnsurePlatformAdmin().Returns(Result.Updated);
+                var handler = new ExecuteRefundHandler(db, currentUser, platformAdminGuardShared2, Substitute.For<IAuditWriter>());
                 return await handler.Handle(new ExecuteRefundCommand(refundId, sharedKey), ct);
             },
             CancellationToken.None);
@@ -385,7 +393,9 @@ public class Phase13RefundAllocationSqlServerTests
                 AuthorizeTenant(scope.ServiceProvider, tenantId);
                 var currentUser = Substitute.For<ICurrentUser>();
                 currentUser.UserId.Returns("user-1");
-                var handler = new ExecuteRefundHandler(db, currentUser, Substitute.For<IAuditWriter>());
+                var platformAdminGuardConflicting1 = Substitute.For<IPlatformAdminGuard>();
+                platformAdminGuardConflicting1.EnsurePlatformAdmin().Returns(Result.Updated);
+                var handler = new ExecuteRefundHandler(db, currentUser, platformAdminGuardConflicting1, Substitute.For<IAuditWriter>());
                 return await handler.Handle(new ExecuteRefundCommand(refundIdA, sharedKey), ct);
             },
             async ct =>
@@ -395,7 +405,9 @@ public class Phase13RefundAllocationSqlServerTests
                 AuthorizeTenant(scope.ServiceProvider, tenantId);
                 var currentUser = Substitute.For<ICurrentUser>();
                 currentUser.UserId.Returns("user-1");
-                var handler = new ExecuteRefundHandler(db, currentUser, Substitute.For<IAuditWriter>());
+                var platformAdminGuardConflicting2 = Substitute.For<IPlatformAdminGuard>();
+                platformAdminGuardConflicting2.EnsurePlatformAdmin().Returns(Result.Updated);
+                var handler = new ExecuteRefundHandler(db, currentUser, platformAdminGuardConflicting2, Substitute.For<IAuditWriter>());
                 return await handler.Handle(new ExecuteRefundCommand(refundIdB, sharedKey), ct);
             },
             CancellationToken.None);
@@ -479,7 +491,9 @@ public class Phase13RefundAllocationSqlServerTests
 
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns("user-1");
-        var handler = new ExecuteRefundHandler(db2, currentUser, Substitute.For<IAuditWriter>());
+        var platformAdminGuardSuccess = Substitute.For<IPlatformAdminGuard>();
+        platformAdminGuardSuccess.EnsurePlatformAdmin().Returns(Result.Updated);
+        var handler = new ExecuteRefundHandler(db2, currentUser, platformAdminGuardSuccess, Substitute.For<IAuditWriter>());
         var result = await handler.Handle(new ExecuteRefundCommand(refundId), CancellationToken.None);
         Assert.True(result.IsSuccess);
 
@@ -531,7 +545,9 @@ public class Phase13RefundAllocationSqlServerTests
 
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns("user-1");
-        var handler = new ExecuteRefundHandler(db2, currentUser, Substitute.For<IAuditWriter>());
+        var platformAdminGuardFail = Substitute.For<IPlatformAdminGuard>();
+        platformAdminGuardFail.EnsurePlatformAdmin().Returns(Result.Updated);
+        var handler = new ExecuteRefundHandler(db2, currentUser, platformAdminGuardFail, Substitute.For<IAuditWriter>());
         var result = await handler.Handle(new ExecuteRefundCommand(refundId), CancellationToken.None);
 
         Assert.False(result.IsSuccess);

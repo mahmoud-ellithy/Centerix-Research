@@ -212,7 +212,9 @@ public class Phase13RefundAllocationTests
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.UserId.Returns(userId);
         var auditWriter = Substitute.For<IAuditWriter>();
-        return new ExecuteRefundHandler(db, currentUser, auditWriter);
+        var platformAdminGuard = Substitute.For<IPlatformAdminGuard>();
+        platformAdminGuard.EnsurePlatformAdmin().Returns(Result.Updated);
+        return new ExecuteRefundHandler(db, currentUser, platformAdminGuard, auditWriter);
     }
 
     private static Refund CreatePendingRefund(

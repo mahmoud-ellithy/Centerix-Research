@@ -34,6 +34,16 @@ public class CreateInstallmentScheduleHandler(
     {
         for (int attempt = 0; attempt <= MaxDeadlockRetries; attempt++)
         {
+            // Task 19 — hygiene: clear tracked entities on each retry so a rolled-back
+            // attempt's Added installments do not leak into the next attempt's save
+            // (which would either duplicate-insert or be silently dropped by the next
+            // RollbackAsync, wasting a retry). Mirrors AllocatePaymentCommand /
+            // ExecuteRefundCommand pattern.
+            if (dbContext is DbContext dbc)
+            {
+                dbc.ChangeTracker.Clear();
+            }
+
             var result = await TryHandleAsync(request, cancellationToken);
 
             if (result.IsSuccess || !IsRetryableError(result))

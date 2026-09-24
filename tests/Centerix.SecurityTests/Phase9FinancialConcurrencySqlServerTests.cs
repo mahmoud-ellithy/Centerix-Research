@@ -1698,7 +1698,9 @@ public class Phase9FinancialConcurrencySqlServerTests
                 var currentUser = Substitute.For<ICurrentUser>();
                 currentUser.UserId.Returns("test-user-1");
                 currentUser.IsAuthenticated.Returns(true);
-                var handler = new ExecuteRefundHandler(db, currentUser, auditWriter);
+                var platformAdminGuard = Substitute.For<IPlatformAdminGuard>();
+                platformAdminGuard.EnsurePlatformAdmin().Returns(Result.Updated);
+                var handler = new ExecuteRefundHandler(db, currentUser, platformAdminGuard, auditWriter);
                 return await handler.Handle(new ExecuteRefundCommand(refundId), ct);
             },
             async ct =>
@@ -1711,7 +1713,9 @@ public class Phase9FinancialConcurrencySqlServerTests
                 var currentUser = Substitute.For<ICurrentUser>();
                 currentUser.UserId.Returns("test-user-1");
                 currentUser.IsAuthenticated.Returns(true);
-                var handler = new ExecuteRefundHandler(db, currentUser, auditWriter);
+                var platformAdminGuard2 = Substitute.For<IPlatformAdminGuard>();
+                platformAdminGuard2.EnsurePlatformAdmin().Returns(Result.Updated);
+                var handler = new ExecuteRefundHandler(db, currentUser, platformAdminGuard2, auditWriter);
                 return await handler.Handle(new ExecuteRefundCommand(refundId), ct);
             },
             cts.Token);
