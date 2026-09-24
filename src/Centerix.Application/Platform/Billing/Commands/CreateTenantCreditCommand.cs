@@ -282,6 +282,27 @@ public class ApplyCreditToInvoiceHandler(
                 "Application amount exceeds the available credit remaining.");
         }
 
+        // ── INVOICE ROW LOCK (SQL Server) ───────────────────────────────
+        // Serialize all settlement operations against this invoice. AllocatePayment
+        // acquires the same UPDLOCK before reading invoice state, so a concurrent credit
+        // application and payment allocation cannot both validate against a remaining
+        // balance that ignores the other's settlement and over-settle the invoice.
+        if (dbContext.IsRelational && dbContext is DbContext efDb)
+        {
+            var conn = efDb.Database.GetDbConnection();
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = transaction!.GetDbTransaction();
+            cmd.CommandText = "SELECT 1 FROM Platform.Invoices WITH (UPDLOCK, ROWLOCK, HOLDLOCK) WHERE InvoiceId = @p0 AND TenantId = @p1";
+            var p0 = cmd.CreateParameter(); p0.ParameterName = "@p0"; p0.Value = request.InvoiceId;
+            var p1 = cmd.CreateParameter(); p1.ParameterName = "@p1"; p1.Value = credit.TenantId!;
+            cmd.Parameters.Add(p0); cmd.Parameters.Add(p1);
+            if (conn.State != System.Data.ConnectionState.Open)
+            {
+                await conn.OpenAsync(cancellationToken);
+            }
+            await cmd.ExecuteScalarAsync(cancellationToken);
+        }
+
         var invoice = await dbContext.Invoices
             .FirstOrDefaultAsync(i => i.Id == request.InvoiceId, cancellationToken);
 

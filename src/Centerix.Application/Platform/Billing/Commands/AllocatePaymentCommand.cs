@@ -153,11 +153,37 @@ public class AllocatePaymentHandler(
             return PaymentErrors.CannotAllocatePendingPayment;
         }
 
-        // Load invoice with its allocations.
-        // This ensures concurrent allocations against the same Invoice are serialized
-        // by the Serializable isolation level's range locks.
+        // ── INVOICE ROW LOCK (SQL Server) ───────────────────────────────
+        // Serialize all settlement operations against this invoice. ApplyCreditToInvoice
+        // acquires the same UPDLOCK before reading invoice state, so a concurrent payment
+        // allocation and credit application cannot both validate against a remaining
+        // balance that ignores the other's settlement and over-settle the invoice.
+        // Without this, the two handlers lock disjoint resources (Payment vs TenantCredit)
+        // and Serializable range locks alone do not order them against each other.
+        if (dbContext.IsRelational && dbContext is DbContext efDb)
+        {
+            var conn = efDb.Database.GetDbConnection();
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = transaction!.GetDbTransaction();
+            cmd.CommandText = "SELECT 1 FROM Platform.Invoices WITH (UPDLOCK, ROWLOCK, HOLDLOCK) WHERE InvoiceId = @p0 AND TenantId = @p1";
+            var p0 = cmd.CreateParameter(); p0.ParameterName = "@p0"; p0.Value = request.InvoiceId;
+            var p1 = cmd.CreateParameter(); p1.ParameterName = "@p1"; p1.Value = payment.TenantId!;
+            cmd.Parameters.Add(p0); cmd.Parameters.Add(p1);
+            if (conn.State != System.Data.ConnectionState.Open)
+            {
+                await conn.OpenAsync(cancellationToken);
+            }
+            await cmd.ExecuteScalarAsync(cancellationToken);
+        }
+
+        // Load invoice with its allocations. This ensures concurrent allocations against
+        // the same Invoice are serialized by the Serializable isolation level's range locks.
+        // CreditApplications MUST be included: GetRemainingAmount() subtracts credit
+        // applications, and without loading them the remaining-balance validation would
+        // be blind to concurrent or prior credit settlement and over-allocate the invoice.
         var invoice = await dbContext.Invoices
             .Include(i => i.PaymentAllocations)
+            .Include(i => i.CreditApplications)
             .FirstOrDefaultAsync(i => i.Id == request.InvoiceId, cancellationToken);
 
         if (invoice is null)

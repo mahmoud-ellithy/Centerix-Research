@@ -298,9 +298,9 @@ public class Task201_CombinedSettlementConcurrencyTests
 
         // Both should succeed (6,000 + 3,000 = 9,000 <= 10,000)
         Assert.True(result1.IsSuccess,
-            $"Payment allocation failed: {string.Join(", ", result1.Errors!.Select(e => e.Code))}");
+            $"Payment allocation failed: {string.Join(", ", result1.Errors?.Select(e => e.Code) ?? [])}");
         Assert.True(result2.IsSuccess,
-            $"Credit application failed: {string.Join(", ", result2.Errors!.Select(e => e.Code))}");
+            $"Credit application failed: {string.Join(", ", result2.Errors?.Select(e => e.Code) ?? [])}");
 
         // Verify final state: remaining = 1,000
         using (var scope = _env.Factory.Services.CreateScope())
@@ -323,10 +323,14 @@ public class Task201_CombinedSettlementConcurrencyTests
     }
 
     /// <summary>
-    /// Over-allocation attempt: Invoice Total = 10,000. Credit = 3,000.
+    /// Over-settlement attempt: Invoice Total = 10,000. Credit = 3,000.
     /// AllocatePayment(8,000) + ApplyCreditToInvoice(3,000) concurrently.
-    /// Expected: one succeeds (8,000 allocated), other fails with insufficient remaining.
-    /// Combined must never exceed 10,000.
+    /// Combined settlement (8,000 + 3,000 = 11,000) exceeds the invoice total.
+    /// The overpayment-capping business rule (excess becomes TenantCredit) means the
+    /// allocation may still succeed AFTER the credit application commits — capped at the
+    /// committed remaining (7,000) with the 1,000 excess issued as overpayment credit.
+    /// The invariant under proof: total settled NEVER exceeds Invoice.TotalAmount and
+    /// remaining NEVER goes negative, regardless of which operation commits first.
     /// </summary>
     [Fact]
     [Trait("Category", "SqlServer")]
@@ -383,14 +387,20 @@ public class Task201_CombinedSettlementConcurrencyTests
             },
             cts.Token);
 
-        // Exactly one must succeed, one must fail (8,000 + 3,000 = 11,000 > 10,000)
+        // At least one must succeed. Both outcomes are legitimate:
+        //   - Allocation commits first → credit (3,000 > remaining 2,000) is rejected
+        //     with TenantCredit.ExceedsInvoiceRemaining → exactly 1 success.
+        //   - Credit commits first → allocation is capped at remaining 7,000 with the
+        //     1,000 excess issued as overpayment TenantCredit → both succeed.
+        // The invariant under proof is that settlement NEVER exceeds the invoice total
+        // and remaining NEVER goes negative — regardless of interleaving.
         var successCount = (result1.IsSuccess ? 1 : 0) + (result2.IsSuccess ? 1 : 0);
-        Assert.True(successCount == 1,
-            $"Expected exactly 1 success. Got {successCount}. " +
-            $"R1: {(result1.IsSuccess ? "OK" : string.Join(", ", result1.Errors!.Select(e => e.Code)))}, " +
-            $"R2: {(result2.IsSuccess ? "OK" : string.Join(", ", result2.Errors!.Select(e => e.Code)))}");
+        Assert.True(successCount >= 1,
+            $"Expected at least 1 success. Got {successCount}. " +
+            $"R1: {(result1.IsSuccess ? "OK" : string.Join(", ", result1.Errors?.Select(e => e.Code) ?? []))}, " +
+            $"R2: {(result2.IsSuccess ? "OK" : string.Join(", ", result2.Errors?.Select(e => e.Code) ?? []))}");
 
-        // Final invoice remaining >= 0
+        // Final invariants: remaining >= 0, total settled <= TotalAmount, ledger identity
         using (var scope = _env.Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -401,8 +411,22 @@ public class Task201_CombinedSettlementConcurrencyTests
                 .Include(i => i.CreditApplications)
                 .FirstAsync(i => i.Id == invoiceId);
 
-            Assert.True(invoice.GetRemainingAmount() >= 0m,
-                $"Negative remaining balance: {invoice.GetRemainingAmount()}");
+            var remaining = invoice.GetRemainingAmount();
+            var totalSettled = invoice.GetPaidAmount() + invoice.GetAppliedCreditAmount();
+
+            Assert.True(remaining >= 0m,
+                $"Negative remaining balance: {remaining}");
+            Assert.True(totalSettled <= invoice.TotalAmount,
+                $"Total settled ({totalSettled}) exceeds invoice total ({invoice.TotalAmount})");
+            Assert.Equal(invoice.TotalAmount, totalSettled + remaining);
+
+            // When both succeed, the credit committed first: allocation must be capped
+            // at 7,000 (with 1,000 excess as overpayment credit) and credit = 3,000.
+            if (result1.IsSuccess && result2.IsSuccess)
+            {
+                Assert.Equal(7000m, invoice.GetPaidAmount());
+                Assert.Equal(3000m, invoice.GetAppliedCreditAmount());
+            }
         }
     }
 }
