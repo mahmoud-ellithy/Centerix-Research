@@ -59,6 +59,14 @@ public class Phase12_1CreditConcurrencySqlServerTests
         return new ApplyCreditToInvoiceHandler(db, auditWriter);
     }
 
+    private static AllocatePaymentHandler CreateAllocateHandler(AppDbContext db)
+    {
+        var auditWriter = Substitute.For<IAuditWriter>();
+        var guard = Substitute.For<IPlatformAdminGuard>();
+        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        return new AllocatePaymentHandler(db, auditWriter, NullSubscriptionReconciliationService.Instance, guard);
+    }
+
     private static async Task EnsureTenantExists(IServiceProvider scope, string tenantId)
     {
         var store = scope.GetRequiredService<IMultiTenantStore<CenterixTenantInfo>>();
@@ -307,7 +315,7 @@ public class Phase12_1CreditConcurrencySqlServerTests
                 using var scope = _env.Factory.Services.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 AuthorizeTenant(scope.ServiceProvider, tenantId);
-                var handler = new AllocatePaymentHandler(db, Substitute.For<IAuditWriter>(), NullSubscriptionReconciliationService.Instance);
+                var handler = CreateAllocateHandler(db);
                 return await handler.Handle(new AllocatePaymentCommand(paymentId, invoiceId, 13000m), ct);
             },
             async ct =>
@@ -315,7 +323,7 @@ public class Phase12_1CreditConcurrencySqlServerTests
                 using var scope = _env.Factory.Services.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 AuthorizeTenant(scope.ServiceProvider, tenantId);
-                var handler = new AllocatePaymentHandler(db, Substitute.For<IAuditWriter>(), NullSubscriptionReconciliationService.Instance);
+                var handler = CreateAllocateHandler(db);
                 return await handler.Handle(new AllocatePaymentCommand(paymentId, invoiceId, 13000m), ct);
             },
             CancellationToken.None);

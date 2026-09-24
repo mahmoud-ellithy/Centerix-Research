@@ -1,6 +1,7 @@
 namespace Centerix.SecurityTests;
 
 using Centerix.Application.Common.Interfaces;
+using Centerix.Application.Platform.Billing;
 using Centerix.Application.Platform.Billing.Commands;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Billing.Credits;
@@ -329,7 +330,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoice);
 
         var paymentHandler = new AllocatePaymentHandler(
-            db, Substitute.For<IAuditWriter>(), NullSubscriptionReconciliationService.Instance);
+            db, Substitute.For<IAuditWriter>(), NullSubscriptionReconciliationService.Instance, AllowPlatformAdmin());
         await paymentHandler.Handle(new AllocatePaymentCommand(payment.Id, invoice.Id, 1000m), CancellationToken.None);
 
         var creditHandler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
@@ -353,7 +354,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoice);
 
         var paymentHandler = new AllocatePaymentHandler(
-            db, Substitute.For<IAuditWriter>(), NullSubscriptionReconciliationService.Instance);
+            db, Substitute.For<IAuditWriter>(), NullSubscriptionReconciliationService.Instance, AllowPlatformAdmin());
         await paymentHandler.Handle(new AllocatePaymentCommand(payment.Id, invoice.Id, 1000m), CancellationToken.None);
 
         var creditHandler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());
@@ -365,6 +366,13 @@ public class Phase10_1CreditApplicationCorrectionTests
             .FirstAsync(i => i.Id == invoice.Id);
         Assert.Equal(500m, updatedInvoice.GetRemainingAmount());
         Assert.Equal(InvoiceStatus.PartiallyPaid, updatedInvoice.Status);
+    }
+
+    private static IPlatformAdminGuard AllowPlatformAdmin()
+    {
+        var guard = Substitute.For<IPlatformAdminGuard>();
+        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        return guard;
     }
 
     // ==================================================================
@@ -531,7 +539,7 @@ public class Phase10_1CreditApplicationCorrectionTests
         await IssueInvoiceAsync(db, invoice);
 
         var paymentHandler = new AllocatePaymentHandler(
-            db, Substitute.For<IAuditWriter>(), NullSubscriptionReconciliationService.Instance);
+            db, Substitute.For<IAuditWriter>(), NullSubscriptionReconciliationService.Instance, AllowPlatformAdmin());
         await paymentHandler.Handle(new AllocatePaymentCommand(payment.Id, invoice.Id, 2000m), CancellationToken.None);
 
         var creditHandler = new ApplyCreditToInvoiceHandler(db, Substitute.For<IAuditWriter>());

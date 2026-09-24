@@ -11,6 +11,8 @@ using Centerix.Domain.Platform.Subscriptions;
 /// </summary>
 public class BillingCycle : AuditableEntity<Guid>
 {
+    public byte[] RowVersion { get; private set; } = null!;
+
     public Guid SubscriptionId { get; private set; }
     public Subscriptions.TenantPlan Subscription { get; private set; } = default!;
 

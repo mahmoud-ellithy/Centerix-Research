@@ -110,7 +110,8 @@ public class Phase12CustomerCreditLifecycleTests
         return new AllocatePaymentHandler(
             db,
             Substitute.For<IAuditWriter>(),
-            NullSubscriptionReconciliationService.Instance);
+            NullSubscriptionReconciliationService.Instance,
+            AllowPlatformAdmin());
     }
 
     private static ApplyCreditToInvoiceHandler CreateCreditHandler(AppDbContext db)
@@ -119,6 +120,13 @@ public class Phase12CustomerCreditLifecycleTests
     }
 
     private static string NewKey() => Guid.NewGuid().ToString("N");
+
+    private static IPlatformAdminGuard AllowPlatformAdmin()
+    {
+        var guard = Substitute.For<IPlatformAdminGuard>();
+        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        return guard;
+    }
 
     // ==================================================================
     // A. Overpayment Tests

@@ -71,5 +71,10 @@ public class BillingCycleConfiguration : IEntityTypeConfiguration<BillingCycle>
 
         builder.HasIndex(bc => new { bc.SubscriptionId, bc.PeriodStart, bc.PeriodEnd })
             .HasDatabaseName("IX_BillingCycles_SubscriptionId_Period");
+
+        // Task 20.1 — concurrency token: prevents silent last-write-wins on concurrent updates.
+        builder.Property(bc => bc.RowVersion)
+            .IsRowVersion()
+            .HasValueGenerator<Centerix.Infrastructure.Data.ValueGenerators.RowVersionValueGenerator>();
     }
 }

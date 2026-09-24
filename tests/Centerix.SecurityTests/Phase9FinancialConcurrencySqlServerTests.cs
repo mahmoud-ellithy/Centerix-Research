@@ -126,7 +126,9 @@ public class Phase9FinancialConcurrencySqlServerTests
     private static async Task<AllocatePaymentHandler> CreateHandler(AppDbContext db)
     {
         var auditWriter = Substitute.For<IAuditWriter>();
-        return new AllocatePaymentHandler(db, auditWriter, NullSubscriptionReconciliationService.Instance);
+        var guard = Substitute.For<IPlatformAdminGuard>();
+        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        return new AllocatePaymentHandler(db, auditWriter, NullSubscriptionReconciliationService.Instance, guard);
     }
 
     /// <summary>

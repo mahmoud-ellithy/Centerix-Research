@@ -21,7 +21,8 @@ public record AllocatePaymentCommand(Guid PaymentId, Guid InvoiceId, decimal All
 public class AllocatePaymentHandler(
     IAppDbContext dbContext,
     IAuditWriter auditWriter,
-    ISubscriptionReconciliationService reconciliationService) : IRequestHandler<AllocatePaymentCommand, Result<Updated>>
+    ISubscriptionReconciliationService reconciliationService,
+    IPlatformAdminGuard platformAdminGuard) : IRequestHandler<AllocatePaymentCommand, Result<Updated>>
 {
     /// <summary>
     /// Maximum number of retry attempts when a SQL Server deadlock (error 1205) occurs.
@@ -35,6 +36,12 @@ public class AllocatePaymentHandler(
         AllocatePaymentCommand request,
         CancellationToken cancellationToken)
     {
+        // Task 20.1 — PLATFORM authorization boundary. Allocation/settlement is a platform-side
+        // commercial operation. A tenant admin holding an over-broad tenant permission must not
+        // reach this handler regardless of controller attribute configuration.
+        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        if (!guardResult.IsSuccess)
+            return guardResult.Errors!;
         // Retry loop for deadlock resilience. Under Serializable isolation, concurrent
         // transactions may deadlock on range locks. When SQL Server chooses this transaction
         // as the deadlock victim (error 1205), we retry with bounded exponential backoff.

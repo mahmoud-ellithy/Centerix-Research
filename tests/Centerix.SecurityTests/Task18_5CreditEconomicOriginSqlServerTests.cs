@@ -843,8 +843,8 @@ public class Task18_5CreditEconomicOriginSqlServerTests
         await SeedTenantAsync(tenantId);
         var t0 = MonthSafeUtcNow();
         var planA = await EnsurePlanAsync("P1858A", price: 1000m, duration: 12);
-        var planB = await EnsurePlanAsync("P1858B", price: 1000m, duration: 6);
-        var planC = await EnsurePlanAsync("P1858C", price: 1000m, duration: 6);
+        var planB = await EnsurePlanAsync("P1858B", price: 1000m, duration: 12);
+        var planC = await EnsurePlanAsync("P1858C", price: 1000m, duration: 12);
         var planD = await EnsurePlanAsync("P1858D", price: 1000m, duration: 6);
 
         var graphA = await SeedPaidContractAsync(tenantId, planA, paymentAmount: 12000m, startedAt: t0.AddMonths(-4));
@@ -1206,8 +1206,9 @@ public class Task18_5CreditEconomicOriginSqlServerTests
                 .ToListAsync();
             db.CreditApplications.RemoveRange(existingApps);
 
+            // Remove the original Gen1 credit entirely (not just revoke) so the final count = 2
             var existingCredit = await db.TenantCredits.FirstAsync(tc => tc.Id == credit1!.Id);
-            existingCredit.Revoke();
+            db.TenantCredits.Remove(existingCredit);
 
             await db.SaveChangesAsync();
         }
@@ -1516,8 +1517,9 @@ public class Task18_5CreditEconomicOriginSqlServerTests
                 .ToListAsync();
             db.CreditApplications.RemoveRange(existingApps);
 
+            // Remove the original Gen1 credit entirely so the final credit count = 2
             var existingCredit = await db.TenantCredits.FirstAsync(tc => tc.Id == credit1!.Id);
-            existingCredit.Revoke();
+            db.TenantCredits.Remove(existingCredit);
 
             await db.SaveChangesAsync();
         }
@@ -1589,11 +1591,12 @@ public class Task18_5CreditEconomicOriginSqlServerTests
 
     /// <summary>
     /// Task 18.5.1 Test H — Refund after generation 2/3 with mixed lineage.
+    /// Previously skipped: overlapping subscriptions caused unique-constraint violations on
+    /// UX_TenantCredits_TenantId_SourceType_SourceId. Fixed by using
+    /// SeedSubscriptionChangeCreditWithLineageAsync (generates unique SourceId via Guid.NewGuid).
     /// Verify the same economic origin cannot become refundable cash twice.
-    /// Skipped due to test infrastructure issues with overlapping subscriptions.
-    /// Refund protection is already verified by Test10 and Test11.
     /// </summary>
-    [Fact(Skip = "Test infrastructure issues - refund protection verified by existing Test10/Test11")]
+    [Fact]
     [Trait("Category", "SqlServer")]
     public async Task Test22_Task1851_RefundAfterMixedLineageGeneration_NoDoubleRefund()
     {
@@ -1601,8 +1604,8 @@ public class Task18_5CreditEconomicOriginSqlServerTests
         await SeedTenantAsync(tenantId);
         var t0 = MonthSafeUtcNow();
         var planA = await EnsurePlanAsync("P1858A", price: 1000m, duration: 12);
-        var planB = await EnsurePlanAsync("P1858B", price: 1000m, duration: 6);
-        var planC = await EnsurePlanAsync("P1858C", price: 1000m, duration: 6);
+        var planB = await EnsurePlanAsync("P1858B", price: 1000m, duration: 12);
+        var planC = await EnsurePlanAsync("P1858C", price: 1000m, duration: 12);
 
         var graphA = await SeedPaidContractAsync(tenantId, planA, paymentAmount: 12000m, startedAt: t0.AddMonths(-4));
 
@@ -1625,8 +1628,9 @@ public class Task18_5CreditEconomicOriginSqlServerTests
                 .ToListAsync();
             db.CreditApplications.RemoveRange(existingApps);
 
+            // Remove the Gen1 credit entirely so final credit count = 2
             var existingCredit = await db.TenantCredits.FirstAsync(tc => tc.Id == credit1!.Id);
-            existingCredit.Revoke();
+            db.TenantCredits.Remove(existingCredit);
 
             await db.SaveChangesAsync();
         }

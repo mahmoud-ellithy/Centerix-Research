@@ -1,6 +1,7 @@
 namespace Centerix.SecurityTests;
 
 using Centerix.Application.Common.Interfaces;
+using Centerix.Application.Platform.Billing;
 using Centerix.Application.Platform.Billing.Commands;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Billing.Credits;
@@ -298,7 +299,7 @@ public class Phase10InvoiceFinancialIntegrityTests
         await issueHandler.Handle(new IssueInvoiceCommand(invoice.Id, DateTime.UtcNow, null), CancellationToken.None);
 
         var handler = new AllocatePaymentHandler(
-            db, Substitute.For<IAuditWriter>(), Substitute.For<ISubscriptionReconciliationService>());
+            db, Substitute.For<IAuditWriter>(), Substitute.For<ISubscriptionReconciliationService>(), AllowPlatformAdmin());
         var result = await handler.Handle(new AllocatePaymentCommand(payment.Id, invoice.Id, 4000m), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
@@ -320,7 +321,7 @@ public class Phase10InvoiceFinancialIntegrityTests
         await issueHandler.Handle(new IssueInvoiceCommand(invoice.Id, DateTime.UtcNow, null), CancellationToken.None);
 
         var handler = new AllocatePaymentHandler(
-            db, Substitute.For<IAuditWriter>(), Substitute.For<ISubscriptionReconciliationService>());
+            db, Substitute.For<IAuditWriter>(), Substitute.For<ISubscriptionReconciliationService>(), AllowPlatformAdmin());
         var result = await handler.Handle(new AllocatePaymentCommand(payment.Id, invoice.Id, 12000m), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
@@ -343,7 +344,7 @@ public class Phase10InvoiceFinancialIntegrityTests
         await issueHandler.Handle(new IssueInvoiceCommand(invoice.Id, DateTime.UtcNow, null), CancellationToken.None);
 
         var handler = new AllocatePaymentHandler(
-            db, Substitute.For<IAuditWriter>(), Substitute.For<ISubscriptionReconciliationService>());
+            db, Substitute.For<IAuditWriter>(), Substitute.For<ISubscriptionReconciliationService>(), AllowPlatformAdmin());
 
         await handler.Handle(new AllocatePaymentCommand(payment1.Id, invoice.Id, 4000m), CancellationToken.None);
         var result2 = await handler.Handle(new AllocatePaymentCommand(payment2.Id, invoice.Id, 8000m), CancellationToken.None);
@@ -371,7 +372,7 @@ public class Phase10InvoiceFinancialIntegrityTests
         await issueHandler.Handle(new IssueInvoiceCommand(invoice.Id, DateTime.UtcNow, null), CancellationToken.None);
 
         var handler = new AllocatePaymentHandler(
-            db, Substitute.For<IAuditWriter>(), Substitute.For<ISubscriptionReconciliationService>());
+            db, Substitute.For<IAuditWriter>(), Substitute.For<ISubscriptionReconciliationService>(), AllowPlatformAdmin());
         var result = await handler.Handle(new AllocatePaymentCommand(payment.Id, invoice.Id, 13000m), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
@@ -403,7 +404,7 @@ public class Phase10InvoiceFinancialIntegrityTests
         await issueHandler.Handle(new IssueInvoiceCommand(invoice.Id, DateTime.UtcNow, null), CancellationToken.None);
 
         var handler = new AllocatePaymentHandler(
-            db, Substitute.For<IAuditWriter>(), Substitute.For<ISubscriptionReconciliationService>());
+            db, Substitute.For<IAuditWriter>(), Substitute.For<ISubscriptionReconciliationService>(), AllowPlatformAdmin());
         await handler.Handle(new AllocatePaymentCommand(payment.Id, invoice.Id, 15000m), CancellationToken.None);
 
         var updatedInvoice = await db.Invoices.FindAsync(invoice.Id);
@@ -430,7 +431,7 @@ public class Phase10InvoiceFinancialIntegrityTests
         await issueHandler.Handle(new IssueInvoiceCommand(invoice.Id, DateTime.UtcNow, null), CancellationToken.None);
 
         var handler = new AllocatePaymentHandler(
-            db, Substitute.For<IAuditWriter>(), Substitute.For<ISubscriptionReconciliationService>());
+            db, Substitute.For<IAuditWriter>(), Substitute.For<ISubscriptionReconciliationService>(), AllowPlatformAdmin());
         await handler.Handle(new AllocatePaymentCommand(payment.Id, invoice.Id, 12000m), CancellationToken.None);
 
         var credits = await db.TenantCredits
@@ -658,7 +659,7 @@ public class Phase10InvoiceFinancialIntegrityTests
         await issueHandler.Handle(new IssueInvoiceCommand(invoice.Id, DateTime.UtcNow, null), CancellationToken.None);
 
         var handler = new AllocatePaymentHandler(
-            db, Substitute.For<IAuditWriter>(), Substitute.For<ISubscriptionReconciliationService>());
+            db, Substitute.For<IAuditWriter>(), Substitute.For<ISubscriptionReconciliationService>(), AllowPlatformAdmin());
         await handler.Handle(new AllocatePaymentCommand(payment.Id, invoice.Id, 5000m), CancellationToken.None);
 
         var updatedInvoice = await db.Invoices
@@ -805,7 +806,7 @@ public class Phase10InvoiceFinancialIntegrityTests
         await issueHandler.Handle(new IssueInvoiceCommand(invoice2.Id, DateTime.UtcNow, null), CancellationToken.None);
 
         var allocHandler = new AllocatePaymentHandler(
-            db, Substitute.For<IAuditWriter>(), Substitute.For<ISubscriptionReconciliationService>());
+            db, Substitute.For<IAuditWriter>(), Substitute.For<ISubscriptionReconciliationService>(), AllowPlatformAdmin());
         await allocHandler.Handle(new AllocatePaymentCommand(payment.Id, invoice1.Id, 13000m), CancellationToken.None);
 
         var overpaymentCredit = await db.TenantCredits
@@ -822,5 +823,12 @@ public class Phase10InvoiceFinancialIntegrityTests
         var updatedCredit = await db.TenantCredits.FindAsync(overpaymentCredit.Id);
         Assert.NotNull(updatedCredit);
         Assert.Equal(CreditStatus.Applied, updatedCredit.Status);
+    }
+
+    private static IPlatformAdminGuard AllowPlatformAdmin()
+    {
+        var guard = Substitute.For<IPlatformAdminGuard>();
+        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        return guard;
     }
 }
