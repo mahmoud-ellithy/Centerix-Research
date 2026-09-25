@@ -8,6 +8,16 @@
 
 **Task 20.4 documentation closure (2026-09-25):** the Task 20.4 section below was re-issued for classification accuracy — Test11 = **TEST FIXTURE CORRECTION**, Test22 = **PRODUCTION LOGIC FIX**, Test15 = **INTENTIONAL SKIPPED TEST** — with fresh execution evidence (build, EF model, five targeted SQL runs totalling 12 tests, and the full regression 1524/1525 with 1 intentional skip) and with the Task 20.3.1 statements it supersedes marked as such. Only this document changed in that closure pass.
 
+> **Current-state authority**
+>
+> Sections 20.4.2–20.4.8 represent the final Task 20.4 verification state.
+> Earlier Task 20.1/20.2/20.3 sections are retained as historical evidence
+> and must not be interpreted as current unresolved findings where later
+> sections explicitly record their resolution. In particular:
+> - `BillingCycle` has `IsRowVersion()` — GAP-04 / DB-01 is historical, fixed in Task 20.1
+> - `AllocatePaymentHandler` has `IPlatformAdminGuard` — GAP-03 is historical, fixed in Task 20.1
+> - Test15 is the single intentional skip (not a new regression)
+
 ---
 
 ## TASK 20.2 CLOSURE SUMMARY
@@ -120,7 +130,7 @@ Task 20.1 addressed the HIGH-severity findings from Task 20:
 | `Invoice` | n/a | n/a | ✓ `IsRowVersion()` | ✓ totals 10,2 | ✓ | ✓ |
 | `InvoiceLine` | n/a | n/a | n/a | ✓ `UnitPrice`/`LineTotal` 10,2 | ✓ | ✓ |
 | `Installment` | n/a | n/a | ✓ `IsRowVersion()` | ✓ `Amount`/`SettledAmount` 18,2 | ✓ | ✓ |
-| **`BillingCycle`** | n/a | n/a | **GAP — missing `IsRowVersion()`** | n/a | ✓ | ✓ |
+| **`BillingCycle`** | n/a | n/a | ✓ `IsRowVersion()` | n/a | ✓ | ✓ |
 | `PaymentReceipt` | n/a | n/a | ✓ `IsRowVersion()` | ✓ `Amount` 18,2 | ✓ | ✓ |
 | `CustomerLedgerEntry` | n/a | n/a | ✓ `IsRowVersion()` | ✓ `Amount`/`RunningBalance` 18,2 | ✓ | various |
 | `Subscription` | n/a | n/a | via `TenantPlan` | n/a | ✓ | via `TenantPlan` |
@@ -129,7 +139,7 @@ Task 20.1 addressed the HIGH-severity findings from Task 20:
 
 | ID | Entity | Problem | Severity | Status |
 |---|---|---|---|---|
-| DB-01 | `BillingCycle` | `IsRowVersion()` not configured. `BillingCycle` is on the required concurrency list (Task 20 §4) but no `RowVersion` is declared in `BillingCycleConfiguration.cs`. Without `RowVersion`, concurrent `BillingCycle` updates could silently overwrite each other. | **HIGH** | **GAP** |
+| DB-01 | `BillingCycle` | `IsRowVersion()` not configured — **HISTORICAL — FIXED IN TASK 20.1**. `BillingCycle` now has `IsRowVersion()` in `BillingCycleConfiguration.cs` and migration `20260924073836`. SQL tests pass: `Task201_BillingCycleRowVersionSqlServerTests` → 2/2 PASS. | **FIXED** | **HISTORICAL** |
 | DB-02 | `TenantCredit` | `IdempotencyKey` `HasMaxLength(200)` but migration column is `nvarchar(256)`. Inconsistent with `Payment`/`Refund`/`CreditApplication` which all use 256. | **LOW** | Deviation (works but inconsistent) |
 | DB-03 | `CreditApplication` | Unique index has no `HasDatabaseName` (uses auto-generated name `IX_CreditApplications_TenantId_IdempotencyKey`). Uses filter `[IdempotencyKey] <> ''` (empty string) instead of `[IdempotencyKey] IS NOT NULL`. Deviates from spec naming and filter convention. | **LOW** | Deviation |
 | DB-04 | `RefundAllocation` | Spec mentions `UX_RefundAllocations_Idempotent` but actual index is `UX_RefundAllocations_TenantId_RefundId_PaymentId`. Structural uniqueness is enforced; naming differs. | **LOW** | Naming mismatch |
@@ -201,7 +211,7 @@ No `TODO`, `FIXME`, `XXX`, `HACK` in any `Configurations/` file. No shadow prope
 |---|---|---|---|---|
 | `CreatePaymentHandler` | ❌ | ❌ | `Permissions.Payments.Create` | UNGUARDED (tenant-scoped) |
 | `CompletePaymentHandler` | ❌ | ❌ | N/A (no controller) | UNGUARDED (no prod path) |
-| `AllocatePaymentHandler` | ❌ | ❌ | N/A (no controller) | **GAP** — no controller + no guard |
+| `AllocatePaymentHandler` | ✅ | ✅ line 42 | N/A (no controller) | **GUARDED** — `IPlatformAdminGuard` added in Task 20.1 (no controller; defense-in-depth) |
 | `MarkInvoicePaidHandler` | ❌ | ❌ | `Permissions.Invoices.Update` | UNGUARDED (tenant-scoped) |
 | `CreateRefundHandler` | ❌ | ❌ | `Permissions.Refunds.Create` | UNGUARDED (tenant-scoped) |
 | `ApproveRefundHandler` | ✅ | ✅ line 31 | `Permissions.Refunds.Approve` | **GUARDED** |
@@ -266,7 +276,7 @@ No `TODO`, `FIXME`, `XXX`, `HACK` in any `Configurations/` file. No shadow prope
   - `Rollback_AfterConcurrencyConflict_NoPartialState` (line 906)
 - **Evidence:** `AllocatePaymentCommand.cs` lines 104–368; `PaymentConfiguration.cs` line 68–69
 
-**Status:** **FACT** — concurrency protection exists and is tested on SQL Server. However, `AllocatePaymentCommand` has no `IPlatformAdminGuard` (see §6).
+**Status:** **FACT** — concurrency protection exists and is tested on SQL Server. `AllocatePaymentCommand` is also guarded by `IPlatformAdminGuard` (see §6).
 
 ---
 
@@ -614,7 +624,7 @@ No `TODO`, `FIXME`, `XXX`, `HACK` in any `Configurations/` file. No shadow prope
 | API-02 | HTTP surface | No `PaymentsController` exists. `CreatePaymentCommand` and `AllocatePaymentCommand` are unreachable via HTTP. Either intentional (system-only) or a missing endpoint. | **HIGH** | **GAP — business decision needed** |
 | API-03 | HTTP surface | `CreateInvoiceCommand` accepts arbitrary `Subtotal/Discount/Tax/Total` from the client. No canonical contract pricing derivation. | **MEDIUM** | **GAP** |
 | API-04 | HTTP surface | `TenantCreditsController.ApplyCredit` auto-generates `IdempotencyKey` when client omits it (`TenantCreditsController.cs:43`). This defeats client-controlled retry idempotency. | **MEDIUM** | **GAP** |
-| API-05 | HTTP surface | `AllocatePaymentCommand` has no `IPlatformAdminGuard`. If a `PaymentsController` is added in the future, a tenant admin could reach it. Currently safe because no controller exists. | **HIGH** | **GAP — defense-in-depth** |
+| API-05 | HTTP surface | `AllocatePaymentCommand` has no `IPlatformAdminGuard` — **HISTORICAL — FIXED IN TASK 20.1**. Guard added (`EnsurePlatformAdmin()` at `AllocatePaymentHandler.cs:42`). Currently safe because no controller exists. | **FIXED** | **DEFENSE-IN-DEPTH** |
 
 ---
 
@@ -777,8 +787,8 @@ Consistent negative-path coverage found in:
 |---|---|---|---|
 | **GAP-01** | Production Config | JWT secret committed to `appsettings.json`. Production deployments must override via env var / KeyVault. | Override mechanism must be documented and enforced in deployment pipeline. |
 | **GAP-02** | HTTP Surface | No `PaymentsController` exists. `CreatePaymentCommand` and `AllocatePaymentCommand` are unreachable via HTTP. | Business decision: is this intentional (internal/system-only)? If not, add controller with appropriate `[HasPermission]` attributes. |
-| **GAP-03** | Authorization | `AllocatePaymentCommand` does not invoke `IPlatformAdminGuard`. If controller is added, tenant admin could allocate. | Add `IPlatformAdminGuard.EnsurePlatformAdmin()` to `AllocatePaymentHandler`. |
-| **GAP-04** | DB/EF | `BillingCycle` lacks `RowVersion`. Concurrent updates could silently overwrite. | Add `IsRowVersion()` to `BillingCycle.RowVersion` property. Generate migration. |
+| **GAP-03** | Authorization | `AllocatePaymentCommand` does not invoke `IPlatformAdminGuard` — **HISTORICAL — FIXED IN TASK 20.1**. Guard added at `AllocatePaymentHandler.cs` line 42 (`EnsurePlatformAdmin()`). | **FIXED** (no action required) |
+| **GAP-04** | DB/EF | `BillingCycle` lacks `RowVersion` — **HISTORICAL — FIXED IN TASK 20.1**. `IsRowVersion()` added in `BillingCycleConfiguration.cs`. Migration `20260924073836` created. SQL tests pass 2/2. | **FIXED** (no action required) |
 | **TEST GAP-05** | Test Coverage | `CreatePaymentCommand` has no dedicated handler-level idempotency test (same-key same-payload, same-key different-payload). | Add `Task20IdempotencyKeyTests.cs` with 3 cases per command. |
 
 ### 29.2 MEDIUM Priority
