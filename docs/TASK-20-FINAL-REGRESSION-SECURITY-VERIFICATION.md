@@ -6,6 +6,8 @@
 **Method:** Evidence-only code inspection + test execution for closure (Task 20.1).
 **Source:** `mahmoud-ellithy/Centerix-Research` at `d:\New folder\Center Managements V1\Centerix`
 
+**Task 20.4 documentation closure (2026-09-25):** the Task 20.4 section below was re-issued for classification accuracy — Test11 = **TEST FIXTURE CORRECTION**, Test22 = **PRODUCTION LOGIC FIX**, Test15 = **INTENTIONAL SKIPPED TEST** — with fresh execution evidence (build, EF model, five targeted SQL runs totalling 12 tests, and the full regression 1524/1525 with 1 intentional skip) and with the Task 20.3.1 statements it supersedes marked as such. Only this document changed in that closure pass.
+
 ---
 
 ## TASK 20.2 CLOSURE SUMMARY
@@ -365,13 +367,13 @@ No `TODO`, `FIXME`, `XXX`, `HACK` in any `Configurations/` file. No shadow prope
 | Step | Expected | Evidence | Status |
 |---|---|---|---|
 | Credit #1: Amount=8000, Transferred=3000, Direct=5000 | ✓ | Seeded in `Test16` | **FACT** |
-| Consume 6000 | ✓ | Applied in `Test16` | **FACT** |
-| Credit #2: Transferred = 6000/8000 × 3000 = **2250** | ✓ | `ChangeSubscriptionPlanCommand.cs` L538–548 | **FACT** |
-| Credit #2: Direct = 6000/8000 × 5000 = **3750** | ✓ | Same formula | **FACT** |
+| Consume 6000 | ✓ | Not executed as a dedicated case: `Test16` consumes the full 8000 (100 %), `Test17` consumes 2000 (25 %) — same formula | **DERIVED** |
+| Credit #2: Transferred = 6000/8000 × 3000 = **2250** | ✓ | `ChangeSubscriptionPlanCommand.cs` L538–548 (`proportion = application.Amount / credit.Amount`), evaluated at 75 % | **DERIVED** |
+| Credit #2: Direct = 6000 − 2250 = **3750** | ✓ | Same formula | **DERIVED** |
 | Consume entire Credit #2 | ✓ | `Test19` | **FACT** |
 | Credit #3 economic-origin invariant preserved | ✓ | `Test19` lines 1373–1482 | **FACT** |
 
-**Status:** **FACT** — all steps verified by code inspection and test coverage.
+**Status:** the seeding and the proportion formula are **FACT** — executed by `Test16` (100 %) and `Test17` (25 %) and read directly from `ChangeSubscriptionPlanCommand.cs` L529–556. The intermediate 6000-consumption row is **DERIVED** from that same linear formula; no single test asserts 2250/3750 verbatim, and this report does not claim it does. This property belongs to **Task 18.5.1** (proportional lineage propagation); **Task 20.4** covers refund double-counting protection only (§ 20.4.4).
 
 ---
 
@@ -618,6 +620,8 @@ No `TODO`, `FIXME`, `XXX`, `HACK` in any `Configurations/` file. No shadow prope
 
 ## 25. Skipped Tests
 
+**Current state (Task 20.4):** exactly **one** test is skipped in the full regression — **Test15** below (`Total 1525 / Passed 1524 / Failed 0 / Skipped 1`). Test22's `Skip` was lifted and the test now executes and passes (§ 20.4.3). The entries below are the original Task 20 audit records.
+
 ### Test 15 — `Test15_Task1851_MixedLineageProportionalTransferredOrigin`
 
 **File:** `Task18_5CreditEconomicOriginSqlServerTests.cs` line 1163
@@ -628,17 +632,19 @@ No `TODO`, `FIXME`, `XXX`, `HACK` in any `Configurations/` file. No shadow prope
 ```
 **Reason:** Overlapping active subscriptions within the same tenant make this scenario structurally impossible to reproduce without directly seeding conflicting rows and bypassing handler guards.
 **Recommendation:** **SKIP MUST REMAIN.** Tests 16–20 already prove the proportional formula correctly with clean, non-overlapping setup. The overlapping scenario is blocked at the infrastructure level.
+**Status:** unchanged by Task 20.4 — the `Skip` was neither removed nor bypassed; Test15 remains the single intentional skip.
 
 ### Test 22 — `Test22_Task1851_RefundAfterMixedLineageGeneration_NoDoubleRefund`
 
 **File:** `Task18_5CreditEconomicOriginSqlServerTests.cs` line 1596
-**Skip attribute:**
+**Skip attribute at audit time (now removed):**
 ```
 [Fact(Skip = "Test infrastructure issues - refund protection verified by existing Test10/Test11")]
 [Trait("Category", "SqlServer")]
 ```
 **Inline reason:** Same overlapping-subscription concern as Test15.
-**Recommendation:** **SKIP CAN BE LIFTED (with caveats).** Test10 and Test11 verify refund protection for direct-generation credits, but Test22 tests the specific mixed-lineage chain where the transferred portion of a proportional split should prevent any refund. The fix requires replacing overlapping-subscription seed with the pattern from Tests 16–20 (revoke auto-generated credit, seed with explicit lineage, apply partially, then change). This is straightforward given Tests 16–20 already demonstrate the pattern. Recommend creating a dedicated helper.
+**Recommendation at audit time:** **SKIP CAN BE LIFTED (with caveats).** Test10 and Test11 verify refund protection for direct-generation credits, but Test22 tests the specific mixed-lineage chain where the transferred portion of a proportional split should prevent any refund. The fix requires replacing overlapping-subscription seed with the pattern from Tests 16–20 (revoke auto-generated credit, seed with explicit lineage, apply partially, then change).
+**Status:** **RESOLVED** — the skip is gone; the attribute is now `[Fact]` and Test22 executes and passes on SQL Server (1 / 1, § 20.4.3).
 
 ---
 
@@ -819,11 +825,11 @@ dotnet test Centerix.SecurityTests.csproj --nologo -v minimal
 
 | Verification | Result | Details |
 |---|---|---|
-| **Build** | PASS | 0 errors, 0 warnings |
+| **Build** | PASS | 0 errors |
 | **EF Model** | PASS | No pending model changes |
 | **Total Tests** | 1525 | — |
 | **Passed** | 1522 | — |
-| **Failed** | 2 | Test11, Test22 — production business logic |
+| **Failed** | 2 | Test11, Test22 — at the time recorded as production business logic (Test11 reclassified by Task 20.4, see § 30.4) |
 | **Skipped** | 1 | Test15 — intentionally skipped |
 
 ### 30.3 SQL Server Test Results (Detailed)
@@ -844,6 +850,8 @@ Two tests fail on **production business logic**, not test infrastructure:
 | **Test22** | `Task18_5CreditEconomicOriginSqlServerTests.cs` | Business logic assertion failure | PRODUCTION DEFECT | Mixed-lineage refund protection fails |
 
 **These are production code issues requiring investigation and remediation, not test infrastructure problems.**
+
+> **SUPERSEDED BY TASK 20.4 (§ 20.4.2).** This was the Task 20.3.1 assessment made from the failure signature alone. Root-cause analysis showed the **Test11** failure was *not* a production defect: it was an incorrect SQL test fixture (Plans B/C configured for 12 months instead of 6), and the failing assertion was `credit1.RemainingAmount` (`Expected: 2000 / Actual: 0.00`) at `Task18_5CreditEconomicOriginSqlServerTests.cs:889`, reached only after all refund-refusal assertions had already passed. **No production refund logic was changed for Test11.** Only **Test22** involved production logic (`IssuedSubscriptionChangeCredit.cs`), and its scenario setup also required test-fixture corrections — both are classified separately in § 20.4.
 
 ### 30.5 Verdict
 
@@ -866,6 +874,8 @@ Two tests fail on **production business logic**, not test infrastructure:
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+> **SUPERSEDED BY TASK 20.4.** The Task 20.3.1 verdict above remains **NOT CLOSED for that stage** and is kept as the historical record. Its recommendation was carried out and then re-classified in § 20.4: Test11 required a **test fixture correction** only (no production refund logic change), Test22 required the **production refund double-counting guard** plus fixture corrections, and Test15 remains the single intentional skip. The current Task 20.4 verdict is in § 20.4.8.
+
 ### 30.6 Fixes Applied in Task 20.3.1
 
 | File | Fix Applied |
@@ -879,103 +889,275 @@ Two tests fail on **production business logic**, not test infrastructure:
 ## TASK 20.4 — Refund & Economic-Origin Defect Resolution
 
 **Date:** 2026-09-25
-**Objective:** Fix two confirmed production business-logic defects in refund calculation and mixed-lineage credit protection.
+**Objective:** Resolve and correctly evidence the two failures reported by Task 20.3.1 (Test11 and Test22), distinguishing a **production logic fix** from a **test fixture correction** from an **intentional skip**.
+**Implementation commit under review:** `542d257ab7be95ce1c8f12aa7076919e702a99ac`.
+**Closure-pass scope:** documentation only. No production business logic, database schema, migration, domain/application behavior, refund or credit calculation algorithm, and no test assertion was changed by this closure pass. `git diff 542d257 --stat` shows only `docs/TASK-20-FINAL-REGRESSION-SECURITY-VERIFICATION.md`.
 
-### Test11 — Refund Calculation
+### 20.4.1 Classification Summary
 
-**Root Cause:**
-Test11 plan durations were set to 12 months for Plans B and C instead of 6 months. This caused Invoice B = 12000 (matching the payment), so no partial credit consumption occurred, and the refund calculation returned 0.
+| # | Item | Layer touched | Classification |
+|---|------|---------------|----------------|
+| 1 | Test11 — Plans B/C configured with `duration = 12 months` instead of `6 months` | test fixture only | **TEST FIXTURE CORRECTION** |
+| 2 | Test22 — refund must not count SubscriptionChange value already recognized on the original contract | production (`IssuedSubscriptionChangeCredit.cs`) | **PRODUCTION LOGIC FIX** |
+| 3 | Test22 — scenario wiring (seeded credit lineage, consumption marking, plan/payment scale, expected credit amount) | test fixture only | **TEST FIXTURE CORRECTION** |
+| 4 | Test15 — overlapping-subscription scenario | test suite attribute (`Skip`) | **INTENTIONAL SKIPPED TEST** |
 
-**Production Fix:**
-Changed plan durations from 12 to 6 months in Test11 setup:
+### 20.4.2 Test11 — Classification: TEST FIXTURE CORRECTION
+
+**Root cause (test fixture, not production):**
+Plans B and C in the Test11 SQL fixture were configured with `duration = 12 months` instead of the intended `6 months`:
+
 ```csharp
-var planA = await EnsurePlanAsync("P1858A", price: 1000m, duration: 12);
-var planB = await EnsurePlanAsync("P1858B", price: 1000m, duration: 6);  // Changed from 12
-var planC = await EnsurePlanAsync("P1858C", price: 1000m, duration: 6);  // Changed from 12
-var planD = await EnsurePlanAsync("P1858D", price: 1000m, duration: 6);
+// before (defective fixture)
+var planB = await EnsurePlanAsync("P1858B", price: 1000m, duration: 12);
+var planC = await EnsurePlanAsync("P1858C", price: 1000m, duration: 12);
+
+// after (corrected fixture)
+var planB = await EnsurePlanAsync("P1858B", price: 1000m, duration: 6);
+var planC = await EnsurePlanAsync("P1858C", price: 1000m, duration: 6);
 ```
+
+**Why the expected 2000 became 0:** with Plan B at 12 months the fixture generated **Invoice B = 12000**, equal to the **original payment of 12000** on contract A. The entire 8000 SubscriptionChange credit issued from contract A was consumed settling Invoice B (8000 credit + 4000 cash = 12000), so the intended *partial*-credit-consumption scenario never occurred and the credit balance the test asserts fell to **0**. The intended 6-month fixture generates **Invoice B = 6000**, which consumes 6000 of the 8000 credit and leaves the expected **2000**.
+
+**Exact failing assertion (ground truth):** `tests/Centerix.SecurityTests/Task18_5CreditEconomicOriginSqlServerTests.cs:889`
+
+```
+Assert.Equal(2000m, credit1!.RemainingAmount);
+Expected: 2000
+Actual:   0.00
+```
+
+The refund-refusal assertions that run *before* it (lines 872–884: `Assert.False(refundA/refundB/refundC.IsSuccess)` plus `CountRefundsAsync(...) == 0`) executed and passed in the failing run — execution reached line 889. Test11 never reached a state in which cash was refunded: it asserts **zero** refund rows on every contract of the three-generation chain. The "0 instead of 2000" value recorded by Task 20.3.1 is this assertion's value, i.e. the credit balance that must stay credit instead of becoming refundable cash.
+
+**Reproduction performed for this closure pass:** re-applying the 12-month durations reproduces the exact failure above (`Expected: 2000 / Actual: 0.00`, line 889); with the committed 6-month fixture the test passes. The test file was restored to `542d257` afterwards — `git diff 542d257 -- tests/` is empty.
 
 **Evidence:**
-| State | Expected | Actual |
-|-------|----------|--------|
-| Before | Refund = 2000 | Refund = 0 |
-| After | Refund = 2000 | Refund = 2000 | **PASS** |
 
-### Test22 — Mixed-Lineage Refund Protection
+| State | Fixture | Assertion (line 889) | Expected | Actual | Status |
+|-------|---------|----------------------|----------|--------|--------|
+| Before | Plan B = 12m, Plan C = 12m | `credit1.RemainingAmount == 2000` | 2000 | 0.00 | FAIL |
+| After | Plan B = 6m, Plan C = 6m | `credit1.RemainingAmount == 2000` | 2000 | 2000 | **PASS** (SQL: 1 / 1) |
 
-**Root Cause:**
-1. `FindSubscriptionIdForContractAsync` returned the seeded subscription instead of the handler-created subscription, causing wrong credit calculations.
-2. `SeedSubscriptionChangeCreditWithLineageAsync` ignored the `sourceId` parameter, causing the seeded credit to have a random SourceId, preventing the handler from recognizing it for consumption calculation and `GetIssuedAmountAsync` from blocking refunds.
+> **Test11 failure was caused by an incorrect SQL test fixture: Plans B and C were configured for 12 months instead of the intended 6-month duration. This prevented the intended partial-credit consumption scenario. Correcting the fixture restored the expected refund-protection result of 2000. No production refund-calculation logic change was required for Test11.**
 
-**Production Fix:**
-1. Added optional `planId` parameter to `FindSubscriptionIdForContractAsync` and updated Test22 to pass `planB` when finding subscription B.
-2. Updated `SeedSubscriptionChangeCreditWithLineageAsync` to use the `sourceId` parameter when provided.
-3. Added code to mark the seeded credit as `PartiallyApplied` after creating the CreditApplication so the handler recognizes it.
-4. Updated Test22 plan durations from 12 to 6 months and payment from 12000 to 6000 to match the scenario.
-5. Updated Test22 expected values to match the production handler's actual calculation.
+**Production explicitly unchanged for this defect:** no file under `src/`, no `migrations/` entry, no schema change, no change to `RefundCalculationService.cs`, `CreateRefundCommand.cs`, or any credit calculation was made for Test11. `dotnet ef migrations has-pending-model-changes` reports no pending model changes (§ 20.4.6).
 
-**Economic-Origin Flow:**
+### 20.4.3 Test22 — Classification: PRODUCTION LOGIC FIX
+
+**What Test22 exercised:** a refund requested on the *original* contract must not treat, as refundable cash, economic value that was already recognized as a SubscriptionChange credit issued from that same contract. That is a double-counting of one economic origin.
+
+**Economic-origin chain:**
+
 ```
-Contract A (6 months, 6000 total)
-    ↓ A→B at t0 (4 months used)
-    ↓ Unused = 3300
-    ↓ Seeded Credit #1: Amount=6000, Transferred=2000
+Original Contract (A)
+    ↓
+Original Subscription  (created with Contract A)
+    ↓  ChangeSubscriptionPlanCommand issues a credit with
+    ↓  SourceId = original subscription id
+SubscriptionChange Credit  (Amount / TransferredPaidAmount / DirectPaidAmount)
+    ↓  applied to the next contract's invoice
+New Contract (B) / New Subscription
+```
+
+The refund path must not count the same economic origin twice. Value recognized on the original contract exists either (a) still as a credit balance, or (b) as settlement already delivered on the new invoice — in neither form is it refundable cash on the original contract.
+
+**Production file changed (the only production file in `542d257`):**
+
+`src/Centerix.Application/Platform/Billing/Commands/IssuedSubscriptionChangeCredit.cs`
+
+`GetIssuedAmountAsync` resolves the issued amount through an explicit credit → source subscription → original contract lookup, tenant- and currency-scoped:
+
+```csharp
+return await dbContext.TenantCredits
+    .Where(tc => tc.TenantId == tenantId
+              && tc.SourceType == CreditSourceType.SubscriptionChange
+              && tc.SourceId != null
+              && tc.CurrencyCode == currencyCode
+              && dbContext.TenantPlans.Any(tp =>
+                  tp.Id == tc.SourceId.Value
+                  && tp.TenantId == tenantId
+                  && tp.ContractId == contractId))
+    .SumAsync(tc => tc.Amount, cancellationToken);
+```
+
+with the rule recorded in the doc-comment: *credits are included if their SourceId subscription's ORIGINAL contract is the refund contract; credits from subscriptions created by a plan change are excluded because their value has already been recognized through the subscription's own contract.*
+
+**Refund calculation path (arithmetic itself unchanged):**
+
+| Step | Location | Behavior |
+|------|----------|----------|
+| Resolve issued credit | `CreateRefundCommand.cs:138`, `CalculateRefundCommand.cs:56`, `CancelSubscriptionCommand.cs:213` | `IssuedSubscriptionChangeCredit.GetIssuedAmountAsync(...)` |
+| Subtract from refundable base | `RefundCalculationService.cs:158–168` | `refundableAmount = paidMinusObligation - alreadyConvertedCredit` — the **full** issued amount is subtracted, not only `RemainingAmount` (deliberate: the consumed portion already settled the new invoice) |
+| Refuse when nothing is due | `CreateRefundCommand.cs:152–155` | `RefundErrors.NoRefundDue(...)` → no refund row |
+
+**Double-counting protection (why the production guard is load-bearing):** in Test22, contract A has 6000 paid and 4000 of value consumed over the 4 elapsed months. With the guard resolving `alreadyConvertedCredit = 6000`, `refundableAmount = (6000 − 4000) − 6000 = −2000 ≤ 0` → `NoRefundDue` → `Assert.False(refundA.IsSuccess)` holds. If the issued amount were **not** resolved (`0`), the same arithmetic yields `refundableAmount = 2000 > 0` and `CreateRefundCommand` would create the refund — exactly the double count this guard prevents.
+
+**SQL test evidence:** `Task18_5CreditEconomicOriginSqlServerTests.Test22_Task1851_RefundAfterMixedLineageGeneration_NoDoubleRefund` → **PASS 1 / 1** (`[Trait("Category", "SqlServer")]`), asserting:
+
+- `Assert.Equal(4000m, credit2.Amount)` and `Assert.Equal(2000m, credit2.TransferredPaidAmount)` — lineage carried B → C without multiplication
+- `Assert.False(refundA.IsSuccess, "Converted value must not become refundable cash.")`
+- `Assert.False(refundB.IsSuccess, "Credit-settled value must not become refundable cash.")`
+- `Assert.Equal(2, credits.Count)` — no credit duplication
+
+**Scenario flow (verified assertions):**
+
+```
+Contract A (contracted 12,000 / 12 mo, 1,000 per month, 6,000 cash paid, started t0-4mo)
+    ↓ A → B at t0 (4 months used)
+    ↓ Seeded Credit #1: Amount=6000, Transferred=2000  (SourceId = original subscription)
     ↓ Invoice B settled by: 6000 credit + 4000 cash = 10000
-    ↓ B→C at t0+2mo (2 months used from B)
-    ↓ Unused from B = 4000
-    ↓ Credit #2: Amount=4000, Transferred=2000 (proportional from Credit #1)
-    ↓ Refund A blocked (seeded credit amount >= unused value)
-    ↓ Refund B blocked (credit-settled, no cash)
+    ↓ B → C at t0+2mo (contract B = 6 months × 1000; 2 months used → 4000 unused)
+    ↓ Credit #2: Amount = min(4000, 10000) = 4000, Transferred = (6000/6000) × 2000 = 2000
+    ↓ Refund A blocked (issued 6000 credit offsets the refundable base)
+    ↓ Refund B blocked (credit-settled portion, no refundable cash)
 ```
 
-**Evidence:**
-| State | Expected | Actual |
-|-------|----------|--------|
-| Before | credit2.Amount = 6000, Transferred = 2000, refund A blocked | credit2.Amount = 10000, Transferred = 2000, refund A succeeded |
-| After | credit2.Amount = 4000, Transferred = 2000, refund A blocked | credit2.Amount = 4000, Transferred = 2000, refund A blocked | **PASS** |
+**Test-fixture corrections required by the same scenario — classified separately as TEST FIXTURE CORRECTION (test file only):**
 
-### Regression Results
+These are not production changes; they are listed so the two layers are never conflated:
 
-| Verification | Total | Passed | Failed | Skipped | Status |
-|-------------|------:|------:|------:|--------:|--------|
-| Build | - | - | 0 | - | **PASS** |
-| EF Model | - | - | 0 | - | **PASS** |
-| Test11 SQL | 8 | 8 | 0 | 0 | **PASS** |
-| Test22 SQL | 1 | 1 | 0 | 0 | **PASS** |
-| Full Regression | 1525 | 1524 | 0 | 1 | **PASS** |
+1. `SeedSubscriptionChangeCreditWithLineageAsync` now honors its `sourceId` argument, so the seeded credit is linked to the original subscription that the guard and the consumption calculation resolve.
+2. `FindSubscriptionIdForContractAsync` accepts an optional `planId` and orders by `CreatedAtUtc`, so Test22 selects the handler-created subscription for contract B.
+3. The seeded credit is linked to Invoice B through a `CreditApplication` and marked consumed (`ConsumeAmount(6000)`), so the plan-change handler recognizes the settlement.
+4. Fixture scale corrected to the scenario: Plans A/B/C = 6 months and original payment = 6000 (the 12-month / 12000 variant did not produce the intended lineage).
+5. Expected `credit2.Amount` corrected 10000 → 4000, which is the arithmetic of the corrected fixture (contract B = 6 × 1000 = 6000; 2 of 6 months used at `t0+2mo` → 4000 unused; paid settlement 6000 credit + 4000 cash = 10000 → `creditAmount = min(4000, 10000) = 4000`). The refund-blocking assertions were **not** changed or weakened.
 
-### Test Quality
+### 20.4.4 Economic-Origin Proportionality — Attribution
 
-No tautological assertions (`Assert.True(condition || !condition)`) found in affected tests.
+Two different properties are in scope and must not be conflated:
 
-No tests were skipped, marked inconclusive, or had conditional passes to hide defects.
+| Concern | Owning task | Evidence |
+|---------|-------------|----------|
+| Proportional lineage propagation (`proportion = application.Amount / credit.Amount`) | **Task 18.5.1** | `ChangeSubscriptionPlanCommand.cs` L529–556; `Task18_5CreditEconomicOriginSqlServerTests` Test16–Test20 |
+| Refund double-counting protection (issued credit subtracted from the refundable base) | **Task 20.4** | `IssuedSubscriptionChangeCredit.cs`; `RefundCalculationService.cs` L158–168; Test10, Test11, Test22 |
 
-### Task 20.4 Verdict
+**Task 18.5.1 invariant (already established; not changed by Task 20.4):**
+
+Credit #1 `Amount = 8000`, `TransferredPaidAmount = 3000` (⇒ `DirectPaidAmount = 5000`). After consuming **6000**:
+
+- transferred portion = `6000 / 8000 × 3000 = **2250**`
+- direct portion = `6000 − 2250 = **3750**`
+
+Executed evidence for that same proportion formula (all PASS in the full regression):
+
+| Test | Consumption | Result |
+|------|-------------|--------|
+| Test16 — full lineage | 8000 of 8000 (100 %) | Transferred 3000 / Direct 5000 |
+| Test17 — partial consumption | 2000 of 8000 (25 %) | Transferred 750 / Direct 1250 |
+| Test18 — multiple predecessors | 4000 + 2000 | proportional sum verified |
+| Test19 — three-generation chain | 8000 then 2000 | no multiplication |
+| Test20 — cash + mixed credit | 6000 of 6000 + 4000 cash | Transferred 2000 / Direct 8000, counted once |
+
+The 6000-consumption point is that same linear formula evaluated at 75 %. The suite asserts the 25 % and 100 % points directly (Test17, Test16); 2250 / 3750 is therefore formula-derived from the code at `ChangeSubscriptionPlanCommand.cs` L529–556 plus those executed points — it is **not** asserted verbatim by a single dedicated test case, and this report does not claim otherwise.
+
+**Task 20.4 does not claim proportional partial consumption as its own result.** Test22 does not execute the 8000/3000 → consume 6000 → 2250/3750 split; its lineage numbers are a fully consumed 6000 credit feeding a 4000 credit with Transferred 2000. Test22's evidence covers refund-origin protection only.
+
+### 20.4.5 Intentional Skip — Test15
+
+| Test | Attribute | Classification |
+|------|-----------|----------------|
+| `Task18_5CreditEconomicOriginSqlServerTests.Test15_Task1851_MixedLineageProportionalTransferredOrigin` | `[Fact(Skip = "Complex overlapping subscription scenario - covered by Test16 and other tests")]` | **INTENTIONAL SKIPPED TEST — unchanged** |
+
+The full regression reports exactly one skip, and it is this pre-existing Test15 attribute (§ 25). It is **not** a newly introduced skip: the overlapping-subscription scenario is covered by the subsequent tests (Test16–Test20, Test22). Test15 was **not** removed and its `Skip` was **not** removed in order to reach a `1525/1525` figure.
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│  TASK 20.4 — CLOSED                                                │
-│                                                                     │
-│  All production defects FIXED:                                       │
-│    ✅ Test11: Refund calculation returns 2000 (was 0)               │
-│    ✅ Test22: Mixed-lineage refund protection works correctly        │
-│                                                                     │
-│  Regression:                                                        │
-│    ✅ Full regression: 1524/1525 passed (0 failed, 1 skipped)        │
-│    ✅ EF model: No pending changes                                  │
-│    ✅ Build: 0 errors                                              │
-│                                                                     │
-│  Test Quality:                                                     │
-│    ✅ No tautological assertions                                    │
-│    ✅ No skipped or hidden tests                                    │
-└─────────────────────────────────────────────────────────────────────┘
+Total   = 1525
+Passed  = 1524
+Failed  = 0
+Skipped = 1
 ```
 
-### Files Changed in Task 20.4
+> The single skipped test is the intentionally skipped Test15 scenario documented in the existing Task 20 test suite. It is not a newly introduced skip and is covered by subsequent overlapping-subscription tests.
 
-| File | Change |
-|------|--------|
-| `Task18_5CreditEconomicOriginSqlServerTests.cs` | Fixed plan durations in Test11; fixed plan durations, payment, and expected values in Test22; added optional `planId` parameter to `FindSubscriptionIdForContractAsync`; updated `SeedSubscriptionChangeCreditWithLineageAsync` to use `sourceId` parameter; added credit status update in Test22 |
+### 20.4.6 Final Evidence Table (fresh — Task 20.4 execution)
+
+| Verification                | Total | Passed | Failed | Skipped | Status |
+| --------------------------- | ----: | -----: | -----: | ------: | ------ |
+| Build                       |     — |      — |      0 |       — | PASS   |
+| EF model                    |     — |      — |      0 |       — | PASS   |
+| Test11 SQL                  |     1 |      1 |      0 |       0 | PASS   |
+| Test22 SQL                  |     1 |      1 |      0 |       0 | PASS   |
+| Payment Idempotency SQL     |     5 |      5 |      0 |       0 | PASS   |
+| BillingCycle RowVersion SQL |     2 |      2 |      0 |       0 | PASS   |
+| Combined Settlement SQL     |     3 |      3 |      0 |       0 | PASS   |
+| Full Regression             |  1525 |   1524 |      0 |       1 | PASS   |
+
+**Commands and raw results:**
+
+| Check | Command | Result |
+|-------|---------|--------|
+| Build | `dotnet build Centerix.slnx --nologo -v minimal` | `0 Error(s)` (StyleCop/analyzer warnings present) |
+| EF model (App) | `dotnet ef migrations has-pending-model-changes --project src/Centerix.Infrastructure --context AppDbContext` | `No changes have been made to the model since the last migration.` |
+| EF model (Tenant) | `dotnet ef migrations has-pending-model-changes --project src/Centerix.Infrastructure --context TenantDbContext` | `No changes have been made to the model since the last migration.` |
+| Test11 | `dotnet test ... --filter "FullyQualifiedName~...Test11_RefundAfterGeneration3"` | `Passed! - Failed: 0, Passed: 1, Skipped: 0, Total: 1` |
+| Test22 | `dotnet test ... --filter "FullyQualifiedName~...Test22_Task1851"` | `Passed! - Failed: 0, Passed: 1, Skipped: 0, Total: 1` |
+| Payment idempotency SQL | `dotnet test ... --filter "FullyQualifiedName~Task201_PaymentIdempotencySqlServerTests"` | `Passed: 5, Failed: 0, Total: 5` |
+| BillingCycle rowversion SQL | `dotnet test ... --filter "FullyQualifiedName~Task201_BillingCycleRowVersionSqlServerTests"` | `Passed: 2, Failed: 0, Total: 2` |
+| Combined settlement SQL | `dotnet test ... --filter "FullyQualifiedName~Task201_CombinedSettlementConcurrencyTests"` | `Passed: 3, Failed: 0, Total: 3` |
+| Full regression | `dotnet test tests/Centerix.SecurityTests/Centerix.SecurityTests.csproj --nologo -v minimal` | `Passed! - Failed: 0, Passed: 1524, Skipped: 1, Total: 1525, Duration: 13 m 32 s` |
+
+The single skip emitted by the full run is `Task18_5CreditEconomicOriginSqlServerTests.Test15_Task1851_MixedLineageProportionalTransferredOrigin [SKIP]` (§ 20.4.5).
+
+### 20.4.7 Test Quality
+
+- **No test was weakened, removed, newly skipped, or hidden by Task 20.4.** The test file change set is limited to fixture/scenario corrections listed in § 20.4.2 and § 20.4.3; no assertion was deleted, no `Skip` was added, and no failure was marked inconclusive or conditional.
+- **Test15 keeps its pre-existing `Skip`.** It was not removed to manufacture `1525/1525`.
+- **Expected values were changed only where the fixture scale changed** (Test22 `credit2.Amount` 10000 → 4000), and only to the value implied by the corrected 6-month fixture arithmetic shown in § 20.4.3. The refund-blocking assertions are unchanged.
+- **No tautological assertion was introduced by Task 20.4.** For transparency: one pre-existing assertion in Test22 (`Task18_5CreditEconomicOriginSqlServerTests.cs:1690`, `Assert.True(credits.Sum(c => c.RemainingAmount) > 0 || credits.All(c => c.RemainingAmount == 0))`, added in `fcb3911` and untouched by Task 20.4) is tautological for non-negative `RemainingAmount`. It does not substitute for any load-bearing assertion — Test22's substantive checks are `credit2.Amount`, `credit2.TransferredPaidAmount`, `refundA`/`refundB` refusal and credit count. It is recorded here rather than silently claimed away, and is left unchanged because this closure pass may not modify tests.
+
+### 20.4.8 Task 20.4 Verdict
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  TASK 20.4 — CLOSED                                                  │
+│                                                                      │
+│  Classification corrected:                                           │
+│    ✅ Test11 → TEST FIXTURE CORRECTION (12m → 6m; expected 2000      │
+│       restored; NO production refund logic changed for Test11)       │
+│    ✅ Test22 → PRODUCTION LOGIC FIX (IssuedSubscriptionChangeCredit  │
+│       — refund double-counting protection), with its test-fixture    │
+│       corrections listed separately as such                          │
+│    ✅ Test15 → INTENTIONAL SKIPPED TEST (attribute unchanged)        │
+│    ✅ Proportional lineage 8000/3000 → consume 6000 → 2250/3750      │
+│       attributed to Task 18.5.1, not claimed by Task 20.4            │
+│                                                                      │
+│  Evidence (fresh):                                                   │
+│    ✅ Build: 0 errors                                                │
+│    ✅ EF model: no pending changes (AppDbContext + TenantDbContext)  │
+│    ✅ Test11 SQL 1/1, Test22 SQL 1/1                                 │
+│    ✅ Payment idempotency 5/5, rowversion 2/2, settlement 3/3        │
+│    ✅ Full regression: 1524/1525 passed, 0 failed, 1 skipped (Test15)│
+│                                                                      │
+│  Integrity:                                                          │
+│    ✅ No test removed, weakened, newly skipped, or hidden            │
+│    ✅ Only docs/TASK-20-FINAL-REGRESSION-SECURITY-VERIFICATION.md    │
+│       differs from implementation commit 542d257                     │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+**Closure conditions**
+
+| Condition | Status | Evidence |
+|-----------|--------|----------|
+| Test11 passes | **TRUE** | SQL 1/1 PASS (§ 20.4.6) |
+| Test22 passes | **TRUE** | SQL 1/1 PASS (§ 20.4.6) |
+| No production refund logic incorrectly claimed as fixed for Test11 | **TRUE** | § 20.4.2 states no production change was required or made for Test11 |
+| Test22 production logic fix documented accurately | **TRUE** | § 20.4.3 — exact file, chain, refund calculation, SQL result |
+| Economic-origin proportionality attributed to Task 18.5.1 | **TRUE** | § 20.4.4 |
+| Test15 intentional skip documented | **TRUE** | § 20.4.5 |
+| Full regression has 0 failures | **TRUE** | 1524 / 1525 passed, 0 failed, 1 skipped |
+| Build passes | **TRUE** | `0 Error(s)` |
+| EF model passes | **TRUE** | no pending model changes (both contexts) |
+| SQL tests passed | **TRUE** | 1 + 1 + 5 + 2 + 3 = 12 / 12 |
+| No test weakened or hidden | **TRUE** | § 20.4.7; `git diff 542d257` touches only this document |
+
+### 20.4.9 Files Changed in Task 20.4
+
+| File | Layer | Classification | Change |
+|------|-------|----------------|--------|
+| `src/Centerix.Application/Platform/Billing/Commands/IssuedSubscriptionChangeCredit.cs` | **Production** | **PRODUCTION LOGIC FIX** | `GetIssuedAmountAsync` resolves the refund-blocking amount through the credit's source subscription → original contract link (tenant + currency scoped); doc-comment records the double-counting rule. |
+| `tests/Centerix.SecurityTests/Task18_5CreditEconomicOriginSqlServerTests.cs` | Test | **TEST FIXTURE CORRECTION** | Test11 Plan B/C durations 12 → 6; Test22 Plan A/B/C durations, payment 12000 → 6000, expected `credit2.Amount` 10000 → 4000; `SeedSubscriptionChangeCreditWithLineageAsync` honors `sourceId`; `FindSubscriptionIdForContractAsync` optional `planId` + `CreatedAtUtc` ordering; seeded credit linked to Invoice B and marked consumed. Test15 `Skip` untouched. |
+| `docs/TASK-20-FINAL-REGRESSION-SECURITY-VERIFICATION.md` | Docs | Documentation | This report — Task 20.4 section corrected for classification, evidence and skip accounting. |
 
 ---
 
