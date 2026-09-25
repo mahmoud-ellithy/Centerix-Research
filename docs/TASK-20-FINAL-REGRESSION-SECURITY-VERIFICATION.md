@@ -1,7 +1,8 @@
 # TASK 20 — Final Regression & Security Verification
 
-**Verdict:** **CLOSED**
-**Date:** 2026-09-24
+**Verdict:** **NOT CLOSED — Production Defects Found**
+**Date:** 2026-09-25
+**Task 20.3.1 Objective:** SQL Server verification and closure of blockers for payment idempotency, billing cycle rowversion, combined settlement concurrency, and economic origin tests.
 **Method:** Evidence-only code inspection + test execution for closure (Task 20.1).
 **Source:** `mahmoud-ellithy/Centerix-Research` at `d:\New folder\Center Managements V1\Centerix`
 
@@ -799,68 +800,79 @@ Consistent negative-path coverage found in:
 
 ---
 
-## 30. Final Verdict
+## 30. Task 20.3.1 Final Execution Evidence
 
-### 30.1 Fresh Evidence Table (Task 20.3 Execution — 2026-09-25)
+### 30.1 Blocker Closure Status
 
-| Verification | Command | Total | Passed | Failed | Skipped | Status |
-|---|---|---|---|---|---|---|
-| Build | `dotnet build Centerix.slnx --nologo -v minimal` | — | 0 errors | 0 | — | **PASS** |
-| EF model | `dotnet ef migrations has-pending-model-changes` | — | No pending | — | — | **PASS** |
-| InMemory regression | `dotnet test --filter "Category!=SqlServer"` | 1348 | 1348 | 0 | 0 | **PASS** |
-| Payment Idempotency SQL | `dotnet test --filter "Category=SqlServer&Category=Task201Idempotency"` | 5 | 5 | 0 | 0 | **PASS** |
-| BillingCycle RowVersion SQL | Repository infrastructure defect (FK missing) | — | — | — | — | **NOT FIXED** |
-| Combined Settlement SQL | Repository infrastructure defect | — | — | — | — | **NOT FIXED** |
-| Test22 (Economic Origin) | SQL infrastructure defect | — | — | — | — | **NOT FIXED** |
+| Blocker | Description | Status | Evidence |
+|---------|-------------|--------|----------|
+| **BLOCKER-01** | Payment Idempotency SQL tests | **FIXED** | `Task201_PaymentIdempotencySqlServerTests.cs` — 5/5 passed |
+| **BLOCKER-02** | BillingCycle RowVersion SQL tests | **FIXED** | `Task201_BillingCycleRowVersionSqlServerTests.cs` — 2/2 passed |
+| **BLOCKER-03** | Combined Settlement Concurrency tests | **FIXED** | `Task201_CombinedSettlementConcurrencyTests.cs` — 3/3 passed |
+| **BLOCKER-04** | Test22 Economic Origin tests | **EXECUTABLE** | `Task18_5CreditEconomicOriginSqlServerTests.cs` — fails on production business logic |
 
-### 30.2 Tautological Assertion Fix (Task 20.3)
-
-| File | Line | Issue | Fix |
-|---|---|---|---|
-| `Task201_PaymentIdempotencyTests.cs` | 87 | `Assert.True(resultB.IsSuccess \|\| !resultB.IsSuccess)` — always true | Replaced with meaningful assertions documenting InMemory limitations and pointing to SQL Server tests |
-
-### 30.3 SQL Server Test Infrastructure Defects
-
-The following SQL Server tests have infrastructure defects unrelated to production code:
-
-1. **Payment Idempotency SQL Tests** — ✅ FIXED in Task 20.3
-   - Issue: Missing `StampAddedTenantIds()` call, tenant query filter blocking queries
-   - Fix: Added `CreatePaymentWithTenant()` helper with proper TenantId stamping and `IgnoreQueryFilters()` for verification queries
-   - Result: All 5 tests pass
-
-2. **BillingCycle RowVersion SQL Tests** — REPOSITORY DEFECT
-   - Issue: `TenantPlan.Create()` generates `PlanId` that doesn't exist in `Platform.Plans` table (FK constraint violation)
-   - Fix: Requires creating a `Plan` entity first, or restructuring the test to use existing plans
-
-3. **Combined Settlement SQL Tests** — NOT EXECUTED
-   - Status: Not executed due to time constraints
-
-4. **Test22 (Economic Origin)** — NOT EXECUTED  
-   - Status: SQL infrastructure not available
-
-### 30.4 Verdict
+### 30.2 Full Regression Results
 
 ```
-TASK 20.3 — CLOSED (with documented infrastructure limitations)
+dotnet test Centerix.SecurityTests.csproj --nologo -v minimal
 ```
 
-**All mandatory items verified:**
-1. ✅ Tautological assertion fixed (`Task201_PaymentIdempotencyTests.cs`)
-2. ✅ Build passes (0 errors)
-3. ✅ EF model synchronized (no pending changes)
-4. ✅ InMemory regression passes (1348/1348)
-5. ✅ Payment Idempotency SQL tests pass (5/5) — FIXED infrastructure defect
-6. ✅ Report updated with fresh evidence
+| Verification | Result | Details |
+|---|---|---|
+| **Build** | PASS | 0 errors, 0 warnings |
+| **EF Model** | PASS | No pending model changes |
+| **Total Tests** | 1525 | — |
+| **Passed** | 1522 | — |
+| **Failed** | 2 | Test11, Test22 — production business logic |
+| **Skipped** | 1 | Test15 — intentionally skipped |
 
-**Documented infrastructure limitations (not production defects):**
-- BillingCycle RowVersion SQL tests: FK constraint requires Plan entity setup
-- Combined Settlement SQL tests: not executed in this session
-- Test22: requires SQL Server infrastructure
+### 30.3 SQL Server Test Results (Detailed)
 
-**Business Decisions (unchanged):**
-- `PaymentsController` does not exist — intentional (system-only operations)
-- Renewal idempotency — inherent via structural uniqueness
-- `CreateInvoice` accepts client amounts — tenant-admin workflow
+| Test File | Tests | Passed | Failed | Notes |
+|-----------|-------|--------|--------|-------|
+| `Task201_PaymentIdempotencySqlServerTests.cs` | 5 | 5 | 0 | ✅ BLOCKER-01 FIXED |
+| `Task201_BillingCycleRowVersionSqlServerTests.cs` | 2 | 2 | 0 | ✅ BLOCKER-02 FIXED |
+| `Task201_CombinedSettlementConcurrencyTests.cs` | 3 | 3 | 0 | ✅ BLOCKER-03 FIXED |
+
+### 30.4 Production Code Defects (Not Test Infrastructure)
+
+Two tests fail on **production business logic**, not test infrastructure:
+
+| Test | File | Failure | Severity | Root Cause |
+|------|------|---------|----------|------------|
+| **Test11** | `Task18_5CreditEconomicOriginSqlServerTests.cs` | Business logic assertion failure | PRODUCTION DEFECT | Refund calculation returns 0 but test expects 2000 |
+| **Test22** | `Task18_5CreditEconomicOriginSqlServerTests.cs` | Business logic assertion failure | PRODUCTION DEFECT | Mixed-lineage refund protection fails |
+
+**These are production code issues requiring investigation and remediation, not test infrastructure problems.**
+
+### 30.5 Verdict
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  TASK 20.3.1 — NOT CLOSED                                          │
+│                                                                     │
+│  All SQL-specific test infrastructure blockers FIXED:               │
+│    ✅ BLOCKER-01: Payment Idempotency SQL (5/5 passed)              │
+│    ✅ BLOCKER-02: BillingCycle RowVersion SQL (2/2 passed)          │
+│    ✅ BLOCKER-03: Combined Settlement Concurrency (3/3 passed)     │
+│    ✅ BLOCKER-04: Test22 executable (fails on production logic)    │
+│                                                                     │
+│  PRODUCTION DEFECTS DISCOVERED:                                     │
+│    ❌ Test11: Refund business logic assertion failure               │
+│    ❌ Test22: Mixed-lineage refund protection failure                │
+│                                                                     │
+│  RECOMMENDATION: Investigate and fix production business logic      │
+│  for refund calculation and mixed-lineage credit scenarios.         │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 30.6 Fixes Applied in Task 20.3.1
+
+| File | Fix Applied |
+|------|-------------|
+| `Task201_BillingCycleRowVersionSqlServerTests.cs` | Fixed FK constraint by creating Plan entity before TenantPlan; fixed parameter ordering in `TenantPlan.Create()`; fixed SQL query for rowversion verification; added `AuthorizeTenant()` for query filter |
+| `Task201_PaymentIdempotencySqlServerTests.cs` | Fixed tenant query filter blocking; added proper `StampAddedTenantIds()` calls |
+| `Task201_CombinedSettlementConcurrencyTests.cs` | Verified deadlocks at invoice row-lock level (expected SQL Server behavior) |
 
 ---
 
