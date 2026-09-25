@@ -710,6 +710,7 @@ public class PromotionDomainTests
         var offer = service.Calculate(plan, 3, UtcNow, [promo]).Value;
 
         // Step 3: Simulate Contract creation from offer
+        var grossAmount = offer.FinalAmount + offer.DiscountAmount;
         var contractResult = Centerix.Domain.Platform.Contracts.Contract.Create(
             id: Guid.NewGuid(),
             tenantId: "tenant-1",
@@ -721,6 +722,7 @@ public class PromotionDomainTests
             monthlyListPrice: offer.MonthlyListPrice,
             contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode,
+            grossAmount: grossAmount,
             contractedAmount: offer.FinalAmount,
             discountAmount: offer.DiscountAmount,
             promotionReference: offer.PromotionName,

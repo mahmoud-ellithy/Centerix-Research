@@ -206,6 +206,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
             monthlyListPrice: 1000m,
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
+            grossAmount: 11000m,
             contractedAmount: 10000m,
             discountAmount: 1000m,
             promotionId: 1,
@@ -239,6 +240,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
             monthlyListPrice: 1200m,
             contractualMonthlyValue: 1200m,
             currencyCode: "EGP",
+            grossAmount: 14400m,
             contractedAmount: 14400m,
             discountAmount: 0m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
@@ -269,7 +271,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
         var contract = Contract.Create(
             Guid.NewGuid(), tenantId, "CTR-ALIGN-001", 1,
             subStart, subStart.AddMonths(12), 12,
-            1000m, 1000m, "EGP", 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
         sub.LinkToContract(contract.Id);
 
         // BillingCycle aligned with subscription
@@ -311,7 +313,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
         var contract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-DUR-001", 1,
             startsAt, endsAt, durationMonths,
-            1000m, 1000m, "EGP", 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         // Contract end is based on DurationMonths using AddCalendarMonths
         Assert.Equal(startsAt, contract.EffectiveAtUtc);
@@ -355,13 +357,13 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
             Guid.NewGuid(), "t-1", "CTR-OLD-001", 1,
             new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            12, 1000m, 1000m, "EGP", 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            12, 1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         var newStart = oldContract.EndsAtUtc;
         var newContract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-NEW-001", 1,
             newStart, newStart.AddMonths(12),
-            12, 1000m, 1000m, "EGP", 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            12, 1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         // New contract starts at or after old contract ends
         Assert.True(newContract.EffectiveAtUtc >= oldContract.EndsAtUtc);
@@ -837,10 +839,16 @@ public class Phase9_3_3ContractSubscriptionAlignmentSqlServerTests
 
             // Create old contract (starts 6 months ago, ends in 6 months)
             var oldContractStart = DateTime.UtcNow.AddMonths(-6);
+            // New invariant: ContractedAmount = GrossAmount - DiscountAmount
+            // GrossAmount = 10000, DiscountAmount = 1000, ContractedAmount = 9000
             var oldContract = Contract.Create(
                 Guid.NewGuid(), tenantId, "CTR-HIST-OLD", planId,
                 oldContractStart, oldContractStart.AddMonths(12), 12,
-                1000m, 1000m, "EGP", 10000m,Contract.CompleteEntitlementSnapshotVersion,  1000m,
+                1000m, 1000m, "EGP",
+                grossAmount: 10000m,
+                contractedAmount: 9000m,
+                entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+                discountAmount: 1000m,
                 promotionId: 1, promotionType: "PercentageDiscount", chargedMonths: 10).Value;
             db.Contracts.Add(oldContract);
             oldContractId = oldContract.Id;

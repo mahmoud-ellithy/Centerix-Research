@@ -75,10 +75,12 @@ public class CreateInvoiceHandler(
             return InvoiceErrors.DuplicateInvoiceNumber;
 
         // 6. Derive authoritative amounts from Contract (INV-01: server-authoritative)
-        var subtotal = contract.ContractedAmount;
+        // Commercial invariant: ContractedAmount = GrossAmount - DiscountAmount
+        // Invoice.TotalAmount MUST equal Contract.ContractedAmount (the final agreed amount)
+        var subtotal = contract.GrossAmount;
         var discountAmount = contract.DiscountAmount;
         var taxAmount = 0m; // Tax calculation will be added in a later task
-        var totalAmount = subtotal - discountAmount + taxAmount;
+        var totalAmount = contract.ContractedAmount; // = GrossAmount - DiscountAmount
 
         // 7. Validate client-supplied amounts match server-derived (if provided)
         // This prevents tampering while allowing optional submission for validation

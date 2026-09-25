@@ -274,6 +274,7 @@ public class RenewSubscriptionOfferHandler(
                 monthlyListPrice: calc.MonthlyListPrice,
                 contractualMonthlyValue: calc.MonthlyListPrice,
                 currencyCode: calc.CurrencyCode,
+                grossAmount: calc.BaseAmount,
                 contractedAmount: calc.FinalAmount,
                 entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
                 discountAmount: calc.DiscountAmount,
@@ -386,14 +387,14 @@ public class RenewSubscriptionOfferHandler(
             var billingCycle = billingCycleResult.Value;
 
             // ── Step 12: Create Invoice from the BillingCycle ──
-            var cycleDurationMonths = durationMonths;
-            if (cycleDurationMonths <= 0)
-                cycleDurationMonths = 1;
-
-            var subtotal = calc.MonthlyListPrice * cycleDurationMonths;
+            // Use authoritative values from the Offer calculation:
+            // - Subtotal = BaseAmount (the tier price or monthly price × duration before discount)
+            // - DiscountAmount = applied discount
+            // - TotalAmount = ContractedAmount = BaseAmount - DiscountAmount
+            var subtotal = calc.BaseAmount;
             var discountAmount = calc.DiscountAmount;
             var taxAmount = 0m;
-            var totalAmount = subtotal - discountAmount + taxAmount;
+            var totalAmount = calc.FinalAmount; // = BaseAmount - DiscountAmount
 
             var invoiceNumber = $"INV-{now:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
 

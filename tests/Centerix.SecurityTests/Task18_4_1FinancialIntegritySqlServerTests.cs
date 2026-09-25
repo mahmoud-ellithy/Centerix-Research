@@ -118,7 +118,7 @@ public class Task18_4_1FinancialIntegritySqlServerTests
         var contract = Contract.Create(
             Guid.NewGuid(), tenantId, $"CTR-{Guid.NewGuid():N}"[..16],
             planId, startedAt, endsAt, 12,
-            1000m, 1000m, "EGP", 12000m,
+            1000m, 1000m, "EGP", 12000m, 12000m,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
         contract.SubmitForApproval();
         contract.Activate(startedAt);

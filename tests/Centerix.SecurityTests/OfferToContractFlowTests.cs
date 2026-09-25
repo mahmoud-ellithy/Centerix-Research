@@ -443,6 +443,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: offer.MonthlyListPrice,
             contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode,
+            grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
             discountAmount: offer.DiscountAmount,
             promotionReference: offer.PromotionName,
@@ -482,6 +483,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: offer.MonthlyListPrice,
             contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode,
+            grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
             discountAmount: offer.DiscountAmount,
             promotionId: offer.PromotionId,
@@ -510,6 +512,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: offer.MonthlyListPrice,
             contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode,
+            grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
             discountAmount: offer.DiscountAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
@@ -532,6 +535,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: offer.MonthlyListPrice,
             contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode,
+            grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
             discountAmount: offer.DiscountAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
@@ -554,6 +558,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: offer.MonthlyListPrice,
             contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode,
+            grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
             discountAmount: offer.DiscountAmount,
             promotionId: offer.PromotionId,
@@ -579,6 +584,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: offer.MonthlyListPrice,
             contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode,
+            grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
             discountAmount: offer.DiscountAmount,
             chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
@@ -613,6 +619,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: 1000m,
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
+            grossAmount: 10000m,
             contractedAmount: 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         var benefit = ContractBenefit.Create(
@@ -696,6 +703,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: offer.MonthlyListPrice,
             contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode,
+            grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
             discountAmount: offer.DiscountAmount,
             promotionId: offer.PromotionId,
@@ -725,6 +733,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: 1000m,
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
+            grossAmount: 10000m,
             contractedAmount: 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         contract.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contract.Id, 1, 1000m, "EGP", 1000m, 1).Value);
@@ -995,6 +1004,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: offer.MonthlyListPrice,
             contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode,
+            grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
             discountAmount: offer.DiscountAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
@@ -1038,6 +1048,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: offer.MonthlyListPrice,
             contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode,
+            grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
             discountAmount: offer.DiscountAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
@@ -1118,6 +1129,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: 1000m,
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
+            grossAmount: 10000m,
             contractedAmount: 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         var b1 = ContractBenefit.Create(Guid.NewGuid(), contract.Id, ContractBenefitType.PhysicalGift, "A", null, 1500m, "EGP").Value;
@@ -1144,6 +1156,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: 1000m,
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
+            grossAmount: 10000m,
             contractedAmount: 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         var physicalBenefit = ContractBenefit.Create(Guid.NewGuid(), contract.Id, ContractBenefitType.PhysicalGift, "Printer", null, 1000m, "EGP").Value;
@@ -1190,6 +1203,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: offer.MonthlyListPrice,
             contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode,
+            grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
             discountAmount: offer.DiscountAmount,
             promotionId: offer.PromotionId,
@@ -1239,6 +1253,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: offer.MonthlyListPrice,
             contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode,
+            grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
             discountAmount: offer.DiscountAmount,
             promotionId: offer.PromotionId,
@@ -1275,6 +1290,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: offer.MonthlyListPrice,
             contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode,
+            grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
             discountAmount: offer.DiscountAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
@@ -1468,6 +1484,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: offer.MonthlyListPrice,
             contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode,
+            grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
             discountAmount: offer.DiscountAmount,
             promotionId: offer.PromotionId,
@@ -1520,6 +1537,7 @@ public class OfferToContractFlowTests
             monthlyListPrice: 1000m,
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
+            grossAmount: 10000m,
             contractedAmount: 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         var b1 = ContractBenefit.Create(Guid.NewGuid(), contract.Id, ContractBenefitType.PhysicalGift, "A", null, 1500m, "EGP").Value;

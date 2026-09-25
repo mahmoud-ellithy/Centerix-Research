@@ -50,6 +50,7 @@ public class ContractBenefitsGiftsHardeningTests
             monthlyListPrice: monthlyListPrice,
             contractualMonthlyValue: contractualMonthlyValue,
             currencyCode: "EGP",
+            grossAmount: contractedAmount,
             contractedAmount: contractedAmount,
             discountAmount: 0,
             promotionReference: null, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);

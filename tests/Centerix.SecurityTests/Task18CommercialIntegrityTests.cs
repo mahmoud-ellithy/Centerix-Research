@@ -199,6 +199,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: contractPrice,
             contractualMonthlyValue: contractPrice,
             currencyCode: "EGP",
+            grossAmount: contractPrice * durationMonths,
             contractedAmount: contractPrice * durationMonths,
             discountAmount: 0,
             bonusMonths: 0,
@@ -258,6 +259,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 800m,
             contractualMonthlyValue: 800m,
             currencyCode: "EGP",
+            grossAmount: 9600m,
             contractedAmount: 9600m,
             discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
@@ -300,6 +302,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 80m,
             contractualMonthlyValue: 80m,
             currencyCode: "EGP",
+            grossAmount: 480m,
             contractedAmount: 480m,
             discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
@@ -330,6 +333,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 500m,
             contractualMonthlyValue: 500m,
             currencyCode: "EGP",
+            grossAmount: 3000m,
             contractedAmount: 3000m,
             discountAmount: 0,
             chargedMonths: 5, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
@@ -374,6 +378,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 750m,
             contractualMonthlyValue: 750m,
             currencyCode: "EGP",
+            grossAmount: 9000m,
             contractedAmount: 9000m,
             discountAmount: 0,
             bonusMonths: 3,
@@ -442,6 +447,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 400m,
             contractualMonthlyValue: 400m,
             currencyCode: "EGP",
+            grossAmount: 2400m,
             contractedAmount: 2400m,
             discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
@@ -479,7 +485,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             Guid.NewGuid(), tenantId, "CTR-TA-VIEW",
             planId: 1, effectiveAtUtc: UtcNow, endsAtUtc: UtcNow.AddMonths(12),
             durationMonths: 12, monthlyListPrice: 1000m, contractualMonthlyValue: 1000m,
-            currencyCode: "EGP", contractedAmount: 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            currencyCode: "EGP", grossAmount: 12000m, contractedAmount: 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
         db.Contracts.Add(contract);
         await db.SaveChangesAsync();
 
@@ -669,7 +675,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             Guid.NewGuid(), tenantIdA, "CTR-CT-A",
             planId: 1, effectiveAtUtc: UtcNow, endsAtUtc: UtcNow.AddMonths(12),
             durationMonths: 12, monthlyListPrice: 1000m, contractualMonthlyValue: 1000m,
-            currencyCode: "EGP", contractedAmount: 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            currencyCode: "EGP", grossAmount: 12000m, contractedAmount: 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
         db.Contracts.Add(contract);
         await db.SaveChangesAsync();
 
@@ -755,6 +761,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 1000m,
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
+            grossAmount: 12000m,
             contractedAmount: 12000m,
             discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
@@ -875,6 +882,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 1000m,
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
+            grossAmount: 12000m,
             contractedAmount: 12000m,
             discountAmount: 0,
             bonusMonths: 2,
@@ -906,6 +914,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 900m,
             contractualMonthlyValue: 900m,
             currencyCode: "EGP",
+            grossAmount: 10800m,
             contractedAmount: 10800m,
             discountAmount: 0,
             bonusMonths: 3,
@@ -951,6 +960,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 800m,
             contractualMonthlyValue: 800m,
             currencyCode: "EGP",
+            grossAmount: 9600m,
             contractedAmount: 9600m,
             discountAmount: 0,
             bonusMonths: 1,
@@ -990,6 +1000,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 1000m,
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
+            grossAmount: 12000m,
             contractedAmount: 12000m,
             discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
@@ -1022,6 +1033,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 900m,
             contractualMonthlyValue: 900m,
             currencyCode: "EGP",
+            grossAmount: 10800m,
             contractedAmount: 10800m,
             discountAmount: 0,
             bonusMonths: 2,
@@ -1078,6 +1090,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 1000m,
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
+            grossAmount: 12000m,
             contractedAmount: 12000m,
             discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
         contract.Activate(UtcNow);
@@ -1203,6 +1216,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 1000m,
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
+            grossAmount: 12000m,
             contractedAmount: 12000m,
             discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
         contract.Activate(UtcNow);
@@ -1332,6 +1346,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 900m,
             contractualMonthlyValue: 900m,
             currencyCode: "EGP",
+            grossAmount: 10800m,
             contractedAmount: 10800m,
             discountAmount: 0,
             bonusMonths: 1,
@@ -1371,6 +1386,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 800m,
             contractualMonthlyValue: 800m,
             currencyCode: "EGP",
+            grossAmount: 9600m,
             contractedAmount: 9600m,
             discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
@@ -1395,6 +1411,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 1000m,
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
+            grossAmount: 12000m,
             contractedAmount: 12000m,
             discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
@@ -1517,6 +1534,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 800m,
             contractualMonthlyValue: 800m,
             currencyCode: "EGP",
+            grossAmount: 9600m,
             contractedAmount: 9600m,
             discountAmount: 0,
             bonusMonths: 3,
@@ -1582,6 +1600,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 750m,
             contractualMonthlyValue: 750m,
             currencyCode: "EGP",
+            grossAmount: 9000m,
             contractedAmount: 9000m,
             discountAmount: 0,
             bonusMonths: 2,
@@ -1639,6 +1658,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 500m,
             contractualMonthlyValue: 500m,
             currencyCode: "EGP",
+            grossAmount: 3000m,
             contractedAmount: 3000m,
             discountAmount: 0,
             bonusMonths: 2, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
@@ -1669,6 +1689,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 500m,
             contractualMonthlyValue: 500m,
             currencyCode: "EGP",
+            grossAmount: 3000m,
             contractedAmount: 3000m,
             discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
@@ -1705,6 +1726,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: 1000m,
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
+            grossAmount: 12000m,
             contractedAmount: 12000m,
             discountAmount: 0, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
@@ -1890,6 +1912,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
         // Domain-level verification that the handler's new code path works:
         // 1. Load plan limits → contract gets limits
         // 2. Load plan features → contract gets features
+        var grossAmount = offer.FinalAmount + offer.DiscountAmount;
         var contractResult = Contract.Create(
             id: Guid.NewGuid(),
             tenantId: env.TenantId,
@@ -1901,6 +1924,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
             monthlyListPrice: offer.MonthlyListPrice,
             contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode,
+            grossAmount: grossAmount,
             contractedAmount: offer.FinalAmount,
             discountAmount: offer.DiscountAmount,
             promotionReference: offer.PromotionName,

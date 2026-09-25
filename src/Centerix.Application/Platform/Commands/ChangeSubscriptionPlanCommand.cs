@@ -277,6 +277,7 @@ public class ChangeSubscriptionPlanHandler(
                 monthlyListPrice: calc.MonthlyListPrice,
                 contractualMonthlyValue: calc.MonthlyListPrice,
                 currencyCode: calc.CurrencyCode,
+                grossAmount: calc.BaseAmount,
                 contractedAmount: calc.FinalAmount,
                 entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
                 discountAmount: calc.DiscountAmount,

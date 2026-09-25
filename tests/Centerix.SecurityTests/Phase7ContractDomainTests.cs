@@ -36,6 +36,7 @@ public class Phase7ContractDomainTests
             monthlyListPrice: monthlyListPrice,
             contractualMonthlyValue: contractualMonthlyValue,
             currencyCode: "EGP",
+            grossAmount: contractedAmount,
             contractedAmount: contractedAmount,
             discountAmount: 0,
             promotionReference: null, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
@@ -70,7 +71,7 @@ public class Phase7ContractDomainTests
             Guid.NewGuid(), "", "CNT-001", 1,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            12, 1000m, 1000m, "EGP", 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
+            12, 1000m, 1000m, "EGP", 12000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.TenantId_Required", result.Errors[0].Code);
@@ -83,7 +84,7 @@ public class Phase7ContractDomainTests
             Guid.NewGuid(), "tenant-1", "", 1,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            12, 1000m, 1000m, "EGP", 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
+            12, 1000m, 1000m, "EGP", 12000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.ContractNumber_Required", result.Errors[0].Code);
@@ -96,7 +97,7 @@ public class Phase7ContractDomainTests
             Guid.NewGuid(), "tenant-1", "CNT-001", 0,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            12, 1000m, 1000m, "EGP", 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
+            12, 1000m, 1000m, "EGP", 12000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.PlanId_Required", result.Errors[0].Code);
@@ -108,7 +109,7 @@ public class Phase7ContractDomainTests
         var result = Contract.Create(
             Guid.NewGuid(), "tenant-1", "CNT-001", 1,
             default, new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            12, 1000m, 1000m, "EGP", 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
+            12, 1000m, 1000m, "EGP", 12000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.EffectiveAt_Required", result.Errors[0].Code);
@@ -121,7 +122,7 @@ public class Phase7ContractDomainTests
             Guid.NewGuid(), "tenant-1", "CNT-001", 1,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            0, 1000m, 1000m, "EGP", 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
+            0, 1000m, 1000m, "EGP", 12000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.Duration_Invalid", result.Errors[0].Code);
@@ -134,7 +135,7 @@ public class Phase7ContractDomainTests
             Guid.NewGuid(), "tenant-1", "CNT-001", 1,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            12, -1m, 1000m, "EGP", 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
+            12, -1m, 1000m, "EGP", 12000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.MonthlyListPrice_Invalid", result.Errors[0].Code);
@@ -147,7 +148,7 @@ public class Phase7ContractDomainTests
             Guid.NewGuid(), "tenant-1", "CNT-001", 1,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            12, 1000m, 1000m, "US", 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
+            12, 1000m, 1000m, "US", 12000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.Currency_Invalid", result.Errors[0].Code);
@@ -160,7 +161,7 @@ public class Phase7ContractDomainTests
             Guid.NewGuid(), "tenant-1", "CNT-001", 1,
             new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            12, 1000m, 1000m, "EGP", 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
+            12, 1000m, 1000m, "EGP", 12000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.EndsAt_Before_EffectiveAt", result.Errors[0].Code);
@@ -465,7 +466,7 @@ public class Phase7ContractDomainTests
         var result = Contract.Create(
             Guid.NewGuid(), "tenant-1", "CNT-001", 1,
             effectiveAt, new DateTime(2027, 1, 15, 0, 0, 0, DateTimeKind.Utc),
-            12, 1000m, 1000m, "EGP", 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
+            12, 1000m, 1000m, "EGP", 10000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         var contract = result.Value;
 

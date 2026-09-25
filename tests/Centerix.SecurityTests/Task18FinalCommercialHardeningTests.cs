@@ -162,7 +162,7 @@ public class Task18FinalCommercialHardeningTests
         var result = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-NEG", 1,
             FixedNow, FixedNow.AddMonths(12), 12,
-            1000m, 1000m, "EGP", 12000m,
+            1000m, 1000m, "EGP", 12000m, 12000m,
             entitlementSnapshotVersion: -1);
 
         Assert.False(result.IsSuccess);
@@ -178,7 +178,7 @@ public class Task18FinalCommercialHardeningTests
         var contract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-LEGACY", 1,
             FixedNow, FixedNow.AddMonths(12), 12,
-            1000m, 1000m, "EGP", 12000m,
+            1000m, 1000m, "EGP", 12000m, 12000m,
             entitlementSnapshotVersion: Contract.IncompleteEntitlementSnapshotVersion).Value;
 
         Assert.Equal(0, contract.EntitlementSnapshotVersion);
@@ -199,7 +199,7 @@ public class Task18FinalCommercialHardeningTests
             effective,
             TenantPlan.ComputeEffectiveEndsAtUtc(effective, 12, 0),
             12,
-            1000m, 1000m, "EGP", 12000m,
+            1000m, 1000m, "EGP", 12000m, 12000m,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
             bonusMonths: 0, maxStudents: 0, maxUsers: 0, maxBranches: 0,
             maxTeachers: 0, storageGb: 0, smsQuota: 0).Value;
@@ -214,7 +214,7 @@ public class Task18FinalCommercialHardeningTests
         var contract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-MISALIGN", 1,
             FixedNow, FixedNow.AddMonths(12), 12,
-            1000m, 1000m, "EGP", 12000m,
+            1000m, 1000m, "EGP", 12000m, 12000m,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
             bonusMonths: 3).Value;
 
@@ -234,7 +234,7 @@ public class Task18FinalCommercialHardeningTests
         var contract = Contract.Create(
             Guid.NewGuid(), tenantId, $"CTR-{Guid.NewGuid():N}"[..12],
             1, effectiveAt, endsAt, durationMonths,
-            1000m, 1000m, "EGP", 12000m,
+            1000m, 1000m, "EGP", 12000m, 12000m,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
             bonusMonths: bonusMonths).Value;
         db.Contracts.Add(contract);
@@ -310,7 +310,7 @@ public class Task18FinalCommercialHardeningTests
         var contract = Contract.Create(
             Guid.NewGuid(), tenantId, "CTR-BAD-END", 1,
             FixedNow, FixedNow.AddMonths(12), 12,
-            1000m, 1000m, "EGP", 12000m,
+            1000m, 1000m, "EGP", 12000m, 12000m,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
             bonusMonths: 3).Value;
         db.Contracts.Add(contract);
@@ -487,7 +487,7 @@ public class Task18FinalCommercialHardeningTests
         var contract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-FEAT", 1,
             FixedNow, FixedNow.AddMonths(12), 12,
-            1000m, 1000m, "EGP", 12000m,
+            1000m, 1000m, "EGP", 12000m, 12000m,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         Assert.True(contract.AddContractFeature(
@@ -561,7 +561,7 @@ public class Task18FinalCommercialHardeningTests
         var contract = Contract.Create(
             Guid.NewGuid(), tenantId, $"CTR-PAID-{Guid.NewGuid():N}"[..16],
             planId, startedAt, endsAt, durationMonths,
-            monthlyPrice, monthlyPrice, "EGP", monthlyPrice * durationMonths,
+            monthlyPrice, monthlyPrice, "EGP", monthlyPrice * durationMonths, monthlyPrice * durationMonths,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
         Assert.True(contract.SubmitForApproval().IsSuccess);
         Assert.True(contract.Activate(startedAt).IsSuccess);
@@ -798,7 +798,7 @@ public class Task18FinalCommercialHardeningTests
         var oldEnds = TenantPlan.ComputeEffectiveEndsAtUtc(startedAt, 12, 1);
         var contract = Contract.Create(
             Guid.NewGuid(), tenantId, "CTR-RENEW-OLD", planId,
-            startedAt, oldEnds, 12, 1000m, 1000m, "EGP", 12000m,
+            startedAt, oldEnds, 12, 1000m, 1000m, "EGP", 12000m, 12000m,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
             bonusMonths: 1).Value;
         db.Contracts.Add(contract);

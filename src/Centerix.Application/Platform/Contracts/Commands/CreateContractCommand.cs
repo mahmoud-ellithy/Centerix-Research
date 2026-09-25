@@ -108,6 +108,8 @@ public class CreateContractHandler : IRequestHandler<CreateContractCommand, Resu
             request.EffectiveAtUtc, request.DurationMonths, plan.BonusMonths);
 
         // Create the Contract aggregate — client-supplied commercial terms only (price, duration, etc.)
+        // Compute GrossAmount from ContractedAmount + DiscountAmount (invariant: ContractedAmount = GrossAmount - DiscountAmount)
+        var grossAmount = request.ContractedAmount + request.DiscountAmount;
         var contractResult = Contract.Create(
             request.ContractId,
             tenantId,
@@ -119,6 +121,7 @@ public class CreateContractHandler : IRequestHandler<CreateContractCommand, Resu
             request.MonthlyListPrice,
             request.ContractualMonthlyValue,
             request.CurrencyCode,
+            grossAmount,
             request.ContractedAmount,
             Contract.CompleteEntitlementSnapshotVersion,
             request.DiscountAmount,

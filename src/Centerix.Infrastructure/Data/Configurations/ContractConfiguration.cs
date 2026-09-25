@@ -64,6 +64,10 @@ public class ContractConfiguration : IEntityTypeConfiguration<Contract>
             .HasMaxLength(3)
             .IsRequired();
 
+        builder.Property(c => c.GrossAmount)
+            .HasPrecision(18, 2)
+            .IsRequired();
+
         builder.Property(c => c.ContractedAmount)
             .HasPrecision(18, 2)
             .IsRequired();

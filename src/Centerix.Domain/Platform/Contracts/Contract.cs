@@ -71,6 +71,12 @@ public class Contract : AuditableEntity<Guid>
     /// <summary>Currency code (ISO-4217, e.g., EGP, USD).</summary>
     public string CurrencyCode { get; private set; } = default!;
 
+    /// <summary>
+    /// Gross contract amount before discounts (MonthlyListPrice × DurationMonths).
+    /// Used as the Subtotal base for Invoice breakdown.
+    /// </summary>
+    public decimal GrossAmount { get; private set; }
+
     /// <summary>Final contracted amount (after discounts).</summary>
     public decimal ContractedAmount { get; private set; }
 
@@ -151,6 +157,7 @@ public class Contract : AuditableEntity<Guid>
         decimal monthlyListPrice,
         decimal contractualMonthlyValue,
         string currencyCode,
+        decimal grossAmount,
         decimal contractedAmount,
         decimal discountAmount,
         string? promotionReference,
@@ -177,6 +184,7 @@ public class Contract : AuditableEntity<Guid>
         MonthlyListPrice = monthlyListPrice;
         ContractualMonthlyValue = contractualMonthlyValue;
         CurrencyCode = currencyCode;
+        GrossAmount = grossAmount;
         ContractedAmount = contractedAmount;
         DiscountAmount = discountAmount;
         PromotionReference = promotionReference;
@@ -207,6 +215,7 @@ public class Contract : AuditableEntity<Guid>
         decimal monthlyListPrice,
         decimal contractualMonthlyValue,
         string currencyCode,
+        decimal grossAmount,
         decimal contractedAmount,
         int entitlementSnapshotVersion,
         decimal discountAmount = 0,
@@ -249,6 +258,9 @@ public class Contract : AuditableEntity<Guid>
         if (contractualMonthlyValue < 0)
             return ContractErrors.ContractualMonthlyValueInvalid;
 
+        if (grossAmount < 0)
+            return Error.Validation("Contract.GrossAmount_Invalid", "Gross amount cannot be negative");
+
         if (contractedAmount < 0)
             return ContractErrors.ContractedAmountInvalid;
 
@@ -261,14 +273,15 @@ public class Contract : AuditableEntity<Guid>
         if (endsAtUtc != default && endsAtUtc < effectiveAtUtc)
             return ContractErrors.EndsAtBeforeEffectiveAt;
 
-        // Validate discount does not exceed the gross commercial base (monthly * duration)
-        var grossValue = monthlyListPrice * durationMonths;
-        if (discountAmount > grossValue)
+        // Validate discount does not exceed the gross amount
+        if (discountAmount > grossAmount)
             return ContractErrors.DiscountExceedsGrossValue;
 
-        // Validate contracted amount is consistent: should not exceed gross value
-        if (contractedAmount > grossValue)
-            return ContractErrors.ContractedAmountExceedsGrossValue;
+        // Validate contracted amount is consistent: ContractedAmount = GrossAmount - DiscountAmount
+        var expectedContractedAmount = grossAmount - discountAmount;
+        if (Math.Abs(contractedAmount - expectedContractedAmount) > 0.01m)
+            return Error.Validation("Contract.ContractedAmount_Inconsistent",
+                $"ContractedAmount ({contractedAmount}) must equal GrossAmount ({grossAmount}) - DiscountAmount ({discountAmount})");
 
         var contract = new Contract(
             id,
@@ -282,6 +295,7 @@ public class Contract : AuditableEntity<Guid>
             monthlyListPrice,
             contractualMonthlyValue,
             currencyCode.Trim().ToUpperInvariant(),
+            grossAmount,
             contractedAmount,
             discountAmount,
             promotionReference?.Trim(),
@@ -550,8 +564,17 @@ public class Contract : AuditableEntity<Guid>
                 $"EndsAtUtc is {EndsAtUtc:O}, expected {expectedEndsAtUtc:O} " +
                 $"(EffectiveAtUtc + {DurationMonths} months + {BonusMonths} bonus months)");
 
+        if (GrossAmount < 0)
+            return ContractErrors.SnapshotIncomplete("GrossAmount must not be negative");
+
         if (ContractedAmount < 0 || DiscountAmount < 0)
             return ContractErrors.SnapshotIncomplete("ContractedAmount and DiscountAmount must not be negative");
+
+        // Validate the commercial invariant: ContractedAmount = GrossAmount - DiscountAmount
+        var expectedContractedAmount = GrossAmount - DiscountAmount;
+        if (Math.Abs(ContractedAmount - expectedContractedAmount) > 0.01m)
+            return ContractErrors.SnapshotIncomplete(
+                $"ContractedAmount ({ContractedAmount}) must equal GrossAmount ({GrossAmount}) - DiscountAmount ({DiscountAmount})");
 
         if (MaxStudents < 0 || MaxUsers < 0 || MaxBranches < 0 ||
             MaxTeachers < 0 || StorageGb < 0 || SmsQuota < 0)

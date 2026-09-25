@@ -90,6 +90,7 @@ public class CreateContractFromOfferHandler(
         var smsQuota = offer.SMSQuota;
 
         // Create the Contract aggregate using ONLY Offer-derived commercial terms + Offer entitlements
+        // Commercial snapshot: GrossAmount = BaseAmount (pre-discount), ContractedAmount = FinalAmount (post-discount)
         var contractResult = Contract.Create(
             id: Guid.NewGuid(),
             tenantId: tenantId,
@@ -101,6 +102,7 @@ public class CreateContractFromOfferHandler(
             monthlyListPrice: offer.MonthlyListPrice,
             contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode,
+            grossAmount: offer.BaseAmount,
             contractedAmount: offer.FinalAmount,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
             discountAmount: offer.DiscountAmount,

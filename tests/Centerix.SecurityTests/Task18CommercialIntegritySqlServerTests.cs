@@ -145,6 +145,7 @@ public class Task18CommercialIntegritySqlServerTests
             monthlyListPrice: 1000m,
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
+            grossAmount: 12000m,
             contractedAmount: 12000m,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
         Assert.True(contractResult.IsSuccess, string.Join(", ", contractResult.Errors?.Select(e => e.Code) ?? []));
@@ -210,6 +211,7 @@ public class Task18CommercialIntegritySqlServerTests
             monthlyListPrice: 1000m,
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
+            grossAmount: 12000m,
             contractedAmount: 12000m,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
         contract.SubmitForApproval();

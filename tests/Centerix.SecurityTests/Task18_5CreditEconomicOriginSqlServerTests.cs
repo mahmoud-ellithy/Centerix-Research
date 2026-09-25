@@ -142,7 +142,7 @@ public class Task18_5CreditEconomicOriginSqlServerTests
         var contract = Contract.Create(
             Guid.NewGuid(), tenantId, $"CTR-{Guid.NewGuid():N}"[..16],
             planId, start, endsAt, durationMonths,
-            monthlyPrice, monthlyPrice, currency, contractedAmount,
+            monthlyPrice, monthlyPrice, currency, contractedAmount, contractedAmount,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
         contract.SubmitForApproval();
         contract.Activate(start);

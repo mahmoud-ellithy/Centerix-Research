@@ -831,7 +831,7 @@ public class Phase8_1_1ConcurrencySqlServerTests
             1000m,
             1000m,
             "EGP",
-            12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value!;
+            12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value!;
         contract.SubmitForApproval();
         contract.Activate(DateTime.UtcNow);
         db.Contracts.Add(contract);

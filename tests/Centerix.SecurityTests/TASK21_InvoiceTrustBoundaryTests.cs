@@ -44,9 +44,13 @@ public class TASK21_InvoiceTrustBoundaryTests
     private static async Task<Contract> CreateActiveContractAsync(
         AppDbContext db,
         string tenantId,
-        decimal contractedAmount = 10000m,
+        decimal contractedAmount = 9500m,
         decimal discountAmount = 500m)
     {
+        // Commercial invariant: ContractedAmount = GrossAmount - DiscountAmount
+        // For contractedAmount = 9500 and discountAmount = 500, grossAmount = 10000
+        var grossAmount = contractedAmount + discountAmount;
+
         var contractResult = Contract.Create(
             id: Guid.NewGuid(),
             tenantId: tenantId,
@@ -55,15 +59,16 @@ public class TASK21_InvoiceTrustBoundaryTests
             effectiveAtUtc: DateTime.UtcNow.AddMonths(-1),
             endsAtUtc: DateTime.UtcNow.AddMonths(11),
             durationMonths: 12,
-            monthlyListPrice: contractedAmount,
-            contractualMonthlyValue: contractedAmount,
+            monthlyListPrice: grossAmount / 12,
+            contractualMonthlyValue: grossAmount / 12,
             currencyCode: "EGP",
+            grossAmount: grossAmount,
             contractedAmount: contractedAmount,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
             discountAmount: discountAmount);
 
         if (!contractResult.IsSuccess)
-            throw new InvalidOperationException("Failed to create contract");
+            throw new InvalidOperationException("Failed to create contract: " + contractResult.Errors!.First().Description);
 
         var contract = contractResult.Value;
         contract.Activate(DateTime.UtcNow);
@@ -414,6 +419,8 @@ public class TASK21_InvoiceTrustBoundaryTests
     public async Task ValidServerDerivedInvoice_NoClientAmounts_Succeeds()
     {
         using var db = CreateDbContext(TenantA);
+        // Create contract with ContractedAmount = 10000 (final agreed amount)
+        // and DiscountAmount = 500, which means GrossAmount = 10500
         var contract = await CreateActiveContractAsync(db, TenantA, contractedAmount: 10000m, discountAmount: 500m);
         var tenantService = CreateTenantService(TenantA);
 
@@ -439,11 +446,12 @@ public class TASK21_InvoiceTrustBoundaryTests
         Assert.True(result.IsSuccess);
 
         // Verify invoice amounts match server-authoritative values
+        // Commercial invariant: Invoice.TotalAmount = Contract.ContractedAmount (no double-discount)
         var invoice = await db.Invoices.FirstAsync(i => i.ContractId == contract.Id);
-        Assert.Equal(10000m, invoice.Subtotal);
+        Assert.Equal(10500m, invoice.Subtotal); // GrossAmount = ContractedAmount + DiscountAmount
         Assert.Equal(500m, invoice.DiscountAmount);
         Assert.Equal(0m, invoice.TaxAmount);
-        Assert.Equal(9500m, invoice.TotalAmount); // 10000 - 500 + 0
+        Assert.Equal(10000m, invoice.TotalAmount); // = Contract.ContractedAmount (NOT subtotal - discount)
     }
 
     // ==================================================================

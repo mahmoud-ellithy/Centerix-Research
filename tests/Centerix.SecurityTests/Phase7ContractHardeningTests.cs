@@ -39,6 +39,7 @@ public class Phase7ContractHardeningTests
             monthlyListPrice: monthlyListPrice,
             contractualMonthlyValue: contractualMonthlyValue,
             currencyCode: "EGP",
+            grossAmount: contractedAmount,
             contractedAmount: contractedAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.True(result.IsSuccess);
@@ -202,13 +203,13 @@ public class Phase7ContractHardeningTests
     [Fact]
     public void Contract_Create_DiscountExceedsGrossValue_IsRejected()
     {
-        // monthlyListPrice=1000, duration=12, gross=12000, discount=12001
+        // monthlyListPrice=1000, duration=12, grossAmount=10000, discount=15000 (exceeds gross)
         var result = Contract.Create(
             Guid.NewGuid(), "tenant-1", "CNT-001", 1,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            12, 1000m, 1000m, "EGP", 10000m,
-            discountAmount: 12001m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
+            12, 1000m, 1000m, "EGP", 10000m, 10000m,
+            discountAmount: 15000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.Discount_Exceeds_GrossValue", result.Errors![0].Code);
@@ -217,16 +218,17 @@ public class Phase7ContractHardeningTests
     [Fact]
     public void Contract_Create_ContractedAmountExceedsGrossValue_IsRejected()
     {
-        // monthlyListPrice=1000, duration=12, gross=12000, contractedAmount=12001
+        // monthlyListPrice=1000, duration=12, grossAmount=10000, contractedAmount=15000
+        // Invariant: contractedAmount = grossAmount - discountAmount → 15000 != 10000 (violation)
         var result = Contract.Create(
             Guid.NewGuid(), "tenant-1", "CNT-001", 1,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            12, 1000m, 1000m, "EGP", 12001m,
+            12, 1000m, 1000m, "EGP", 10000m, 15000m,
             discountAmount: 0m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.False(result.IsSuccess);
-        Assert.Equal("Contract.ContractedAmount_Exceeds_GrossValue", result.Errors![0].Code);
+        Assert.Equal("Contract.ContractedAmount_Inconsistent", result.Errors![0].Code);
     }
 
     [Fact]
@@ -237,7 +239,7 @@ public class Phase7ContractHardeningTests
             Guid.NewGuid(), "tenant-1", "CNT-001", 1,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            12, 1000m, 1000m, "EGP", 0m,
+            12, 1000m, 1000m, "EGP", 12000m, 0m,
             discountAmount: 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.True(result.IsSuccess);
@@ -250,7 +252,7 @@ public class Phase7ContractHardeningTests
             Guid.NewGuid(), "tenant-1", "CNT-001", 1,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            12, 1000m, -1m, "EGP", 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
+            12, 1000m, -1m, "EGP", 12000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.ContractualMonthlyValue_Invalid", result.Errors![0].Code);
