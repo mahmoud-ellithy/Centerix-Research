@@ -95,6 +95,11 @@ public class Invoice : AuditableEntity<Guid>
         if (totalAmount < 0)
             return InvoiceErrors.InvalidTotalAmount;
 
+        // INV-01: Mathematical integrity check - TotalAmount must equal Subtotal - DiscountAmount + TaxAmount
+        var expectedTotal = subtotal - discountAmount + taxAmount;
+        if (Math.Abs(totalAmount - expectedTotal) > 0.01m)
+            return InvoiceErrors.TotalAmountMismatch;
+
         return new Invoice(
             id, invoiceNumber, periodStart, periodEnd, subtotal, discountAmount, taxAmount, totalAmount,
             InvoiceStatus.Draft, contractId, subscriptionId, billingCycleId);

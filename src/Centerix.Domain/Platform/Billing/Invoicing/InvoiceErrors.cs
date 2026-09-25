@@ -39,4 +39,22 @@ public static class InvoiceErrors
 
     public static Error CannotRemoveLineNonDraft =>
         Error.Conflict("Invoice.CannotRemoveLineNonDraft", "Invoice lines can only be removed from draft invoices");
+
+    public static Error TotalAmountMismatch =>
+        Error.Validation("Invoice.TotalAmountMismatch", "TotalAmount must equal Subtotal - DiscountAmount + TaxAmount");
+
+    public static Error DuplicateInvoiceNumber =>
+        Error.Conflict("Invoice.DuplicateInvoiceNumber", "An invoice with this number already exists");
+
+    public static Error ContractNotFound =>
+        Error.NotFound("Invoice.ContractNotFound", "Contract was not found");
+
+    public static Error ContractNotOwnedByTenant =>
+        Error.Forbidden("Invoice.ContractNotOwnedByTenant", "The specified contract does not belong to your tenant");
+
+    public static Error SubscriptionContractMismatch =>
+        Error.Conflict("Invoice.SubscriptionContractMismatch", "The specified subscription does not belong to the specified contract");
+
+    public static Error ClientAmountMismatch =>
+        Error.Validation("Invoice.ClientAmountMismatch", "Client-supplied amount does not match the authoritative server-derived value");
 }
