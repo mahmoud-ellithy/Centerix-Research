@@ -81,7 +81,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
         int durationMonths = 12, int bonusMonths = 0, DateTime? startsAt = null)
     {
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId ?? Guid.NewGuid().ToString(), planId, price, "EGP",
+            Guid.NewGuid(), tenantId ?? Guid.NewGuid().ToString(), planId, price, price, "EGP",
             durationMonths, bonusMonths, startsAt ?? UtcNow, false, SubscriptionStatus.Pending).Value;
         sub.Activate(startsAt ?? UtcNow);
         return sub;
@@ -214,7 +214,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
         db.Contracts.Add(contract);
 
         var subscription = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 1, contractPrice, "EGP",
+            Guid.NewGuid(), tenantId, 1, contractPrice, contractPrice, "EGP",
             durationMonths, 0, UtcNow, false, SubscriptionStatus.Pending).Value;
         subscription.Activate(UtcNow);
         subscription.LinkToContract(contract.Id);
@@ -267,6 +267,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
         var subscription = TenantPlan.Create(
             Guid.NewGuid(), "tenant-1", plan.Id,
             snapshotPrice: contract.MonthlyListPrice,
+            snapshotMonthlyCharge: contract.MonthlyListPrice,
             snapshotCurrency: contract.CurrencyCode,
             durationMonths: contract.DurationMonths,
             bonusMonths: 0,
@@ -309,6 +310,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
         var subscription = TenantPlan.Create(
             Guid.NewGuid(), "tenant-1", plan.Id,
             snapshotPrice: contract.MonthlyListPrice,
+            snapshotMonthlyCharge: contract.MonthlyListPrice,
             snapshotCurrency: contract.CurrencyCode,
             durationMonths: contract.DurationMonths,
             bonusMonths: 0,
@@ -344,6 +346,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
         var subscription = TenantPlan.Create(
             Guid.NewGuid(), "tenant-1", plan.Id,
             snapshotPrice: contract.MonthlyListPrice,
+            snapshotMonthlyCharge: contract.MonthlyListPrice,
             snapshotCurrency: contract.CurrencyCode,
             durationMonths: contract.DurationMonths,
             bonusMonths: 0,
@@ -454,6 +457,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
         var subscription = TenantPlan.Create(
             Guid.NewGuid(), "tenant-1", plan.Id,
             snapshotPrice: contract.MonthlyListPrice,
+            snapshotMonthlyCharge: contract.MonthlyListPrice,
             snapshotCurrency: contract.CurrencyCode,
             durationMonths: contract.DurationMonths,
             bonusMonths: 0,
@@ -719,7 +723,7 @@ public class Task18CommercialIntegrityTests : IClassFixture<TestWebApplicationFa
         await userManager.AddToRoleAsync(userB, "TenantAdmin");
 
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantIdA, 1, 1000m, "EGP", 12, 0, UtcNow, false,
+            Guid.NewGuid(), tenantIdA, 1, 1000m, 1000m, "EGP", 12, 0, UtcNow, false,
             SubscriptionStatus.Active).Value;
         db.TenantPlans.Add(sub);
         await db.SaveChangesAsync();

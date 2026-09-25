@@ -52,7 +52,19 @@ public class TenantPlan : AuditableEntity<Guid>
     // tenant query filter and must not be shadowed. Platform-admin flows bypass the filter
     // explicitly (IgnoreQueryFilters) AFTER the platform boundary check.
 
+    /// <summary>
+    /// Monthly list price before any discounts (from Plan or Offer).
+    /// Used for display/reference only.
+    /// </summary>
     public decimal SnapshotPrice { get; private set; }
+
+    /// <summary>
+    /// Actual monthly charge after applying Contract-level discounts.
+    /// This is the authoritative monthly amount for BillingCycle invoice calculation.
+    /// For no-discount contracts: SnapshotMonthlyCharge = SnapshotPrice.
+    /// </summary>
+    public decimal SnapshotMonthlyCharge { get; private set; }
+
     public string SnapshotCurrency { get; private set; } = default!;
     public int DurationMonths { get; private set; }
     public int BonusMonths { get; private set; }
@@ -93,6 +105,7 @@ public class TenantPlan : AuditableEntity<Guid>
         string tenantId,
         int planId,
         decimal snapshotPrice,
+        decimal snapshotMonthlyCharge,
         string snapshotCurrency,
         int durationMonths,
         int bonusMonths,
@@ -110,6 +123,7 @@ public class TenantPlan : AuditableEntity<Guid>
         TenantId = tenantId;
         PlanId = planId;
         SnapshotPrice = snapshotPrice;
+        SnapshotMonthlyCharge = snapshotMonthlyCharge;
         SnapshotCurrency = snapshotCurrency;
         DurationMonths = durationMonths;
         BonusMonths = bonusMonths;
@@ -147,6 +161,7 @@ public class TenantPlan : AuditableEntity<Guid>
         string tenantId,
         int planId,
         decimal snapshotPrice,
+        decimal snapshotMonthlyCharge,
         string snapshotCurrency,
         int durationMonths,
         int bonusMonths,
@@ -169,6 +184,9 @@ public class TenantPlan : AuditableEntity<Guid>
         if (snapshotPrice < 0)
             return TenantPlanErrors.SnapshotPriceInvalid;
 
+        if (snapshotMonthlyCharge < 0)
+            return TenantPlanErrors.SnapshotPriceInvalid;
+
         if (string.IsNullOrWhiteSpace(snapshotCurrency) || snapshotCurrency.Trim().Length != 3)
             return TenantPlanErrors.SnapshotCurrencyInvalid;
 
@@ -188,7 +206,7 @@ public class TenantPlan : AuditableEntity<Guid>
             return TenantPlanErrors.SnapshotLimitsInvalid;
 
         return new TenantPlan(
-            id, tenantId.Trim(), planId, snapshotPrice, snapshotCurrency.Trim().ToUpperInvariant(),
+            id, tenantId.Trim(), planId, snapshotPrice, snapshotMonthlyCharge, snapshotCurrency.Trim().ToUpperInvariant(),
             durationMonths, bonusMonths, startsAtUtc, autoRenew, status,
             maxStudents, maxUsers, maxBranches, maxTeachers, storageGb, smsQuota);
     }

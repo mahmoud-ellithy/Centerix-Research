@@ -72,6 +72,7 @@ public class Phase9_1_2SubscriptionInstallmentOwnershipTests
             tenantId,
             planId: 1,
             snapshotPrice: 100m,
+            snapshotMonthlyCharge: 100m,
             snapshotCurrency: "USD",
             12,
             bonusMonths: 0,
@@ -303,7 +304,7 @@ public class Phase9_1_2SubscriptionInstallmentOwnershipTests
 
         // Create subscription with tenantB's ID in the same DB
         var subscriptionB = TenantPlan.Create(
-            Guid.NewGuid(), tenantB, 1, 100m, "USD", 12, 0,
+            Guid.NewGuid(), tenantB, 1, 100m, 100m, "USD", 12, 0,
             DateTime.UtcNow, false, SubscriptionStatus.Pending).Value!;
         subscriptionB.Activate(DateTime.UtcNow);
         db.TenantPlans.Add(subscriptionB);
@@ -529,7 +530,7 @@ public class Phase9_1_2SubscriptionInstallmentOwnershipTests
         // Create subscription that is past its EffectiveEndsAtUtc
         var start = DateTime.UtcNow.AddMonths(-3);
         var result = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 1, 100m, "USD", 1, 0,
+            Guid.NewGuid(), tenantId, 1, 100m, 100m, "USD", 1, 0,
             startsAtUtc: start, autoRenew: false,
             status: SubscriptionStatus.Pending);
         var sub = result.Value;
@@ -570,7 +571,7 @@ public class Phase9_1_2SubscriptionInstallmentOwnershipTests
 
         // Create subscription with tenant B's ID in the same DB
         var subscriptionB = TenantPlan.Create(
-            Guid.NewGuid(), tenantB, 1, 100m, "USD", 12, 0,
+            Guid.NewGuid(), tenantB, 1, 100m, 100m, "USD", 12, 0,
             DateTime.UtcNow, false, SubscriptionStatus.Pending).Value!;
         subscriptionB.Activate(DateTime.UtcNow);
         db.TenantPlans.Add(subscriptionB);
@@ -684,7 +685,7 @@ public class Phase9_1_2SubscriptionInstallmentOwnershipTests
         await using var db = CreateDbContext(tenantId);
 
         var result = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 1, 100m, "USD", 1, 0,
+            Guid.NewGuid(), tenantId, 1, 100m, 100m, "USD", 1, 0,
             startsAtUtc: start, autoRenew: false,
             status: SubscriptionStatus.Pending);
         var sub = result.Value;
@@ -778,7 +779,7 @@ public class Phase9_1_2SubscriptionInstallmentOwnershipTests
         var contractA = CreateAndPersistContract(db, tenantA);
 
         var subscriptionB = TenantPlan.Create(
-            Guid.NewGuid(), tenantB, 1, 100m, "USD", 12, 0,
+            Guid.NewGuid(), tenantB, 1, 100m, 100m, "USD", 12, 0,
             DateTime.UtcNow, false, SubscriptionStatus.Pending).Value!;
         subscriptionB.Activate(DateTime.UtcNow);
         db.TenantPlans.Add(subscriptionB);

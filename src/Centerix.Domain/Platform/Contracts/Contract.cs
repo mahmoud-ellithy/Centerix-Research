@@ -499,11 +499,18 @@ public class Contract : AuditableEntity<Guid>
     /// <summary>
     /// Builds a subscription snapshot from this contract's own data.
     /// No Plan queries — all values are authoritative snapshots on the Contract.
+    /// MonthlyCharge = GrossAmount / DurationMonths (actual monthly charge after discount).
     /// </summary>
     public SubscriptionSnapshot GetSubscriptionSnapshot()
     {
+        // Calculate actual monthly charge: GrossAmount / DurationMonths
+        // For no-discount contracts: GrossAmount = ContractedAmount, so MonthlyCharge = ContractedAmount / DurationMonths
+        // For discounted contracts: GrossAmount = ContractedAmount + DiscountAmount, so MonthlyCharge = (ContractedAmount + DiscountAmount) / DurationMonths
+        var monthlyCharge = DurationMonths > 0 ? GrossAmount / DurationMonths : 0m;
+
         return new SubscriptionSnapshot(
             MonthlyListPrice,
+            monthlyCharge,
             ContractualMonthlyValue,
             CurrencyCode,
             DurationMonths,

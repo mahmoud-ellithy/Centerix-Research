@@ -68,7 +68,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
     {
         var start = startsAt ?? new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId ?? Guid.NewGuid().ToString(), planId, price, "EGP",
+            Guid.NewGuid(), tenantId ?? Guid.NewGuid().ToString(), planId, price, price, "EGP",
             durationMonths, bonusMonths, start, false, SubscriptionStatus.Pending).Value;
         sub.Activate(start);
         return sub;
@@ -77,7 +77,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
     private static TenantPlan CreateExpiredSubscription(string? tenantId = null)
     {
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId ?? Guid.NewGuid().ToString(), 1, 1000m, "EGP",
+            Guid.NewGuid(), tenantId ?? Guid.NewGuid().ToString(), 1, 1000m, 1000m, "EGP",
             1, 0, UtcNow.AddMonths(-3), false, SubscriptionStatus.Active).Value;
         sub.MarkExpired(UtcNow);
         return sub;
@@ -534,7 +534,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentSqlServerTests
             var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
             db.StampAddedTenantIds(tenantId);
             var sub = TenantPlan.Create(
-                Guid.NewGuid(), tenantId, planId, 1000m, "EGP", 12, 0,
+                Guid.NewGuid(), tenantId, planId, 1000m, 1000m, "EGP", 12, 0,
                 oldSubStart, false, SubscriptionStatus.Pending).Value;
             sub.Activate(oldSubStart);
             db.TenantPlans.Add(sub);
@@ -600,7 +600,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentSqlServerTests
             var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
             db.StampAddedTenantIds(tenantId);
             var sub = TenantPlan.Create(
-                Guid.NewGuid(), tenantId, planId, 1000m, "EGP", 12, 0,
+                Guid.NewGuid(), tenantId, planId, 1000m, 1000m, "EGP", 12, 0,
                 oldSubStart, false, SubscriptionStatus.Pending).Value;
             sub.Activate(oldSubStart);
             db.TenantPlans.Add(sub);
@@ -655,7 +655,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentSqlServerTests
             var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
             db.StampAddedTenantIds(tenantId);
             var sub = TenantPlan.Create(
-                Guid.NewGuid(), tenantId, planId, 1000m, "EGP", 6, 0,
+                Guid.NewGuid(), tenantId, planId, 1000m, 1000m, "EGP", 6, 0,
                 DateTime.UtcNow.AddMonths(-7), false, SubscriptionStatus.Pending).Value;
             sub.Activate(DateTime.UtcNow.AddMonths(-7));
             sub.MarkExpired(DateTime.UtcNow);
@@ -711,7 +711,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentSqlServerTests
             var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
             db.StampAddedTenantIds(tenantId);
             var sub = TenantPlan.Create(
-                Guid.NewGuid(), tenantId, planId, 1000m, "EGP", 12, 0,
+                Guid.NewGuid(), tenantId, planId, 1000m, 1000m, "EGP", 12, 0,
                 DateTime.UtcNow.AddMonths(-6), false, SubscriptionStatus.Pending).Value;
             sub.Activate(DateTime.UtcNow.AddMonths(-6));
             db.TenantPlans.Add(sub);
@@ -766,7 +766,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentSqlServerTests
             var seedDb = seed.ServiceProvider.GetRequiredService<AppDbContext>();
             seedDb.StampAddedTenantIds(tenantId);
             var sub = TenantPlan.Create(
-                Guid.NewGuid(), tenantId, planId, 1000m, "EGP", 6, 0,
+                Guid.NewGuid(), tenantId, planId, 1000m, 1000m, "EGP", 6, 0,
                 now.AddMonths(-7), false, SubscriptionStatus.Pending).Value;
             sub.Activate(now.AddMonths(-7));
             sub.MarkExpired(now);
@@ -862,7 +862,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentSqlServerTests
 
             // Create old subscription linked to old contract (Active, ends in 6 months)
             var sub = TenantPlan.Create(
-                Guid.NewGuid(), tenantId, planId, 1000m, "EGP", 12, 0,
+                Guid.NewGuid(), tenantId, planId, 1000m, 1000m, "EGP", 12, 0,
                 oldContractStart, false, SubscriptionStatus.Pending).Value;
             sub.Activate(oldContractStart);
             sub.LinkToContract(oldContract.Id);

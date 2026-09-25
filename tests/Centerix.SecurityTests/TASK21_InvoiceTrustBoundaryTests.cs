@@ -89,6 +89,7 @@ public class TASK21_InvoiceTrustBoundaryTests
             tenantId: tenantId,
             planId: 1,
             snapshotPrice: snapshotPrice,
+            snapshotMonthlyCharge: snapshotPrice,
             snapshotCurrency: "EGP",
             durationMonths: 12,
             bonusMonths: 0,

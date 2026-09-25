@@ -88,7 +88,7 @@ public class Phase5TeachersConcurrencySqlServerTests
         await db.SaveChangesAsync();
 
         var sub = TenantPlan.Create(
-            Guid.Parse(tenantId), tenantId, plan.Id, 100m, "USD",
+            Guid.Parse(tenantId), tenantId, plan.Id, 100m, 100m, "USD",
             12, 0, DateTime.UtcNow, false, SubscriptionStatus.Active, 10, 5, 5, 10, 1000, 100).Value;
         sub.Activate(DateTime.UtcNow);
         sub.GrantFeature(FeatureCodes.TeacherManagement);

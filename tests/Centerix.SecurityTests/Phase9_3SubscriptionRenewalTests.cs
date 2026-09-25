@@ -87,11 +87,12 @@ public class Phase9_3SubscriptionRenewalTests
             tenantId ?? Guid.NewGuid().ToString(),
             planId,
             price,
+            price,
             "EGP",
             durationMonths,
             bonusMonths,
             startsAt ?? new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            autoRenew: false,
+            false,
             status).Value;
         return sub;
     }
@@ -113,12 +114,13 @@ public class Phase9_3SubscriptionRenewalTests
             tenantId ?? Guid.NewGuid().ToString(),
             planId: 1,
             snapshotPrice: 1000m,
+            snapshotMonthlyCharge: 1000m,
             snapshotCurrency: "EGP",
             durationMonths: 1,
             bonusMonths: 0,
             startsAtUtc: DateTime.UtcNow.AddMonths(-3),
             autoRenew: false,
-            SubscriptionStatus.Active).Value;
+            status: SubscriptionStatus.Active).Value;
         sub.MarkExpired(DateTime.UtcNow);
         return sub;
     }
@@ -370,11 +372,12 @@ public class Phase9_3SubscriptionRenewalTests
             "tenant-1",
             plan.Id,
             1500m,
+            1500m,
             "EGP",
             6,
             0,
             UtcNow,
-            autoRenew: false,
+            false,
             SubscriptionStatus.Pending,
             plan.MaxStudents,
             plan.MaxUsers,
@@ -982,11 +985,12 @@ public class Phase9_3SubscriptionRenewalTests
             tenantId,
             1,
             1000m,
+            1000m,
             "EGP",
             12,
             0,
             now.AddMonths(-6),
-            autoRenew: false,
+            false,
             SubscriptionStatus.Active).Value;
 
         // Renewal should not create overlapping active entitlement
@@ -1006,11 +1010,12 @@ public class Phase9_3SubscriptionRenewalTests
             tenantId,
             1,
             1000m,
+            1000m,
             "EGP",
             1,
             0,
             now.AddMonths(-3),
-            autoRenew: false,
+            false,
             SubscriptionStatus.Active).Value;
         expiredSub.MarkExpired(now);
 
@@ -1020,11 +1025,12 @@ public class Phase9_3SubscriptionRenewalTests
             tenantId,
             1,
             1000m,
+            1000m,
             "EGP",
             12,
             0,
             now,
-            autoRenew: false,
+            false,
             SubscriptionStatus.Pending).Value;
 
         Assert.Equal(SubscriptionStatus.Expired, expiredSub.Status);
@@ -1043,11 +1049,12 @@ public class Phase9_3SubscriptionRenewalTests
             tenantId,
             1,
             1000m,
+            1000m,
             "EGP",
             12,
             0,
             now,
-            autoRenew: false,
+            false,
             SubscriptionStatus.Active).Value;
 
         // Future subscription starts after current ends
@@ -1056,11 +1063,12 @@ public class Phase9_3SubscriptionRenewalTests
             tenantId,
             1,
             1000m,
+            1000m,
             "EGP",
             12,
             0,
             currentSub.EffectiveEndsAtUtc,
-            autoRenew: false,
+            false,
             SubscriptionStatus.Pending).Value;
 
         Assert.True(futureSub.StartsAtUtc >= currentSub.EffectiveEndsAtUtc);
@@ -1177,11 +1185,12 @@ public class Phase9_3SubscriptionRenewalTests
             Guid.NewGuid().ToString(),
             1,
             1000m,
+            1000m,
             "EGP",
             1,
             0,
             now.AddMonths(-1),
-            autoRenew: false,
+            false,
             SubscriptionStatus.Active).Value;
 
         // Old subscription just expired

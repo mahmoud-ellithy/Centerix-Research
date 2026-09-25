@@ -119,7 +119,7 @@ public class Phase9_5_1NaturalExpirationConcurrencySqlServerTests
         int bonusMonths)
     {
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, planId, 1000m, "EGP",
+            Guid.NewGuid(), tenantId, planId, 1000m, 1000m, "EGP",
             durationMonths, bonusMonths, startsAtUtc, false, status).Value;
         db.TenantPlans.Add(sub);
         db.StampAddedTenantIds(tenantId);

@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -338,7 +338,7 @@ public class Phase2SqlServerTests
         DateTime? startsAt = null)
     {
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, planId, price, currency, durationMonths, bonusMonths,
+            Guid.NewGuid(), tenantId, planId, price, price, currency, durationMonths, bonusMonths,
             startsAt ?? DateTime.UtcNow, false, status, maxStudents, 10, 5, 20, 50, 500).Value;
         if (status == SubscriptionStatus.Active)
             sub.Activate(DateTime.UtcNow);

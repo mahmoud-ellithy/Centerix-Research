@@ -34,7 +34,7 @@ public class Phase2DomainTests
         plan ??= NewPlan();
         var sub = TenantPlan.Create(
             Guid.NewGuid(), Guid.NewGuid().ToString(), plan.Id == 0 ? 1 : plan.Id,
-            plan.MonthlyPrice, plan.CurrencyCode, plan.DurationMonths, plan.BonusMonths,
+            plan.MonthlyPrice, plan.MonthlyPrice, plan.CurrencyCode, plan.DurationMonths, plan.BonusMonths,
             startsAt ?? new DateTime(2026, 1, 31, 0, 0, 0, DateTimeKind.Utc),
             autoRenew: false, status,
             plan.MaxStudents, plan.MaxUsers, plan.MaxBranches, plan.MaxTeachers,
@@ -140,7 +140,7 @@ public class Phase2DomainTests
     {
         var start = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc);
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), "t1", 1, 100m, "USD", 12, 0, start).Value;
+            Guid.NewGuid(), "t1", 1, 100m, 100m, "USD", 12, 0, start).Value;
 
         Assert.Equal(new DateTime(2027, 3, 15, 0, 0, 0, DateTimeKind.Utc), sub.BaseEndsAtUtc);
         Assert.Equal(sub.BaseEndsAtUtc, sub.EffectiveEndsAtUtc); // no bonus
@@ -150,7 +150,7 @@ public class Phase2DomainTests
     public void Subscription_BonusMonths_AreStored_AndExtendEffectiveEnd()
     {
         var start = new DateTime(2026, 6, 30, 0, 0, 0, DateTimeKind.Utc);
-        var sub = TenantPlan.Create(Guid.NewGuid(), "t1", 1, 50m, "EUR", 6, 2, start).Value;
+        var sub = TenantPlan.Create(Guid.NewGuid(), "t1", 1, 50m, 50m, "EUR", 6, 2, start).Value;
 
         Assert.Equal(6, sub.DurationMonths);
         Assert.Equal(2, sub.BonusMonths);
@@ -161,13 +161,13 @@ public class Phase2DomainTests
     [Fact]
     public void Subscription_Create_RejectsInvalidCommercialTerms()
     {
-        Assert.False(TenantPlan.Create(Guid.NewGuid(), "", 1, 10m, "USD", 1, 0, DateTime.UtcNow).IsSuccess);
-        Assert.False(TenantPlan.Create(Guid.NewGuid(), "t", 0, 10m, "USD", 1, 0, DateTime.UtcNow).IsSuccess);
-        Assert.False(TenantPlan.Create(Guid.NewGuid(), "t", 1, -1m, "USD", 1, 0, DateTime.UtcNow).IsSuccess);
-        Assert.False(TenantPlan.Create(Guid.NewGuid(), "t", 1, 10m, "USDD", 1, 0, DateTime.UtcNow).IsSuccess);
-        Assert.False(TenantPlan.Create(Guid.NewGuid(), "t", 1, 10m, "USD", 0, 0, DateTime.UtcNow).IsSuccess);
-        Assert.False(TenantPlan.Create(Guid.NewGuid(), "t", 1, 10m, "USD", 1, -1, DateTime.UtcNow).IsSuccess);
-        Assert.False(TenantPlan.Create(Guid.NewGuid(), "t", 1, 10m, "USD", 1, 0, default).IsSuccess);
+        Assert.False(TenantPlan.Create(Guid.NewGuid(), "", 1, 10m, 10m, "USD", 1, 0, DateTime.UtcNow).IsSuccess);
+        Assert.False(TenantPlan.Create(Guid.NewGuid(), "t", 0, 10m, 10m, "USD", 1, 0, DateTime.UtcNow).IsSuccess);
+        Assert.False(TenantPlan.Create(Guid.NewGuid(), "t", 1, -1m, -1m, "USD", 1, 0, DateTime.UtcNow).IsSuccess);
+        Assert.False(TenantPlan.Create(Guid.NewGuid(), "t", 1, 10m, 10m, "USDD", 1, 0, DateTime.UtcNow).IsSuccess);
+        Assert.False(TenantPlan.Create(Guid.NewGuid(), "t", 1, 10m, 10m, "USD", 0, 0, DateTime.UtcNow).IsSuccess);
+        Assert.False(TenantPlan.Create(Guid.NewGuid(), "t", 1, 10m, 10m, "USD", 1, -1, DateTime.UtcNow).IsSuccess);
+        Assert.False(TenantPlan.Create(Guid.NewGuid(), "t", 1, 10m, 10m, "USD", 1, 0, default).IsSuccess);
     }
 
     // ------------------------------------------------------------------
@@ -188,7 +188,7 @@ public class Phase2DomainTests
     public void Subscription_Activate_AlreadyExpiredTerm_IsDenied()
     {
         var past = DateTime.UtcNow.AddMonths(-6);
-        var sub = TenantPlan.Create(Guid.NewGuid(), "t", 1, 10m, "USD", 1, 0, past).Value; // ended ~5 months ago
+        var sub = TenantPlan.Create(Guid.NewGuid(), "t", 1, 10m, 10m, "USD", 1, 0, past).Value; // ended ~5 months ago
         Assert.False(sub.Activate(DateTime.UtcNow).IsSuccess);
     }
 
@@ -196,7 +196,7 @@ public class Phase2DomainTests
     public void Subscription_Renew_BeforeExpiry_AnchorsAtEffectiveEnd_PreservingPaidTime()
     {
         var start = DateTime.UtcNow.AddDays(-10);
-        var sub = TenantPlan.Create(Guid.NewGuid(), "t", 1, 10m, "USD", 12, 1, start).Value;
+        var sub = TenantPlan.Create(Guid.NewGuid(), "t", 1, 10m, 10m, "USD", 12, 1, start).Value;
         sub.Activate(DateTime.UtcNow);
 
         var effectiveBefore = sub.EffectiveEndsAtUtc;
@@ -213,7 +213,7 @@ public class Phase2DomainTests
     public void Subscription_Renew_AfterExpiry_StartsFreshFromNow()
     {
         var longAgo = DateTime.UtcNow.AddYears(-2);
-        var sub = TenantPlan.Create(Guid.NewGuid(), "t", 1, 10m, "USD", 1, 0, longAgo).Value;
+        var sub = TenantPlan.Create(Guid.NewGuid(), "t", 1, 10m, 10m, "USD", 1, 0, longAgo).Value;
         sub.Activate(longAgo.AddDays(1));
 
         var now = DateTime.UtcNow;
@@ -235,7 +235,7 @@ public class Phase2DomainTests
     public void Subscription_MarkExpired_OnlyAfterEffectiveEnd()
     {
         var start = DateTime.UtcNow.AddMonths(-2);
-        var sub = TenantPlan.Create(Guid.NewGuid(), "t", 1, 10m, "USD", 3, 1, start).Value;
+        var sub = TenantPlan.Create(Guid.NewGuid(), "t", 1, 10m, 10m, "USD", 3, 1, start).Value;
         sub.Activate(start);
 
         Assert.False(sub.MarkExpired(DateTime.UtcNow).IsSuccess); // still within effective term
@@ -269,7 +269,7 @@ public class Phase2DomainTests
         // A row persisted as Active whose effective end already passed cannot be cancelled
         // (it is commercially dead; renewal is the only forward path).
         var expired = TenantPlan.Create(
-            Guid.NewGuid(), "t", 1, 10m, "USD", 1, 0,
+            Guid.NewGuid(), "t", 1, 10m, 10m, "USD", 1, 0,
             DateTime.UtcNow.AddMonths(-2), false, SubscriptionStatus.Active).Value;
         Assert.False(expired.Cancel(DateTime.UtcNow).IsSuccess);
     }
@@ -293,7 +293,7 @@ public class Phase2DomainTests
     {
         var plan = Plan.Create(0, "X" + Guid.NewGuid().ToString("N")[..8], "P", 10m, 111, 222, 333, 444, 55, 66,
             true, null, "SAR", 3, 4).Value;
-        var subResult = TenantPlan.Create(Guid.NewGuid(), "t", 1, plan.MonthlyPrice, "SAR", plan.DurationMonths, plan.BonusMonths,
+        var subResult = TenantPlan.Create(Guid.NewGuid(), "t", 1, plan.MonthlyPrice, plan.MonthlyPrice, "SAR", plan.DurationMonths, plan.BonusMonths,
             DateTime.UtcNow, false, SubscriptionStatus.Pending,
             plan.MaxStudents, plan.MaxUsers, plan.MaxBranches, plan.MaxTeachers,
             plan.StorageGB, plan.SMSQuota);

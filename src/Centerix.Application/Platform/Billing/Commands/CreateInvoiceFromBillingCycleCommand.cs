@@ -46,10 +46,11 @@ public class CreateInvoiceFromBillingCycleHandler(
             cycleDurationMonths = 1; // minimum 1 month for partial cycles
 
         // Derive amounts from subscription snapshot (immutable commercial terms)
-        var subtotal = subscription.SnapshotPrice * cycleDurationMonths;
-        var discountAmount = 0m; // Contract-level discounts are already reflected in SnapshotPrice
+        // Use SnapshotMonthlyCharge which already includes any Contract-level discounts
+        var subtotal = subscription.SnapshotPrice * cycleDurationMonths; // For display: gross monthly price × duration
+        var discountAmount = (subscription.SnapshotPrice - subscription.SnapshotMonthlyCharge) * cycleDurationMonths;
         var taxAmount = 0m; // Tax calculation will be added in a later task
-        var totalAmount = subtotal - discountAmount + taxAmount;
+        var totalAmount = subscription.SnapshotMonthlyCharge * cycleDurationMonths; // Actual charge = monthly charge × duration
 
         var invoiceNumber = $"INV-{now:yyyyMMdd-HHmmss}";
 

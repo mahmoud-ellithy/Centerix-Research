@@ -98,10 +98,9 @@ public class Task201_BillingCycleRowVersionSqlServerTests
 
             // Seed a minimal TenantPlan so BillingCycle.Create resolves its FK.
             var tenantPlan = Centerix.Domain.Platform.Subscriptions.TenantPlan.Create(
-                Guid.NewGuid(), tenantId, plan.Id, 1000m, "EGP", 12, 0,
+                Guid.NewGuid(), tenantId, plan.Id, 1000m, 1000m, "EGP", 12, 0,
                 new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-                autoRenew: false,
-                status: SubscriptionStatus.Active).Value;
+                false, SubscriptionStatus.Active).Value;
             db.TenantPlans.Add(tenantPlan);
 
             var cycle = BillingCycle.Create(
@@ -177,10 +176,9 @@ public class Task201_BillingCycleRowVersionSqlServerTests
             await db.SaveChangesAsync();
 
             var tenantPlan = Centerix.Domain.Platform.Subscriptions.TenantPlan.Create(
-                Guid.NewGuid(), tenantId, plan.Id, 1000m, "EGP", 12, 0,
+                Guid.NewGuid(), tenantId, plan.Id, 1000m, 1000m, "EGP", 12, 0,
                 new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-                autoRenew: false,
-                status: SubscriptionStatus.Active).Value;
+                false, SubscriptionStatus.Active).Value;
             db.TenantPlans.Add(tenantPlan);
             await db.SaveChangesAsync();
             cycleId = await CreateBillingCycle(db, tenantId);

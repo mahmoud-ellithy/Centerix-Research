@@ -8,6 +8,7 @@ using Centerix.Domain.Platform.Subscriptions;
 /// </summary>
 public record SubscriptionSnapshot(
     decimal MonthlyListPrice,
+    decimal MonthlyCharge,
     decimal ContractualMonthlyValue,
     string CurrencyCode,
     int DurationMonths,

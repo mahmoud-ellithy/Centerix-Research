@@ -76,6 +76,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
             tenantId,
             planId: 1,
             snapshotPrice: 100m,
+            snapshotMonthlyCharge: 100m,
             snapshotCurrency: "USD",
             durationMonths,
             bonusMonths: 0,
@@ -394,7 +395,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         // The domain layer prevents this via the result pattern, and the
         // DB unique index is the safety net.
         var result2 = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 1, 100m, "USD", 12, 0,
+            Guid.NewGuid(), tenantId, 1, 100m, 100m, "USD", 12, 0,
             DateTime.UtcNow, false, SubscriptionStatus.Pending);
 
         Assert.True(result2.IsSuccess);
@@ -568,7 +569,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         // Activate with a time BEFORE EffectiveEndsAtUtc, then MarkExpired AFTER.
         var start = DateTime.UtcNow.AddMonths(-3);
         var result = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 1, 100m, "USD", 1, 0,
+            Guid.NewGuid(), tenantId, 1, 100m, 100m, "USD", 1, 0,
             startsAtUtc: start, autoRenew: false,
             status: SubscriptionStatus.Pending);
         var sub = result.Value;
@@ -612,7 +613,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         // Create an actually expired subscription
         var start = now.AddMonths(-3);
         var result = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 1, 100m, "USD", 1, 0,
+            Guid.NewGuid(), tenantId, 1, 100m, 100m, "USD", 1, 0,
             startsAtUtc: start, autoRenew: false,
             status: SubscriptionStatus.Pending);
         var sub = result.Value;
@@ -981,7 +982,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
         SeedGracePeriodPolicy(db, 7);
 
         var result = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 1, 100m, "USD", 12, 0,
+            Guid.NewGuid(), tenantId, 1, 100m, 100m, "USD", 12, 0,
             DateTime.UtcNow, false, SubscriptionStatus.Pending);
         var sub = result.Value;
         var contractId = Guid.NewGuid();
@@ -1129,6 +1130,7 @@ public class Phase9_1_1SubscriptionReconciliationHardeningTests
             tenantId ?? Guid.NewGuid().ToString(),
             planId: 1,
             snapshotPrice: 100m,
+            snapshotMonthlyCharge: 100m,
             snapshotCurrency: "USD",
             durationMonths,
             bonusMonths: 0,

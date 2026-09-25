@@ -155,7 +155,7 @@ public class Task18CommercialIntegritySqlServerTests
         db.Contracts.Add(contract);
 
         var subResult = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, planId, 1000m, "EGP", 12, 0,
+            Guid.NewGuid(), tenantId, planId, 1000m, 1000m, "EGP", 12, 0,
             startedAt, false, SubscriptionStatus.Pending);
         Assert.True(subResult.IsSuccess);
         var sub = subResult.Value;
@@ -219,7 +219,7 @@ public class Task18CommercialIntegritySqlServerTests
         db.Contracts.Add(contract);
 
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, planId, 1000m, "EGP", 12, 0,
+            Guid.NewGuid(), tenantId, planId, 1000m, 1000m, "EGP", 12, 0,
             startedAt, false, SubscriptionStatus.Pending).Value;
         sub.Activate(startedAt);
         sub.LinkToContract(contract.Id);

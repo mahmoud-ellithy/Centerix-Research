@@ -857,6 +857,7 @@ public class Phase8_1_1ConcurrencySqlServerTests
             tenantId,
             planId: plan.Id,
             snapshotPrice: 100m,
+            snapshotMonthlyCharge: 100m,
             snapshotCurrency: "EGP",
             12,
             bonusMonths: 0,

@@ -19,6 +19,7 @@ public class TenantPlanConfiguration : IEntityTypeConfiguration<TenantPlan>
 
         // Commercial snapshot — frozen at creation/renewal, never derived from the live Plan.
         builder.Property(tp => tp.SnapshotPrice).HasPrecision(10, 2);
+        builder.Property(tp => tp.SnapshotMonthlyCharge).HasPrecision(10, 2);
         builder.Property(tp => tp.SnapshotCurrency)
             .HasMaxLength(3)
             .IsRequired();

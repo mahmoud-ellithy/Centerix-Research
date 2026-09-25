@@ -109,7 +109,7 @@ public class Task18_4CommercialIntegritySqlServerTests
         db.Contracts.Add(contract);
 
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, planId, 1000m, "EGP",
+            Guid.NewGuid(), tenantId, planId, 1000m, 1000m, "EGP",
             12, 0, startedAt, false, SubscriptionStatus.Pending).Value;
         sub.Activate(startedAt);
         sub.LinkToContract(contract.Id);

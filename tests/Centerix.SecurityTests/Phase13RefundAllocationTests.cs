@@ -88,6 +88,7 @@ public class Phase13RefundAllocationTests
             tenantId: tenantId,
             planId: 1,
             snapshotPrice: 1000m,
+            snapshotMonthlyCharge: 1000m,
             snapshotCurrency: "EGP",
             durationMonths: 12,
             bonusMonths: 0,

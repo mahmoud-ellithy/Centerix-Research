@@ -59,7 +59,7 @@ public class Phase9_4CancellationTests
 
     private static TenantPlan CreateSub(AppDbContext db, string tid, Guid cid, SubscriptionStatus st = SubscriptionStatus.Active)
     {
-        var r = TenantPlan.Create(Guid.NewGuid(), tid, 1, 1000m, "EGP", 12, 0,
+        var r = TenantPlan.Create(Guid.NewGuid(), tid, 1, 1000m, 1000m, "EGP", 12, 0,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), false, st);
         Assert.True(r.IsSuccess);
         var s = r.Value;
@@ -137,10 +137,10 @@ public class Phase9_4CancellationTests
 
     // ── Domain ──
 
-    private static TenantPlan MkActive() => TenantPlan.Create(Guid.NewGuid(), "t1", 1, 100m, "USD", 12, 0,
+    private static TenantPlan MkActive() => TenantPlan.Create(Guid.NewGuid(), "t1", 1, 100m, 100m, "USD", 12, 0,
         DateTime.UtcNow.AddMonths(-6), false, SubscriptionStatus.Active).Value;
 
-    private static TenantPlan MkPending() => TenantPlan.Create(Guid.NewGuid(), "t1", 1, 100m, "USD", 12, 0,
+    private static TenantPlan MkPending() => TenantPlan.Create(Guid.NewGuid(), "t1", 1, 100m, 100m, "USD", 12, 0,
         DateTime.UtcNow, false, SubscriptionStatus.Pending).Value;
 
     [Fact] public void Domain_Active_Cancelled() { var s = MkActive(); Assert.True(s.Cancel(DateTime.UtcNow).IsSuccess); Assert.Equal(SubscriptionStatus.Cancelled, s.Status); }
@@ -167,7 +167,7 @@ public class Phase9_4CancellationTests
     [Fact]
     public void Domain_Expired_CannotCancel()
     {
-        var s = TenantPlan.Create(Guid.NewGuid(), "t1", 1, 100m, "USD", 1, 0,
+        var s = TenantPlan.Create(Guid.NewGuid(), "t1", 1, 100m, 100m, "USD", 1, 0,
             DateTime.UtcNow.AddMonths(-3), false, SubscriptionStatus.Active).Value;
         s.MarkExpired(DateTime.UtcNow);
         Assert.False(s.Cancel(DateTime.UtcNow).IsSuccess);
@@ -197,7 +197,7 @@ public class Phase9_4CancellationTests
     [Fact]
     public void Domain_PastEnd_CannotCancel()
     {
-        var s = TenantPlan.Create(Guid.NewGuid(), "t1", 1, 100m, "USD", 1, 0,
+        var s = TenantPlan.Create(Guid.NewGuid(), "t1", 1, 100m, 100m, "USD", 1, 0,
             DateTime.UtcNow.AddMonths(-2), false, SubscriptionStatus.Active).Value;
         Assert.False(s.Cancel(DateTime.UtcNow).IsSuccess);
     }
@@ -544,7 +544,7 @@ public class Phase9_4CancellationTests
         var h = CreateHandler(db);
         var c = CreateContract(db, "tenant-1");
         var subStart = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
-        var r = TenantPlan.Create(Guid.NewGuid(), "tenant-1", 1, 1000m, "EGP", 12, 0, subStart, false, SubscriptionStatus.Active);
+        var r = TenantPlan.Create(Guid.NewGuid(), "tenant-1", 1, 1000m, 1000m, "EGP", 12, 0, subStart, false, SubscriptionStatus.Active);
         Assert.True(r.IsSuccess);
         var s = r.Value;
         s.LinkToContract(c.Id);

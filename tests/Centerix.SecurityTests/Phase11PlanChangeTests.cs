@@ -63,7 +63,7 @@ public class Phase11PlanChangeTests
         int durationMonths = 12, int bonusMonths = 0, DateTime? startsAt = null)
     {
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId ?? Guid.NewGuid().ToString(), planId, price, "EGP",
+            Guid.NewGuid(), tenantId ?? Guid.NewGuid().ToString(), planId, price, price, "EGP",
             durationMonths, bonusMonths, startsAt ?? UtcNow, false, SubscriptionStatus.Pending).Value;
         sub.Activate(startsAt ?? UtcNow);
         return sub;
@@ -662,7 +662,7 @@ public class Phase11PlanChangeTests
     public void Test23_OldSubscription_LimitSnapshot_NotModified()
     {
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), Guid.NewGuid().ToString(), 1, 1000m, "EGP",
+            Guid.NewGuid(), Guid.NewGuid().ToString(), 1, 1000m, 1000m, "EGP",
             12, 0, UtcNow, false, SubscriptionStatus.Pending,
             maxStudents: 50, maxUsers: 25, maxBranches: 5, maxTeachers: 10,
             storageGb: 50, smsQuota: 500).Value;
@@ -1080,7 +1080,7 @@ public class Phase11PlanChangeSqlServerTests
             var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
             db.StampAddedTenantIds(tenantId);
             var sub = TenantPlan.Create(
-                Guid.NewGuid(), tenantId, oldPlanId, 1000m, "EGP", 12, 0,
+                Guid.NewGuid(), tenantId, oldPlanId, 1000m, 1000m, "EGP", 12, 0,
                 DateTime.UtcNow.AddMonths(-6), false, SubscriptionStatus.Pending).Value;
             sub.Activate(DateTime.UtcNow.AddMonths(-6));
             db.TenantPlans.Add(sub);
@@ -1138,7 +1138,7 @@ public class Phase11PlanChangeSqlServerTests
             var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
             db.StampAddedTenantIds(tenantId);
             var sub = TenantPlan.Create(
-                Guid.NewGuid(), tenantId, oldPlanId, 1000m, "EGP", 12, 0,
+                Guid.NewGuid(), tenantId, oldPlanId, 1000m, 1000m, "EGP", 12, 0,
                 DateTime.UtcNow.AddMonths(-6), false, SubscriptionStatus.Pending).Value;
             sub.Activate(DateTime.UtcNow.AddMonths(-6));
             db.TenantPlans.Add(sub);
@@ -1190,7 +1190,7 @@ public class Phase11PlanChangeSqlServerTests
             var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
             db.StampAddedTenantIds(tenantId);
             var sub = TenantPlan.Create(
-                Guid.NewGuid(), tenantId, oldPlanId, 1000m, "EGP", 12, 0,
+                Guid.NewGuid(), tenantId, oldPlanId, 1000m, 1000m, "EGP", 12, 0,
                 DateTime.UtcNow.AddMonths(-6), false, SubscriptionStatus.Pending).Value;
             sub.Activate(DateTime.UtcNow.AddMonths(-6));
             db.TenantPlans.Add(sub);
@@ -1240,7 +1240,7 @@ public class Phase11PlanChangeSqlServerTests
             var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
             db.StampAddedTenantIds(tenantId);
             var sub = TenantPlan.Create(
-                Guid.NewGuid(), tenantId, oldPlanId, 1000m, "EGP", 12, 0,
+                Guid.NewGuid(), tenantId, oldPlanId, 1000m, 1000m, "EGP", 12, 0,
                 DateTime.UtcNow.AddMonths(-6), false, SubscriptionStatus.Pending).Value;
             sub.Activate(DateTime.UtcNow.AddMonths(-6));
             db.TenantPlans.Add(sub);
@@ -1283,7 +1283,7 @@ public class Phase11PlanChangeSqlServerTests
             var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
             db.StampAddedTenantIds(tenantId);
             var sub = TenantPlan.Create(
-                Guid.NewGuid(), tenantId, planId, 1000m, "EGP", 12, 0,
+                Guid.NewGuid(), tenantId, planId, 1000m, 1000m, "EGP", 12, 0,
                 DateTime.UtcNow.AddMonths(-6), false, SubscriptionStatus.Pending).Value;
             db.TenantPlans.Add(sub);
             await db.SaveChangesAsync();
@@ -1317,7 +1317,7 @@ public class Phase11PlanChangeSqlServerTests
             var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
             db.StampAddedTenantIds(tenantId);
             var sub = TenantPlan.Create(
-                Guid.NewGuid(), tenantId, oldPlanId, 1000m, "EGP", 12, 0,
+                Guid.NewGuid(), tenantId, oldPlanId, 1000m, 1000m, "EGP", 12, 0,
                 DateTime.UtcNow.AddMonths(-6), false, SubscriptionStatus.Pending).Value;
             sub.Activate(DateTime.UtcNow.AddMonths(-6));
             db.TenantPlans.Add(sub);
@@ -1370,7 +1370,7 @@ public class Phase11PlanChangeSqlServerTests
             var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
             db.StampAddedTenantIds(tenantId);
             var sub = TenantPlan.Create(
-                Guid.NewGuid(), tenantId, oldPlanId, 1000m, "EGP", 12, 0,
+                Guid.NewGuid(), tenantId, oldPlanId, 1000m, 1000m, "EGP", 12, 0,
                 DateTime.UtcNow.AddMonths(-6), false, SubscriptionStatus.Pending).Value;
             sub.Activate(DateTime.UtcNow.AddMonths(-6));
             db.TenantPlans.Add(sub);

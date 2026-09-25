@@ -109,6 +109,7 @@ public class Phase9_5SubscriptionNaturalExpirationTests
             tenantId ?? Guid.NewGuid().ToString(),
             planId: 1,
             snapshotPrice: 100m,
+            snapshotMonthlyCharge: 100m,
             snapshotCurrency: "USD",
             durationMonths,
             bonusMonths: 0,
@@ -137,6 +138,7 @@ public class Phase9_5SubscriptionNaturalExpirationTests
             tenantId ?? Guid.NewGuid().ToString(),
             planId: 1,
             snapshotPrice: 100m,
+            snapshotMonthlyCharge: 100m,
             snapshotCurrency: "USD",
             durationMonths,
             bonusMonths: 0,
@@ -178,7 +180,7 @@ public class Phase9_5SubscriptionNaturalExpirationTests
         var start = DateTime.UtcNow.AddMonths(-3);
         var sub = TenantPlan.Create(
             Guid.NewGuid(), Guid.NewGuid().ToString(), 1,
-            100m, "USD", 1, 0,
+            100m, 100m, "USD", 1, 0,
             startsAtUtc: start, autoRenew: false,
             SubscriptionStatus.Active).Value;
         sub.Activate(start.AddDays(1));
@@ -243,7 +245,7 @@ public class Phase9_5SubscriptionNaturalExpirationTests
         var start = DateTime.UtcNow.AddMonths(-3);
         var sub = TenantPlan.Create(
             Guid.NewGuid(), tenantId, 1,
-            100m, "USD", 1, 0,
+            100m, 100m, "USD", 1, 0,
             startsAtUtc: start, autoRenew: false,
             SubscriptionStatus.Active).Value;
         sub.Activate(start.AddDays(1));
@@ -535,7 +537,7 @@ public class Phase9_5SubscriptionNaturalExpirationTests
 
         var start = now.AddMonths(-2);
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 1, 100m, "USD", 1, 0,
+            Guid.NewGuid(), tenantId, 1, 100m, 100m, "USD", 1, 0,
             startsAtUtc: start, autoRenew: false,
             SubscriptionStatus.Pending).Value;
         sub.Activate(start.AddDays(1));
@@ -567,7 +569,7 @@ public class Phase9_5SubscriptionNaturalExpirationTests
 
         var start = now.AddMonths(-2);
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 1, 100m, "USD", 1, 0,
+            Guid.NewGuid(), tenantId, 1, 100m, 100m, "USD", 1, 0,
             startsAtUtc: start, autoRenew: false,
             SubscriptionStatus.Pending).Value;
         sub.Activate(start.AddDays(1));
@@ -600,7 +602,7 @@ public class Phase9_5SubscriptionNaturalExpirationTests
 
         var start = now.AddMonths(-2);
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 1, 100m, "USD", 1, 0,
+            Guid.NewGuid(), tenantId, 1, 100m, 100m, "USD", 1, 0,
             startsAtUtc: start, autoRenew: false,
             SubscriptionStatus.Pending).Value;
         sub.Activate(start.AddDays(1));
@@ -633,7 +635,7 @@ public class Phase9_5SubscriptionNaturalExpirationTests
 
         var start = now.AddMonths(-3);
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 1, 100m, "USD", 1, 0,
+            Guid.NewGuid(), tenantId, 1, 100m, 100m, "USD", 1, 0,
             startsAtUtc: start, autoRenew: false,
             SubscriptionStatus.Pending).Value;
         sub.Activate(start.AddDays(1));
@@ -694,7 +696,7 @@ public class Phase9_5SubscriptionNaturalExpirationTests
 
         var start = now;
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 1, 100m, "USD", 12, 0,
+            Guid.NewGuid(), tenantId, 1, 100m, 100m, "USD", 12, 0,
             startsAtUtc: start, autoRenew: false,
             SubscriptionStatus.Pending).Value;
         sub.Activate(start.AddSeconds(1));
@@ -817,7 +819,7 @@ public class Phase9_5SubscriptionNaturalExpirationTests
         db.Entry(subA).State = EntityState.Detached;
 
         var subB = TenantPlan.Create(
-            Guid.NewGuid(), tenantB, 1, 100m, "USD", 12, 0,
+            Guid.NewGuid(), tenantB, 1, 100m, 100m, "USD", 12, 0,
             startsAtUtc: now, autoRenew: false,
             SubscriptionStatus.Pending).Value;
         subB.Activate(now);
@@ -854,14 +856,14 @@ public class Phase9_5SubscriptionNaturalExpirationTests
         var start = DateTime.UtcNow.AddMonths(-2);
 
         var oldSub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 1, 100m, "USD", 1, 0,
+            Guid.NewGuid(), tenantId, 1, 100m, 100m, "USD", 1, 0,
             startsAtUtc: start, autoRenew: false,
             SubscriptionStatus.Active).Value;
         oldSub.Activate(start.AddDays(1));
         Assert.Equal(SubscriptionStatus.Active, oldSub.Status);
 
         var newSub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 2, 200m, "USD", 12, 0,
+            Guid.NewGuid(), tenantId, 2, 200m, 200m, "USD", 12, 0,
             startsAtUtc: DateTime.UtcNow, autoRenew: false,
             SubscriptionStatus.Pending).Value;
         newSub.Activate(DateTime.UtcNow);
@@ -879,7 +881,7 @@ public class Phase9_5SubscriptionNaturalExpirationTests
         var tenantId = Guid.NewGuid().ToString();
 
         var oldSub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 1, 100m, "USD", 12, 1,
+            Guid.NewGuid(), tenantId, 1, 100m, 100m, "USD", 12, 1,
             startsAtUtc: DateTime.UtcNow.AddMonths(-13),
             autoRenew: false,
             SubscriptionStatus.Active).Value;
@@ -889,7 +891,7 @@ public class Phase9_5SubscriptionNaturalExpirationTests
         Assert.Equal(SubscriptionStatus.Expired, oldSub.Status);
 
         var newSub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 2, 300m, "EGP", 6, 0,
+            Guid.NewGuid(), tenantId, 2, 300m, 300m, "EGP", 6, 0,
             startsAtUtc: DateTime.UtcNow,
             autoRenew: false,
             SubscriptionStatus.Active).Value;
@@ -913,7 +915,7 @@ public class Phase9_5SubscriptionNaturalExpirationTests
         var start = DateTime.UtcNow.AddMonths(-3);
 
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 1, 100m, "USD", 1, 0,
+            Guid.NewGuid(), tenantId, 1, 100m, 100m, "USD", 1, 0,
             startsAtUtc: start, autoRenew: false,
             SubscriptionStatus.Active).Value;
         sub.Activate(start.AddDays(1));
@@ -966,7 +968,7 @@ public class Phase9_5SubscriptionNaturalExpirationTests
 
         var start = now;
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 1, 100m, "USD", 12, 0,
+            Guid.NewGuid(), tenantId, 1, 100m, 100m, "USD", 12, 0,
             startsAtUtc: start, autoRenew: false,
             SubscriptionStatus.Pending).Value;
         sub.Activate(start.AddSeconds(1));
@@ -1200,7 +1202,7 @@ public class Phase9_5SubscriptionNaturalExpirationTests
         var start = DateTime.UtcNow.AddMonths(-3);
         var sub = TenantPlan.Create(
             Guid.NewGuid(), Guid.NewGuid().ToString(), 1,
-            500m, "EGP", 2, 0,
+            500m, 500m, "EGP", 2, 0,
             startsAtUtc: start, autoRenew: true,
             SubscriptionStatus.Active).Value;
         sub.Activate(start.AddDays(1));
@@ -1236,14 +1238,14 @@ public class Phase9_5SubscriptionNaturalExpirationTests
         var now = DateTime.UtcNow;
 
         var oldSub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 1, 100m, "USD", 1, 0,
+            Guid.NewGuid(), tenantId, 1, 100m, 100m, "USD", 1, 0,
             startsAtUtc: now.AddMonths(-2),
             autoRenew: false,
             SubscriptionStatus.Active).Value;
         oldSub.Activate(now.AddMonths(-2).AddDays(1));
 
         var newSub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, 2, 200m, "USD", 12, 0,
+            Guid.NewGuid(), tenantId, 2, 200m, 200m, "USD", 12, 0,
             startsAtUtc: now,
             autoRenew: false,
             SubscriptionStatus.Active).Value;
@@ -1266,7 +1268,7 @@ public class Phase9_5SubscriptionNaturalExpirationTests
         var start = DateTime.UtcNow.AddMonths(-2);
         var sub = TenantPlan.Create(
             Guid.NewGuid(), Guid.NewGuid().ToString(), 1,
-            500m, "EGP", 6, 2,
+            500m, 500m, "EGP", 6, 2,
             startsAtUtc: start, autoRenew: true,
             SubscriptionStatus.Active).Value;
         sub.Activate(start.AddDays(1));

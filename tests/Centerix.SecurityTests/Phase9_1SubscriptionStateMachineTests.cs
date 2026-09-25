@@ -26,6 +26,7 @@ public class Phase9_1SubscriptionStateMachineTests
             tenantId ?? Guid.NewGuid().ToString(),
             planId: 1,
             snapshotPrice: 100m,
+            snapshotMonthlyCharge: 100m,
             snapshotCurrency: "USD",
             durationMonths,
             bonusMonths: 0,
@@ -48,6 +49,7 @@ public class Phase9_1SubscriptionStateMachineTests
             tenantId ?? Guid.NewGuid().ToString(),
             planId: 1,
             snapshotPrice: 100m,
+            snapshotMonthlyCharge: 100m,
             snapshotCurrency: "USD",
             durationMonths: 1,
             bonusMonths: 0,
@@ -294,9 +296,8 @@ public class Phase9_1SubscriptionStateMachineTests
         // Create with valid Pending status is the only supported path
         var result = TenantPlan.Create(
             Guid.NewGuid(), Guid.NewGuid().ToString(), 1,
-            100m, "USD", 12, 0,
-            DateTime.UtcNow, false,
-            SubscriptionStatus.Pending);
+            100m, 100m, "USD", 12, 0,
+            DateTime.UtcNow, false, SubscriptionStatus.Pending);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(SubscriptionStatus.Pending, result.Value.Status);
@@ -478,10 +479,10 @@ public class Phase9_1SubscriptionStateMachineTests
         // Create a subscription that's PastDue but already past its effective end
         var sub = TenantPlan.Create(
             Guid.NewGuid(), Guid.NewGuid().ToString(), 1,
-            100m, "USD", 1, 0,
+            100m, 100m, "USD", 1, 0,
             startsAtUtc: DateTime.UtcNow.AddMonths(-3),
             autoRenew: false,
-            SubscriptionStatus.Active).Value;
+            status: SubscriptionStatus.Active).Value;
 
         sub.MarkPastDue();
         Assert.Equal(SubscriptionStatus.PastDue, sub.Status);

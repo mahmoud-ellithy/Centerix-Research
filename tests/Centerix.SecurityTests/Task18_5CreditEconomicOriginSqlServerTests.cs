@@ -149,7 +149,7 @@ public class Task18_5CreditEconomicOriginSqlServerTests
         db.Contracts.Add(contract);
 
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, planId, monthlyPrice, currency,
+            Guid.NewGuid(), tenantId, planId, monthlyPrice, monthlyPrice, currency,
             durationMonths, 0, start, false, SubscriptionStatus.Pending).Value;
         sub.Activate(start);
         sub.LinkToContract(contract.Id);

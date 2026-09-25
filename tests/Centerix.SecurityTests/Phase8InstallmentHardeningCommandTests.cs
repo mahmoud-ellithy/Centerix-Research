@@ -398,11 +398,13 @@ public class Phase8InstallmentHardeningCommandTests : IClassFixture<HardeningTes
             TestTenantId,
             1,
             1000m,
+            1000m,
             "EGP",
             12,
             0,
             new DateTime(2026, 1, 1),
-            status: Domain.Platform.Subscriptions.Enums.SubscriptionStatus.Active).Value!;
+            false,
+            Domain.Platform.Subscriptions.Enums.SubscriptionStatus.Active).Value!;
 
         subscription.LinkToContract(contractId);
 

@@ -99,7 +99,7 @@ public class Phase9_4_2CancellationConcurrencySqlServerTests
     private static async Task<Guid> SeedSubscriptionAsync(AppDbContext db, string tenantId, Guid contractId)
     {
         var planId = await SeedPlanAsync(db);
-        var sub = TenantPlan.Create(Guid.NewGuid(), tenantId, planId, 1000m, "EGP", 12, 0,
+        var sub = TenantPlan.Create(Guid.NewGuid(), tenantId, planId, 1000m, 1000m, "EGP", 12, 0,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), false, SubscriptionStatus.Active).Value;
         sub.LinkToContract(contractId);
         db.TenantPlans.Add(sub);

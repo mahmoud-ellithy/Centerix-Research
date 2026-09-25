@@ -63,7 +63,7 @@ public class Phase9_3_1RenewalHardeningTests
         int durationMonths = 12, int bonusMonths = 0, DateTime? startsAt = null)
     {
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId ?? Guid.NewGuid().ToString(), planId, price, "EGP",
+            Guid.NewGuid(), tenantId ?? Guid.NewGuid().ToString(), planId, price, price, "EGP",
             durationMonths, bonusMonths, startsAt ?? UtcNow, false, SubscriptionStatus.Pending).Value;
         sub.Activate(startsAt ?? UtcNow);
         return sub;
@@ -72,7 +72,7 @@ public class Phase9_3_1RenewalHardeningTests
     private static TenantPlan CreateExpiredSubscription(string? tenantId = null)
     {
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId ?? Guid.NewGuid().ToString(), 1, 1000m, "EGP",
+            Guid.NewGuid(), tenantId ?? Guid.NewGuid().ToString(), 1, 1000m, 1000m, "EGP",
             1, 0, UtcNow.AddMonths(-3), false, SubscriptionStatus.Active).Value;
         sub.MarkExpired(UtcNow);
         return sub;
@@ -141,7 +141,7 @@ public class Phase9_3_1RenewalHardeningTests
             currencyCode: "EGP", grossAmount: 5220m, contractedAmount: 5220m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
 
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), "t-1", plan.Id, 1000m, "EGP",
+            Guid.NewGuid(), "t-1", plan.Id, 1000m, 1000m, "EGP",
             durationMonths, 0, UtcNow, false).Value;
 
         Assert.Equal(contract.DurationMonths, sub.DurationMonths);
@@ -206,7 +206,7 @@ public class Phase9_3_1RenewalHardeningTests
 
         var sub = TenantPlan.Create(
             Guid.NewGuid(), "t-1", plan.Id,
-            offer.Value.MonthlyListPrice, offer.Value.CurrencyCode,
+            offer.Value.MonthlyListPrice, offer.Value.MonthlyListPrice, offer.Value.CurrencyCode,
             6, 0, UtcNow, false).Value;
 
         Assert.Equal("USD", sub.SnapshotCurrency);
@@ -570,7 +570,7 @@ public class Phase9_3_1RenewalHardeningTests
 
         var sub = TenantPlan.Create(
             Guid.NewGuid(), "t-1", plan.Id,
-            snapshotPrice: 800m, snapshotCurrency: "USD",
+            snapshotPrice: 800m, snapshotMonthlyCharge: 800m, snapshotCurrency: "USD",
             durationMonths: 6, bonusMonths: 2,
             startsAtUtc: UtcNow, autoRenew: false).Value;
 
@@ -587,7 +587,7 @@ public class Phase9_3_1RenewalHardeningTests
 
         var sub = TenantPlan.Create(
             Guid.NewGuid(), "t-1", plan.Id,
-            snapshotPrice: 500m, snapshotCurrency: "EGP",
+            snapshotPrice: 500m, snapshotMonthlyCharge: 500m, snapshotCurrency: "EGP",
             durationMonths: 6, bonusMonths: 0,
             startsAtUtc: UtcNow).Value;
 
@@ -620,7 +620,7 @@ public class Phase9_3_1RenewalHardeningTests
 
         var sub = TenantPlan.Create(
             Guid.NewGuid(), "t-1", plan.Id,
-            offer.Value.MonthlyListPrice, offer.Value.CurrencyCode,
+            offer.Value.MonthlyListPrice, offer.Value.MonthlyListPrice, offer.Value.CurrencyCode,
             requestedDuration, plan.BonusMonths, UtcNow, false).Value;
 
         Assert.Equal(requestedDuration, sub.DurationMonths);
@@ -902,7 +902,7 @@ public class Phase9_3_1RenewalSqlServerTests
             var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
             db.StampAddedTenantIds(tenantId);
             var sub = TenantPlan.Create(
-                Guid.NewGuid(), tenantId, planId, 1000m, "EGP", 12, 0,
+                Guid.NewGuid(), tenantId, planId, 1000m, 1000m, "EGP", 12, 0,
                 DateTime.UtcNow.AddMonths(-6), false, SubscriptionStatus.Pending).Value;
             sub.Activate(DateTime.UtcNow.AddMonths(-6));
             db.TenantPlans.Add(sub);
@@ -953,7 +953,7 @@ public class Phase9_3_1RenewalSqlServerTests
             var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
             db.StampAddedTenantIds(tenantId);
             var sub = TenantPlan.Create(
-                Guid.NewGuid(), tenantId, planId, 1000m, "EGP", 6, 0,
+                Guid.NewGuid(), tenantId, planId, 1000m, 1000m, "EGP", 6, 0,
                 DateTime.UtcNow, false, SubscriptionStatus.Pending).Value;
             sub.Activate(DateTime.UtcNow);
             db.TenantPlans.Add(sub);
@@ -1013,7 +1013,7 @@ public class Phase9_3_1RenewalSqlServerTests
             var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
             db.StampAddedTenantIds(tenantId);
             var sub = TenantPlan.Create(
-                Guid.NewGuid(), tenantId, planId, 1000m, "EGP", 12, 0,
+                Guid.NewGuid(), tenantId, planId, 1000m, 1000m, "EGP", 12, 0,
                 DateTime.UtcNow.AddMonths(-6), false, SubscriptionStatus.Pending).Value;
             sub.Activate(DateTime.UtcNow.AddMonths(-6));
             db.TenantPlans.Add(sub);
@@ -1063,7 +1063,7 @@ public class Phase9_3_1RenewalSqlServerTests
             var db = seed.ServiceProvider.GetRequiredService<AppDbContext>();
             db.StampAddedTenantIds(tenantId);
             var sub = TenantPlan.Create(
-                Guid.NewGuid(), tenantId, planId, 1000m, "EGP", 6, 0,
+                Guid.NewGuid(), tenantId, planId, 1000m, 1000m, "EGP", 6, 0,
                 DateTime.UtcNow, false, SubscriptionStatus.Pending).Value;
             sub.Activate(DateTime.UtcNow);
             db.TenantPlans.Add(sub);

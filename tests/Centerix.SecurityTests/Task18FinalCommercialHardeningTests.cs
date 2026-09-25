@@ -568,7 +568,7 @@ public class Task18FinalCommercialHardeningTests
         db.Contracts.Add(contract);
 
         var sub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, planId, monthlyPrice, "EGP",
+            Guid.NewGuid(), tenantId, planId, monthlyPrice, monthlyPrice, "EGP",
             durationMonths, 0, startedAt, false, SubscriptionStatus.Pending).Value;
         Assert.True(sub.Activate(startedAt).IsSuccess);
         Assert.True(sub.LinkToContract(contract.Id).IsSuccess);
@@ -804,7 +804,7 @@ public class Task18FinalCommercialHardeningTests
         db.Contracts.Add(contract);
 
         var oldSub = TenantPlan.Create(
-            Guid.NewGuid(), tenantId, planId, 1000m, "EGP", 12, 1,
+            Guid.NewGuid(), tenantId, planId, 1000m, 1000m, "EGP", 12, 1,
             startedAt, false, SubscriptionStatus.Pending).Value;
         Assert.True(oldSub.Activate(startedAt).IsSuccess);
         Assert.True(oldSub.LinkToContract(contract.Id).IsSuccess);

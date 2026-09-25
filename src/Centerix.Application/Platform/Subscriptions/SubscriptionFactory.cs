@@ -72,6 +72,7 @@ public class SubscriptionFactory(IAppDbContext dbContext) : ISubscriptionFactory
             tenantId,
             planId,
             snapshot.MonthlyListPrice,
+            snapshot.MonthlyCharge,
             snapshot.CurrencyCode,
             snapshot.DurationMonths,
             snapshot.BonusMonths,
@@ -131,11 +132,13 @@ public class SubscriptionFactory(IAppDbContext dbContext) : ISubscriptionFactory
         if (!plan.IsActive)
             return Error.Conflict("Subscription.PlanNotActive", "The selected plan is not active and cannot be assigned.");
 
+        // For direct Plan assignments (no Contract), SnapshotMonthlyCharge = plan.MonthlyPrice (no discount applied)
         var createResult = TenantPlan.Create(
             Guid.NewGuid(),
             tenantId,
             plan.Id,
             plan.MonthlyPrice,
+            plan.MonthlyPrice, // SnapshotMonthlyCharge = plan.MonthlyPrice for direct assignments
             plan.CurrencyCode,
             plan.DurationMonths,
             plan.BonusMonths,

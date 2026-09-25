@@ -158,6 +158,7 @@ public class Phase8BillingFoundationCommandTests
             tenantId,
             plan.Id,
             plan.MonthlyPrice,
+            plan.MonthlyPrice,
             plan.CurrencyCode,
             plan.DurationMonths,
             plan.BonusMonths,
@@ -246,6 +247,7 @@ public class Phase8BillingFoundationCommandTests
             Guid.NewGuid(),
             tenantId,
             plan.Id,
+            plan.MonthlyPrice,
             plan.MonthlyPrice,
             plan.CurrencyCode,
             plan.DurationMonths,
@@ -415,7 +417,7 @@ public class Phase8BillingFoundationCommandTests
 
         var mockSubscription = TenantPlan.Create(
             Guid.NewGuid(), tenantId, plan.Id,
-            plan.MonthlyPrice, plan.CurrencyCode,
+            plan.MonthlyPrice, plan.MonthlyPrice, plan.CurrencyCode,
             plan.DurationMonths, plan.BonusMonths,
             startsAtUtc: effective).Value;
         subscriptionFactory.CreateFromSnapshotAsync(
@@ -468,7 +470,7 @@ public class Phase8BillingFoundationCommandTests
 
         var mockSubscription = TenantPlan.Create(
             Guid.NewGuid(), tenantId, plan.Id,
-            plan.MonthlyPrice, plan.CurrencyCode,
+            plan.MonthlyPrice, plan.MonthlyPrice, plan.CurrencyCode,
             plan.DurationMonths, plan.BonusMonths,
             startsAtUtc: effective).Value;
         subscriptionFactory.CreateFromSnapshotAsync(
@@ -520,7 +522,7 @@ public class Phase8BillingFoundationCommandTests
 
         var mockSubscription = TenantPlan.Create(
             Guid.NewGuid(), tenantId, plan.Id,
-            plan.MonthlyPrice, plan.CurrencyCode,
+            plan.MonthlyPrice, plan.MonthlyPrice, plan.CurrencyCode,
             plan.DurationMonths, plan.BonusMonths,
             startsAtUtc: effective).Value;
         subscriptionFactory.CreateFromSnapshotAsync(
