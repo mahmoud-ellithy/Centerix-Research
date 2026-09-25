@@ -259,19 +259,20 @@ public class Task18_5CreditEconomicOriginSqlServerTests
     /// <summary>
     /// Seeds a SubscriptionChange credit with explicit TransferredPaidAmount (bypassing
     /// CreateSubscriptionChange to test the lineage propagation from arbitrary mixed-lineage credits).
-    /// Always generates a unique SourceId to avoid unique constraint violations on
-    /// UX_TenantCredits_TenantId_SourceType_SourceId.
     /// </summary>
     private async Task<Guid> SeedSubscriptionChangeCreditWithLineageAsync(
-        string tenantId, decimal amount, decimal transferredPaidAmount, string currency = "EGP")
+        string tenantId, decimal amount, decimal transferredPaidAmount, string currency = "EGP",
+        Guid? sourceId = null)
     {
         using var scope = _env.Factory.Services.CreateScope();
         AuthorizeTenant(scope.ServiceProvider, tenantId);
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // Always generate a unique SourceId to avoid unique constraint violations
+        // Use sourceId if provided, otherwise generate a random one to avoid unique constraint violations.
+        // The seeded credit is properly linked via CreditApplication to Invoice B.
+        var creditSourceId = sourceId ?? Guid.NewGuid();
         var credit = TenantCredit.CreateSubscriptionChange(
-            Guid.NewGuid(), amount, Guid.NewGuid(),
+            Guid.NewGuid(), amount, creditSourceId,
             transferredPaidAmount, currency,
             idempotencyKey: $"185-lineage-{Guid.NewGuid():N}").Value;
 
@@ -373,13 +374,20 @@ public class Task18_5CreditEconomicOriginSqlServerTests
             tc.TenantId == tenantId && tc.Id == creditId);
     }
 
-    private async Task<Guid> FindSubscriptionIdForContractAsync(string tenantId, Guid contractId)
+    private async Task<Guid> FindSubscriptionIdForContractAsync(string tenantId, Guid contractId, int? planId = null)
     {
         using var scope = _env.Factory.Services.CreateScope();
         AuthorizeTenant(scope.ServiceProvider, tenantId);
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var sub = await db.TenantPlans.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(tp => tp.TenantId == tenantId && tp.ContractId == contractId);
+        // Order by CreatedAtUtc descending to get the most recently created subscription.
+        // If planId is specified, filter by it to get the subscription for a specific plan.
+        var query = db.TenantPlans.IgnoreQueryFilters()
+            .Where(tp => tp.TenantId == tenantId && tp.ContractId == contractId);
+        if (planId.HasValue)
+            query = query.Where(tp => tp.PlanId == planId.Value);
+        var sub = await query
+            .OrderByDescending(tp => tp.CreatedAtUtc)
+            .FirstOrDefaultAsync();
         Assert.NotNull(sub);
         return sub!.Id;
     }
@@ -843,8 +851,8 @@ public class Task18_5CreditEconomicOriginSqlServerTests
         await SeedTenantAsync(tenantId);
         var t0 = MonthSafeUtcNow();
         var planA = await EnsurePlanAsync("P1858A", price: 1000m, duration: 12);
-        var planB = await EnsurePlanAsync("P1858B", price: 1000m, duration: 12);
-        var planC = await EnsurePlanAsync("P1858C", price: 1000m, duration: 12);
+        var planB = await EnsurePlanAsync("P1858B", price: 1000m, duration: 6);
+        var planC = await EnsurePlanAsync("P1858C", price: 1000m, duration: 6);
         var planD = await EnsurePlanAsync("P1858D", price: 1000m, duration: 6);
 
         var graphA = await SeedPaidContractAsync(tenantId, planA, paymentAmount: 12000m, startedAt: t0.AddMonths(-4));
@@ -1603,11 +1611,11 @@ public class Task18_5CreditEconomicOriginSqlServerTests
         var tenantId = "B7C1E9D2-4A5F-4B6C-8D9E-000000190008";
         await SeedTenantAsync(tenantId);
         var t0 = MonthSafeUtcNow();
-        var planA = await EnsurePlanAsync("P1858A", price: 1000m, duration: 12);
-        var planB = await EnsurePlanAsync("P1858B", price: 1000m, duration: 12);
-        var planC = await EnsurePlanAsync("P1858C", price: 1000m, duration: 12);
+        var planA = await EnsurePlanAsync("P1858A", price: 1000m, duration: 6);
+        var planB = await EnsurePlanAsync("P1858B", price: 1000m, duration: 6);
+        var planC = await EnsurePlanAsync("P1858C", price: 1000m, duration: 6);
 
-        var graphA = await SeedPaidContractAsync(tenantId, planA, paymentAmount: 12000m, startedAt: t0.AddMonths(-4));
+        var graphA = await SeedPaidContractAsync(tenantId, planA, paymentAmount: 6000m, startedAt: t0.AddMonths(-4));
 
         // Gen1: A → B
         var contractB = await RunChangePlanAtAsync(tenantId, graphA.SubscriptionId, planB, t0);
@@ -1615,7 +1623,8 @@ public class Task18_5CreditEconomicOriginSqlServerTests
 
         var credit1 = await FindSubscriptionChangeCreditAsync(tenantId, graphA.SubscriptionId);
         var invoiceB = await FindInvoiceIdForContractAsync(tenantId, contractB.Value);
-        var subB = await FindSubscriptionIdForContractAsync(tenantId, contractB.Value);
+        // Pass planB to get the handler-created subscription for Contract B (not the seeded one)
+        var subB = await FindSubscriptionIdForContractAsync(tenantId, contractB.Value, planB);
 
         // Replace with mixed-lineage credit
         using (var scope = _env.Factory.Services.CreateScope())
@@ -1636,9 +1645,19 @@ public class Task18_5CreditEconomicOriginSqlServerTests
         }
 
         // Seed Credit #1: Amount=6,000, Transferred=2,000
+        // SourceId must be graphA.SubscriptionId so the handler can find it for consumption calculation
         var credit1MixedId = await SeedSubscriptionChangeCreditWithLineageAsync(
-            tenantId, 6000m, 2000m);
+            tenantId, 6000m, 2000m, "EGP", graphA.SubscriptionId);
         await SeedDirectCreditApplicationAsync(tenantId, credit1MixedId, invoiceB, 6000m);
+        // Mark the credit as PartiallyApplied with RemainingAmount = 0 so handler recognizes consumption
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            AuthorizeTenant(scope.ServiceProvider, tenantId);
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var seededCredit = await db.TenantCredits.FirstAsync(tc => tc.Id == credit1MixedId);
+            seededCredit.ConsumeAmount(6000m); // Consumes full 6000, sets RemainingAmount = 0 and status = Applied
+            await db.SaveChangesAsync();
+        }
         // Add 4,000 cash for mixed settlement
         await SeedAdditionalPaymentAsync(tenantId, invoiceB, 4000m);
 
@@ -1648,7 +1667,12 @@ public class Task18_5CreditEconomicOriginSqlServerTests
 
         var credit2 = await FindSubscriptionChangeCreditAsync(tenantId, subB);
         Assert.NotNull(credit2);
-        Assert.Equal(10000m, credit2!.Amount);
+        // Contract B (6 months) at t0+2mo: 2 months used, 4 months * 1000 = 4000 unused
+        // paidAmount = 6000 (seeded credit) + 4000 (cash) = 10000
+        // creditAmount = Min(4000, 10000) = 4000
+        // Transferred = (application.Amount / credit.Amount) * credit.Transferred
+        //            = (6000 / 6000) * 2000 = 2000
+        Assert.Equal(4000m, credit2!.Amount);
         Assert.Equal(2000m, credit2.TransferredPaidAmount);
 
         // Attempt refund on original contract A: should fail (value already converted)

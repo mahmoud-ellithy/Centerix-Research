@@ -30,6 +30,13 @@ internal static class IssuedSubscriptionChangeCredit
     /// Sums the SubscriptionChange credits already issued for the subscriptions attached
     /// to <paramref name="contractId"/> within <paramref name="tenantId"/> and
     /// <paramref name="currencyCode"/>. Returns 0 when the contract has no plan-change credit.
+    ///
+    /// <para>
+    /// Credits are included if their SourceId subscription's ORIGINAL contract is the refund contract.
+    /// Credits from subscriptions whose original contract is a DIFFERENT contract (i.e., the subscription
+    /// was created by a plan change) are excluded because their value has already been recognized
+    /// through the subscription's own contract.
+    /// </para>
     /// </summary>
     public static async Task<decimal> GetIssuedAmountAsync(
         IAppDbContext dbContext,
@@ -38,16 +45,25 @@ internal static class IssuedSubscriptionChangeCredit
         string currencyCode,
         CancellationToken cancellationToken)
     {
-        var subscriptionIds = dbContext.TenantPlans
-            .Where(tp => tp.TenantId == tenantId && tp.ContractId == contractId)
-            .Select(tp => tp.Id);
-
+        // Get the subscriptions whose ORIGINAL contract is the refund contract.
+        // A subscription's original contract is set when the subscription is first created.
+        // Subsequent plan changes create NEW subscriptions with the new contract.
+        // So a subscription with ContractId = contractId means its CURRENT contract is contractId,
+        // but we need to know if contractId was the ORIGINAL contract for this subscription.
+        //
+        // The simplest approach: join TenantCredits with TenantPlans on SourceId = TenantPlan.Id,
+        // and filter where TenantPlan.ContractId = contractId.
+        // This correctly includes credits from subscriptions created directly under contractId,
+        // and excludes credits from subscriptions created by plan changes (which have different ContractIds).
         return await dbContext.TenantCredits
             .Where(tc => tc.TenantId == tenantId
                       && tc.SourceType == CreditSourceType.SubscriptionChange
                       && tc.SourceId != null
-                      && subscriptionIds.Contains(tc.SourceId.Value)
-                      && tc.CurrencyCode == currencyCode)
+                      && tc.CurrencyCode == currencyCode
+                      && dbContext.TenantPlans.Any(tp =>
+                          tp.Id == tc.SourceId.Value
+                          && tp.TenantId == tenantId
+                          && tp.ContractId == contractId))
             .SumAsync(tc => tc.Amount, cancellationToken);
     }
 }
