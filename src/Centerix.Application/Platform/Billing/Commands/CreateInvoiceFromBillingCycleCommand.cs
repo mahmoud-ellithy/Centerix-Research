@@ -52,7 +52,7 @@ public class CreateInvoiceFromBillingCycleHandler(
         var taxAmount = 0m; // Tax calculation will be added in a later task
         var totalAmount = subscription.SnapshotMonthlyCharge * cycleDurationMonths; // Actual charge = monthly charge × duration
 
-        var invoiceNumber = $"INV-{now:yyyyMMdd-HHmmss}";
+        var invoiceNumber = $"INV-{now:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
 
         var invoiceResult = Invoice.Create(
             Guid.NewGuid(),
@@ -70,15 +70,19 @@ public class CreateInvoiceFromBillingCycleHandler(
         if (!invoiceResult.IsSuccess)
             return invoiceResult.Errors!;
 
+        // Mark billing cycle as invoiced BEFORE tracking the invoice: BillingCycle.MarkInvoiced()
+        // only accepts Draft, so an already-invoiced cycle must fail without leaving an
+        // orphan Invoice attached to the change tracker (it would be persisted by the next
+        // SaveChangesAsync on the same unit of work). This also guarantees at most one
+        // invoice per BillingCycle (UX_Invoices_InvoiceNumber + Draft-only transition).
+        var markInvoiced = billingCycle.MarkInvoiced();
+        if (!markInvoiced.IsSuccess)
+            return markInvoiced.Errors!;
+
         dbContext.Invoices.Add(invoiceResult.Value);
 
         // Stamp tenant ID before save (InMemory provider doesn't run interceptors)
         dbContext.StampAddedTenantIds(currentTenant.TenantId!);
-
-        // Mark billing cycle as invoiced
-        var markInvoiced = billingCycle.MarkInvoiced();
-        if (!markInvoiced.IsSuccess)
-            return markInvoiced.Errors!;
 
         await dbContext.SaveChangesAsync(cancellationToken);
 

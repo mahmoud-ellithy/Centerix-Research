@@ -499,14 +499,26 @@ public class Contract : AuditableEntity<Guid>
     /// <summary>
     /// Builds a subscription snapshot from this contract's own data.
     /// No Plan queries — all values are authoritative snapshots on the Contract.
-    /// MonthlyCharge = GrossAmount / DurationMonths (actual monthly charge after discount).
+    /// MonthlyCharge = ContractedAmount / DurationMonths (the actual monthly charge AFTER
+    /// the contract discount — the amount the tenant really owes per billed month).
     /// </summary>
+    /// <remarks>
+    /// Task 21.2 correction: this previously divided <see cref="GrossAmount"/> (the PRE-discount
+    /// base), which made SnapshotMonthlyCharge equal the list price and therefore silently
+    /// dropped the contract discount from every BillingCycle invoice
+    /// (discount = (SnapshotPrice - SnapshotMonthlyCharge) × duration evaluated to 0).
+    /// GrossAmount = ContractedAmount + DiscountAmount, so dividing GrossAmount by the duration
+    /// cannot yield the authoritative charge. See
+    /// docs/TASK-21.2-BILLING-CYCLE-INVOICE-LIFECYCLE-INTEGRITY.md.
+    /// </remarks>
     public SubscriptionSnapshot GetSubscriptionSnapshot()
     {
-        // Calculate actual monthly charge: GrossAmount / DurationMonths
-        // For no-discount contracts: GrossAmount = ContractedAmount, so MonthlyCharge = ContractedAmount / DurationMonths
-        // For discounted contracts: GrossAmount = ContractedAmount + DiscountAmount, so MonthlyCharge = (ContractedAmount + DiscountAmount) / DurationMonths
-        var monthlyCharge = DurationMonths > 0 ? GrossAmount / DurationMonths : 0m;
+        // Authoritative post-discount monthly charge: ContractedAmount / DurationMonths.
+        // No discount: ContractedAmount == GrossAmount == MonthlyListPrice × DurationMonths,
+        //             so MonthlyCharge == MonthlyListPrice == Subscription.SnapshotPrice.
+        // Discounted:  MonthlyCharge is the discounted monthly rate, so the BillingCycle
+        //             invoice surfaces the snapshot discount exactly once.
+        var monthlyCharge = DurationMonths > 0 ? ContractedAmount / DurationMonths : 0m;
 
         return new SubscriptionSnapshot(
             MonthlyListPrice,
