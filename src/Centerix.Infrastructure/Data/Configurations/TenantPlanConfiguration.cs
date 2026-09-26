@@ -18,8 +18,12 @@ public class TenantPlanConfiguration : IEntityTypeConfiguration<TenantPlan>
             .IsRowVersion();
 
         // Commercial snapshot — frozen at creation/renewal, never derived from the live Plan.
-        builder.Property(tp => tp.SnapshotPrice).HasPrecision(10, 2);
-        builder.Property(tp => tp.SnapshotMonthlyCharge).HasPrecision(10, 2);
+        // Precision: decimal(18,6) provides sufficient precision for division results.
+        // Example: 10,000 / 12 = 833.333333... needs 6 decimal places to avoid rounding drift.
+        // With decimal(18,6): 833.333333 × 12 = 9,999.999996 (minimal drift within tolerance).
+        // For scenarios requiring exact totals, use Contract.ContractedAmount as the authoritative value.
+        builder.Property(tp => tp.SnapshotPrice).HasPrecision(18, 6);
+        builder.Property(tp => tp.SnapshotMonthlyCharge).HasPrecision(18, 6);
         builder.Property(tp => tp.SnapshotCurrency)
             .HasMaxLength(3)
             .IsRequired();

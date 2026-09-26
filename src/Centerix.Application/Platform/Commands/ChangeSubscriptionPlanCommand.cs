@@ -368,25 +368,30 @@ public class ChangeSubscriptionPlanHandler(
             var subscription = subscriptionResult.Value;
             subscription.LinkToContract(contract.Id);
 
+            // CRITICAL: BillingCycle period represents the PAID billing period only.
+            // Use BaseEndsAtUtc (DurationMonths) NOT EffectiveEndsAtUtc (DurationMonths + BonusMonths).
+            // BonusMonths are FREE entitlement and must NOT increase billed months.
+            // This ensures Invoice.TotalAmount == Contract.ContractedAmount regardless of bonus months.
             var billingCycleResult = BillingCycle.Create(
                 id: Guid.NewGuid(),
                 tenantId: oldSubscription.TenantId,
                 subscriptionId: subscription.Id,
                 periodStart: startsAt,
-                periodEnd: subscription.EffectiveEndsAtUtc);
+                periodEnd: subscription.BaseEndsAtUtc);
 
             if (!billingCycleResult.IsSuccess)
                 return billingCycleResult.Errors!;
 
             var billingCycle = billingCycleResult.Value;
 
-            // ── Invoice amounts MUST derive from the authoritative Offer/Contract ──
+            // Invoice amounts MUST derive from the authoritative Offer/Contract ──
             // The Offer engine (PromotionCalculationService) is the single source of truth:
             //   - BaseAmount: tier price when PricingTier applies, else MonthlyPrice × Duration
             //   - DiscountAmount: promotion discount applied to BaseAmount
             //   - FinalAmount: BaseAmount - DiscountAmount
             // The Contract.ContractedAmount is set to FinalAmount above.
             // Invoice.TotalAmount MUST equal Contract.ContractedAmount (no independent reconstruction).
+            // Invoice PeriodEnd also uses BaseEndsAtUtc to match BillingCycle period semantics.
             var subtotal = calc.BaseAmount;
             var discountAmount = calc.DiscountAmount;
             var taxAmount = 0m;
@@ -398,7 +403,7 @@ public class ChangeSubscriptionPlanHandler(
                 id: Guid.NewGuid(),
                 invoiceNumber: invoiceNumber,
                 periodStart: DateOnly.FromDateTime(startsAt),
-                periodEnd: DateOnly.FromDateTime(subscription.EffectiveEndsAtUtc),
+                periodEnd: DateOnly.FromDateTime(subscription.BaseEndsAtUtc),
                 subtotal: subtotal,
                 discountAmount: discountAmount,
                 taxAmount: taxAmount,

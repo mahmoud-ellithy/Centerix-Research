@@ -374,12 +374,16 @@ public class RenewSubscriptionOfferHandler(
             subscription.LinkToContract(contract.Id);
 
             // ── Step 11: Create BillingCycle ──
+            // CRITICAL: BillingCycle period represents the PAID billing period only.
+            // Use BaseEndsAtUtc (DurationMonths) NOT EffectiveEndsAtUtc (DurationMonths + BonusMonths).
+            // BonusMonths are FREE entitlement and must NOT increase billed months.
+            // This ensures Invoice.TotalAmount == Contract.ContractedAmount regardless of bonus months.
             var billingCycleResult = BillingCycle.Create(
                 id: Guid.NewGuid(),
                 tenantId: oldSubscription.TenantId,
                 subscriptionId: subscription.Id,
                 periodStart: startsAt,
-                periodEnd: subscription.EffectiveEndsAtUtc);
+                periodEnd: subscription.BaseEndsAtUtc);
 
             if (!billingCycleResult.IsSuccess)
                 return billingCycleResult.Errors!;
@@ -398,11 +402,12 @@ public class RenewSubscriptionOfferHandler(
 
             var invoiceNumber = $"INV-{now:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
 
+            // Invoice PeriodEnd also uses BaseEndsAtUtc to match BillingCycle period semantics.
             var invoiceResult = Invoice.Create(
                 id: Guid.NewGuid(),
                 invoiceNumber: invoiceNumber,
                 periodStart: DateOnly.FromDateTime(startsAt),
-                periodEnd: DateOnly.FromDateTime(subscription.EffectiveEndsAtUtc),
+                periodEnd: DateOnly.FromDateTime(subscription.BaseEndsAtUtc),
                 subtotal: subtotal,
                 discountAmount: discountAmount,
                 taxAmount: taxAmount,
