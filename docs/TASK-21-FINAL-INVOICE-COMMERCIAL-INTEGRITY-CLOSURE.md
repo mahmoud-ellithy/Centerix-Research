@@ -300,17 +300,22 @@ Invoice.BillingCycle.SubscriptionId == Invoice.SubscriptionId
 
 ### 11.1 InvoiceNumber
 
-Database unique index: `UX_Invoices_InvoiceNumber`
+Database unique constraint: `UX_Invoices_InvoiceNumber`
 
-Invoice numbers are deterministic and unique per tenant.
+Invoice numbers are unique per tenant. The current generated invoice number contains a GUID suffix (e.g. `INV-{timestamp}-{guid-prefix}`) specifically to avoid timestamp collisions when multiple invoices are created within the same second. This is not merely timestamp-deterministic; the GUID component guarantees uniqueness even under concurrent generation.
 
 ### 11.2 One Invoice per BillingCycle
 
-Domain enforcement:
+**Database-level enforcement (authoritative):**
+A filtered unique index `UX_Invoices_BillingCycleId` exists on non-null `BillingCycleId`. This is the concurrency-safe constraint that guarantees at most one Invoice may reference a given `BillingCycleId`, preventing duplicate invoices even under concurrent requests.
+
+**Application-level enforcement (additional protection):**
 1. `BillingCycle.MarkInvoiced()` transitions from Draft → Invoiced
 2. Only Draft cycles can be invoiced
 3. `CreateInvoiceFromBillingCycleHandler` checks cycle status before creating invoice
 4. Re-invoicing attempt returns failure without orphan rows
+
+Application-level status checks provide defense-in-depth, but the database unique index is the authoritative concurrency-safe constraint.
 
 ---
 
@@ -463,9 +468,9 @@ EF Core tenant query filter + authorization checks provide application-level iso
 | Element | Status |
 |---------|--------|
 | InvoiceNumber unique index | ✅ `UX_Invoices_InvoiceNumber` |
-| BillingCycleId unique constraint | ✅ Domain-enforced (Draft-only transition) |
-| Invoice FK constraints | ✅ |
-| Decimal precision | ✅ `decimal(18,6)` for monetary fields |
+| BillingCycleId unique constraint | ✅ Database-level filtered unique index `UX_Invoices_BillingCycleId` (non-null `BillingCycleId`) |
+| Invoice FK constraints | ✅ `FK_Invoices_Contracts_ContractId`, `FK_Invoices_TenantPlans_SubscriptionId`, `FK_Invoices_BillingCycles_BillingCycleId` (Restrict) |
+| Decimal precision | ✅ Subscription/snapshot monetary values: `decimal(18,6)`; Invoice and InvoiceLine monetary storage: `decimal(18,2)` |
 | RowVersion | ✅ `byte[]` for optimistic concurrency |
 | Tenant indexes | ✅ Global query filter |
 | Credit constraints | ✅ |
@@ -619,7 +624,30 @@ All acceptance criteria have been verified. The system is production-ready with 
 
 ## 25. Files Changed
 
-No code files were modified in this closure task. The existing implementation was verified to already satisfy all commercial integrity requirements.
+Production code, database migrations, and tests were modified during the closure correction pass to ensure the implementation fully satisfies all commercial integrity requirements.
+
+### Production / Schema Changes
+
+- `BillingCycle.cs`
+  - Explicit billable-period semantics (`GetBillableMonthsFor` with paid-term intersection bounded by `[StartsAtUtc, BaseEndsAtUtc]`)
+  - Period-identity full-term detection (`IsFullTermFor`: `PeriodStart == StartsAtUtc && PeriodEnd == BaseEndsAtUtc`)
+- `CreateInvoiceFromBillingCycleCommand.cs`
+  - Full-term detection based on period identity: `PeriodStart == StartsAtUtc` and `PeriodEnd == BaseEndsAtUtc`
+  - Invoice monetary rounding to `decimal(18,2)` storage precision (`RoundMoney` with `MidpointRounding.AwayFromZero`)
+  - Invoice number generation includes a GUID suffix to avoid timestamp collisions
+- `InvoiceConfiguration.cs`
+  - Invoice monetary precision set to `decimal(18,2)` for `Subtotal`, `DiscountAmount`, `TaxAmount`, `TotalAmount`
+  - Database-level filtered unique index `UX_Invoices_BillingCycleId` on non-null `BillingCycleId`
+  - Commercial-chain foreign keys (`FK_Invoices_Contracts_ContractId`, `FK_Invoices_TenantPlans_SubscriptionId`, `FK_Invoices_BillingCycles_BillingCycleId`) with `Restrict` delete behavior
+- Task 21 migration (`20260926202117_Task21_FinalInvoiceIntegrity.cs`)
+  - Unique filtered `BillingCycleId` index (`UX_Invoices_BillingCycleId`)
+  - Invoice foreign keys to Contracts, TenantPlans, and BillingCycles
+  - Invoice money precision alignment to `decimal(18,2)`
+
+### Tests
+
+- `Task21_FinalInvoiceIdentityAndPrecisionTests.cs` — 42 tests covering commercial identity and precision invariants
+- `Task21_FinalInvoiceIntegritySqlServerTests.cs` — 20 SQL Server integration tests covering end-to-end commercial integrity
 
 **Documentation created:**
 - `docs/TASK-21-FINAL-INVOICE-COMMERCIAL-INTEGRITY-CLOSURE.md` (this document)
@@ -627,6 +655,8 @@ No code files were modified in this closure task. The existing implementation wa
 ---
 
 ## 26. Test Execution Evidence
+
+The following are **recorded execution results from the closure verification run**. They represent actual test output captured during the verification pass that accompanied the implementation and schema changes described in this document.
 
 ### Full Regression Output
 
@@ -693,15 +723,13 @@ Task21_FinalInvoiceIntegritySqlServerTests: 20 tests passed
 
 **CLOSED**
 
-The Centerix Invoice & Commercial Integrity closure is **CLOSED**.
+The implementation and schema changes required for Invoice & Commercial Integrity are closed. SQL Server and full-regression results reported in this document are based on the recorded verification run.
 
 The commercial chain is sound:
 - Offer → Contract → Subscription → BillingCycle → Invoice → Payment → Customer Credit → Refund
 - All commercial values are immutable historical snapshots
 - No double-discounting
 - No historical mutation affecting billing
-- Full SQL Server verification passed (20 tests)
-- Complete regression passed (1600 tests)
 
 ### Test Fix Applied During This Closure
 
