@@ -414,7 +414,7 @@ Contract.PaymentTerms == FullUpfront
     → CreateInstallmentScheduleCommand is rejected for this contract
 ```
 
-Schedule creation is an explicit lifecycle step (Task A decides the precise trigger: at contract activation, at first invoice issuance, or at first customer payment). The reverse direction is not an invariant: an existing installment schedule does NOT determine `PaymentTerms`, and a missing schedule does NOT determine `PaymentTerms` either.
+Schedule creation is an explicit lifecycle step. The exact trigger (contract activation, first invoice, first payment, or another lifecycle point) is **NOT** decided by this design baseline. It is **deferred to the installment-schedule integration task**. What this baseline does lock is the directional invariant in §E.2 and the directional forbiddenness in §E.2 — not the timing. The reverse direction is not an invariant: an existing installment schedule does NOT determine `PaymentTerms`, and a missing schedule does NOT determine `PaymentTerms` either.
 
 No `Installment` schema, validation, or lifecycle change is required.
 
@@ -671,14 +671,38 @@ Plan (catalog) → Offer (immutable snapshot)
 
 ## 2. Final PaymentTerms Semantics
 
+```text
+Offer.PaymentTerms is an explicit commercial decision.
+
+Contract.PaymentTerms is an immutable snapshot of the accepted Offer.PaymentTerms.
+
+PromotionType does not determine PaymentTerms.
+
+Benefit eligibility may depend on PaymentTerms through the benefit's own EligibilityRule.
+
+Installment rows never determine or rewrite PaymentTerms.
+```
+
 * `enum PaymentTerms { FullUpfront = 0, Installments = 1 }`.
-* `Offer.PaymentTerms` is set **explicitly** by the platform operator at Offer calculation time. **It is NOT inferred from `PromotionType`** and **NOT inferred from any other commercial field**. All four combinations (`PayForXMonths | PromotionalPrice`) × (`FullUpfront | Installments`) are valid.
-* `Contract.PaymentTerms` is **snapshotted from Offer at Contract creation and is immutable thereafter**.
+* `Offer.PaymentTerms` is set **explicitly** by the platform operator at Offer calculation time. **It is NOT inferred from `PromotionType`** and **NOT inferred from any other commercial field**. All six combinations are valid:
+
+  ```text
+  PayForXMonths   + FullUpfront
+  PayForXMonths   + Installments
+  PromotionalPrice + FullUpfront
+  PromotionalPrice + Installments
+  BonusMonths      + FullUpfront
+  BonusMonths      + Installments
+  ```
+
+* Whether a particular bonus requires upfront payment is expressed by that benefit's `EligibilityRule` (e.g. `PaymentTermsEq(FullUpfront)`). It is **not** a property of `PromotionType` and **not** a global rule for all `BonusMonths`.
+* `Contract.PaymentTerms` is **snapshotted from `Offer` at Contract creation and is immutable thereafter**.
 * **Directional invariant only**:
-  * `PaymentTerms == Installments ⇒ installment schedule is required before first invoice issuance`.
-  * `PaymentTerms == FullUpfront ⇒ no installment schedule may be created`.
+  * `PaymentTerms == Installments ⇒ installment schedule is required before the first invoice for that contract can be issued`.
+  * `PaymentTerms == FullUpfront ⇒ no installment schedule may be created for that contract`.
   * The reverse direction is NOT an invariant. The installment schedule does not determine `PaymentTerms`, and `PaymentTerms` is not changed by payment execution events.
 * **Customer behavior (early payment, late payment, full settlement) operates on financial execution and cannot alter `PaymentTerms`.**
+* **The exact lifecycle trigger for installment-schedule creation is NOT decided by this baseline** — it is **deferred to the installment-schedule integration task** (see §N.3).
 
 ## 3. Final Commercial Benefit Model
 
@@ -730,7 +754,7 @@ No `Earned`, `Consumed`, or `Withdrawn` states.
 ## 7. Final Installment Relationship
 
 * `Installment` remains the authoritative payment obligation / entitlement-period model. No schema, validation, or lifecycle change.
-* `Installment` schedule creation is triggered only when `Contract.PaymentTerms == Installments` and only at the lifecycle point chosen in Task A (genuinely unresolved — see §N).
+* `Installment` schedule creation is triggered only when `Contract.PaymentTerms == Installments`. **The exact lifecycle trigger (activation, first invoice, first payment, or other) is NOT decided by this baseline — it is deferred to the installment-schedule integration task** (see §N).
 * `Contract.PaymentTerms == FullUpfront` rejects any attempt to create an installment schedule for that contract.
 * `Installment` is the **financial execution**. It does NOT determine `Contract.PaymentTerms`.
 
@@ -793,12 +817,12 @@ These cannot be determined from the repository and require explicit business-own
 
 2. **Exact payment schedule structure for `Installments`.** Today `CreateInstallmentScheduleCommand` accepts arbitrary `InstallmentScheduleItem` rows (custom amounts, custom due dates, custom covered periods) and supports equal-count schedules implicitly. The open question is: should the platform enforce any canonical structure (e.g. equal amounts, contiguous months aligned with billing cycle), or should it continue to accept arbitrary operator-supplied schedules? **The repository already supports arbitrary schedules; the question is whether any policy should constrain them.**
 
-3. **Exact timing of installment schedule creation.** When is `CreateInstallmentScheduleCommand` invoked for a `Contract.PaymentTerms == Installments` contract?
+3. **Exact timing of installment schedule creation — DEFERRED to the installment-schedule integration task.** When is `CreateInstallmentScheduleCommand` invoked for a `Contract.PaymentTerms == Installments` contract?
    * at Contract activation,
    * at first invoice issuance,
    * at first customer payment,
    * or at another lifecycle point?
-   This affects invoice / installment integration tests and the order of side-effects in `CreateSubscriptionFromContractCommand`. **No assumption is made here.**
+   This affects invoice / installment integration tests and the order of side-effects in `CreateSubscriptionFromContractCommand`. **The design baseline does NOT decide this.** It is deferred to the installment-schedule integration task. **No assumption is made here.**
 
 4. **Catalog-level expression of bonus rules.** Should `Promotion.BonusRules` (or equivalent) exist as a first-class catalog entity, so the bonus rule is configured once at the promotion level and inherited by all `FreeMonthsBenefit` rows created from that promotion? Or should each `FreeMonthsBenefit` row carry its own `EligibilityRule` independently? The `Promotion` catalog does not currently model bonus rules at all; this decision shapes whether T9 introduces `Promotion.BonusRules` or leaves rules per-row. **No assumption is made here.**
 
