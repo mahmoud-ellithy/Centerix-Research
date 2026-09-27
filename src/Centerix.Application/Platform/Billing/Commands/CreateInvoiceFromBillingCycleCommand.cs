@@ -13,12 +13,21 @@ using Microsoft.EntityFrameworkCore;
 /// Creates an invoice from a BillingCycle, deriving amounts from the Subscription/Contract snapshot.
 /// Client cannot submit arbitrary financial values; they are computed from the commercial snapshot.
 ///
-/// COMMERCIAL INTEGRITY (Task 21.2.1):
-/// - TotalAmount is authoritative: for full-term cycles (BillingCycle covers entire paid term),
-///   Invoice.TotalAmount MUST equal Contract.ContractedAmount (no rounding drift).
-/// - For full-term cycles, all invoice amounts use Contract values (GrossAmount, DiscountAmount, ContractedAmount).
-/// - For partial cycles, amounts are calculated from Subscription snapshot values.
-/// - BonusMonths are excluded from the billing period; they are free entitlement only.
+/// COMMERCIAL INTEGRITY (Task 21 final closure):
+/// - FULL-TERM cycles are identified by PERIOD IDENTITY
+///   (PeriodStart == StartsAtUtc && PeriodEnd == BaseEndsAtUtc), never by duration equality —
+///   a different cycle can coincide with the same number of months.
+/// - For a full-term cycle, Invoice amounts are the authoritative Contract values:
+///   Subtotal = GrossAmount, DiscountAmount = DiscountAmount, TotalAmount = ContractedAmount.
+/// - For a partial cycle, amounts derive exclusively from the immutable Subscription snapshot
+///   scaled by the billable calendar months of the cycle period (BillingCycle.GetBillableMonthsFor):
+///   billable time is bounded by the paid term [StartsAtUtc, BaseEndsAtUtc], a later (renewal)
+///   term bills its own period, and free time (pre-start or bonus months only) bills nothing.
+/// - Money is rounded once, at invoice derivation, to the invoice storage precision
+///   (decimal(18,2), MidpointRounding.AwayFromZero) so the stored invoice reconciles exactly:
+///   TotalAmount = Subtotal − DiscountAmount + TaxAmount.
+/// - BonusMonths are free entitlement only: time from BaseEndsAtUtc onwards (EffectiveEndsAtUtc)
+///   is never counted as billable and can never increase an invoice.
 /// </summary>
 public record CreateInvoiceFromBillingCycleCommand(Guid BillingCycleId) : IRequest<Result<Created>>;
 
@@ -27,6 +36,16 @@ public class CreateInvoiceFromBillingCycleHandler(
     ICurrentTenant currentTenant,
     TimeProvider timeProvider) : IRequestHandler<CreateInvoiceFromBillingCycleCommand, Result<Created>>
 {
+    /// <summary>
+    /// Invoice storage precision is decimal(18,2) (2 decimal places — the Centerix monetary
+    /// policy: every stored amount on the commercial chain is decimal(n,2)); rounding happens
+    /// here, once, before the invoice is constructed, using the same midpoint rule as the
+    /// promotion engine (MidpointRounding.AwayFromZero) so subtotal/discount/total reconcile
+    /// exactly on store.
+    /// </summary>
+    private static decimal RoundMoney(decimal value)
+        => Math.Round(value, 2, MidpointRounding.AwayFromZero);
+
     public async Task<Result<Created>> Handle(
         CreateInvoiceFromBillingCycleCommand request,
         CancellationToken cancellationToken)
@@ -46,40 +65,47 @@ public class CreateInvoiceFromBillingCycleHandler(
         var contract = subscription.Contract;
         var now = timeProvider.GetUtcNow().UtcDateTime;
 
-        // Calculate billing cycle duration in calendar months
-        // Note: BillingCycle.PeriodEnd is based on BaseEndsAtUtc (paid term only, excluding bonus months)
-        var cycleDurationMonths = ((billingCycle.PeriodEnd.Year - billingCycle.PeriodStart.Year) * 12) +
-                                   (billingCycle.PeriodEnd.Month - billingCycle.PeriodStart.Month);
+        // ── Full-term identity (CRITICAL) ────────────────────────────────────────────────
+        // A cycle is full-term ONLY when its period IS the paid term of this subscription
+        // ([StartsAtUtc, BaseEndsAtUtc]). Comparing month counts is not an identity test:
+        // a later 12-month cycle would otherwise masquerade as the contract's full term.
+        var isFullTerm = contract is not null && billingCycle.IsFullTermFor(subscription);
 
-        if (cycleDurationMonths <= 0)
-            cycleDurationMonths = 1; // minimum 1 month for partial cycles
-
-        // Determine invoice amounts based on whether this is a full-term billing cycle.
-        // For full-term cycles (covers entire paid term), use Contract as the authoritative source.
-        // For partial cycles, calculate from Subscription snapshot values.
         decimal subtotal;
         decimal discountAmount;
         decimal taxAmount = 0m; // Tax calculation will be added in a later task
         decimal totalAmount;
 
-        if (contract != null && cycleDurationMonths == subscription.DurationMonths)
+        if (isFullTerm)
         {
-            // Full-term billing cycle: use Contract values as the authoritative source.
-            // This ensures Invoice.TotalAmount == Contract.ContractedAmount exactly, with no rounding drift.
-            subtotal = contract.GrossAmount;
-            discountAmount = contract.DiscountAmount;
-            totalAmount = contract.ContractedAmount;
+            // Full-term: authoritative Contract values — the historical commercial result is
+            // used verbatim and is NEVER recomputed from current catalog data.
+            // Contract guarantees ContractedAmount = GrossAmount − DiscountAmount, so the
+            // invoice arithmetic identity holds at storage precision.
+            subtotal = RoundMoney(contract!.GrossAmount);
+            discountAmount = RoundMoney(contract.DiscountAmount);
+            totalAmount = RoundMoney(contract.ContractedAmount);
         }
         else
         {
-            // Partial-term billing cycle: calculate from Subscription snapshot.
-            // For display: gross monthly price × duration
-            subtotal = subscription.SnapshotPrice * cycleDurationMonths;
-            // Discount: difference between list price and monthly charge, scaled by duration
-            discountAmount = (subscription.SnapshotPrice - subscription.SnapshotMonthlyCharge) * cycleDurationMonths;
-            // Total charge: monthly charge × duration
-            // With decimal(18,6) precision, drift is minimized (e.g., 833.333333 × 12 = 9,999.999996).
-            totalAmount = subscription.SnapshotMonthlyCharge * cycleDurationMonths;
+            // Partial: immutable Subscription snapshot only (no Plan/Promotion/PricingTier reads),
+            // scaled by the billable calendar months of THIS period. Billable time is bounded by
+            // the paid term [StartsAtUtc, BaseEndsAtUtc]: time before the start and bonus time are
+            // never billed, a later (renewal) term is billed on its own period, and a cycle that
+            // holds only free time is reported explicitly instead of becoming a one-month invoice.
+            var billableMonths = billingCycle.GetBillableMonthsFor(subscription);
+            if (!billableMonths.IsSuccess)
+                return billableMonths.Errors!;
+
+            var months = billableMonths.Value;
+
+            // Display gross: list price × billable months.
+            subtotal = RoundMoney(subscription.SnapshotPrice * months);
+            // The snapshot discount only, applied once for the same number of months.
+            discountAmount = RoundMoney((subscription.SnapshotPrice - subscription.SnapshotMonthlyCharge) * months);
+            // Derived from the already-rounded components so the stored invoice reconciles
+            // exactly: TotalAmount = Subtotal − DiscountAmount + TaxAmount.
+            totalAmount = subtotal - discountAmount + taxAmount;
         }
 
         var invoiceNumber = $"INV-{now:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";

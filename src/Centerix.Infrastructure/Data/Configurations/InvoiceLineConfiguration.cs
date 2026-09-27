@@ -37,13 +37,16 @@ public class InvoiceLineConfiguration : IEntityTypeConfiguration<InvoiceLine>
         builder.Property(il => il.Quantity)
             .IsRequired();
 
+        // Task 21 (final closure, requirement 16): line money is decimal(18,2) because the
+        // lines are the components of Invoice.Subtotal, which is decimal(18,2). A narrower
+        // line would make Subtotal representable while its own components were not.
         builder.Property(il => il.UnitPrice)
-            .HasPrecision(10, 2);
+            .HasPrecision(18, 2);
 
         builder.Property(il => il.ProratedDays);
 
         builder.Property(il => il.LineTotal)
-            .HasPrecision(10, 2);
+            .HasPrecision(18, 2);
 
         builder.HasOne(il => il.Invoice)
             .WithMany(i => i.InvoiceLines)

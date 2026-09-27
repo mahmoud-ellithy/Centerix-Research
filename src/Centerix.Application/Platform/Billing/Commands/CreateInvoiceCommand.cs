@@ -63,9 +63,12 @@ public class CreateInvoiceHandler(
             validatedSubscriptionId = request.SubscriptionId;
         }
 
-        // 4. Generate invoice number
+        // 4. Generate invoice number in the documented business format
+        //    INV-yyyyMMdd-HHmmss-XXXXXX. The random suffix is REQUIRED: the DB enforces a global
+        //    unique index (UX_Invoices_InvoiceNumber), so a timestamp-only number would collide
+        //    whenever two invoices are created in the same second (including across tenants).
         var invoiceNumber = string.IsNullOrWhiteSpace(request.InvoiceNumber)
-            ? $"INV-{DateTime.UtcNow:yyyyMMdd-HHmmss}"
+            ? $"INV-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}"
             : request.InvoiceNumber;
 
         // 5. Check for duplicate invoice number within tenant scope (INV-03)
