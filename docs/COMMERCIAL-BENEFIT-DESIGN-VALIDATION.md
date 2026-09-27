@@ -1,27 +1,28 @@
 # CENTERIX — COMMERCIAL BENEFIT DESIGN VALIDATION & FINAL BASELINE
 
-**Type:** Final design baseline for Task A onward. Supersedes the initial validation (`996237d`).
-**Scope:** Validate the `CommercialBenefit` / `PaymentTerms` / Benefit-Lifecycle model against the actual repository state, apply the four corrections from the architecture review, and lock the final approved design.
-**Posture:** Documentation only. **No code, migrations, entities, controllers, or workflows were modified.**
-**Repository state at audit time:** `mahmoud-ellithy/Centerix-Research`, HEAD `6c6ed34` (audit commit `c92e170` already merged; initial validation `996237d` superseded by this document).
+**Type:** Final design baseline for Task A onward. Supersedes the initial validation (`996237d`) and the previous baseline (`aed6e6a`).
+**Scope:** Apply the two final corrections from the architecture review (no invented historical facts, no `PromotionType → PaymentTerms` inference), keep all four-level FreeMonths concepts and Commercial Benefit unification intact, and lock the implementation-ready baseline.
+**Posture:** Documentation only. **No code, migrations, entities, controllers, or tests were modified.**
+**Repository state at audit time:** `mahmoud-ellithy/Centerix-Research`, HEAD `6c6ed34`. Previous commits: `c92e170` (deep audit), `996237d` (initial validation), `aed6e6a` (first baseline correction) — both superseded by this document.
 
 ---
 
 ## A. Executive Summary
 
-The previous Deep Financial Domain Audit (`DEEP-FINANCIAL-DOMAIN-AUDIT-REPORT.md`, `c92e170`) and the initial validation (`996237d`) reached four core conclusions that this final baseline **confirms and refines**:
+The Deep Financial Domain Audit (`c92e170`), the initial validation (`996237d`), and the first baseline correction (`aed6e6a`) reached these conclusions that this final baseline **confirms**:
 
-1. **`Installment` is the authoritative payment obligation / entitlement period model.** No new `PaymentObligation` aggregate is required.
+1. **`Installment` is the authoritative payment obligation / entitlement-period model.** No new `PaymentObligation` aggregate is required.
 2. **`PaymentTerms` does not exist anywhere** in the codebase; full-tree grep confirms zero matches.
 3. **`BenefitEligibilityService` is a single global rule** used for every `ContractBenefit`. It conflates *eligibility* with *delivery*.
 4. **`OfferBenefit` rows are never populated in production today** — the promotion pipeline carries price only.
+5. **`Commercial Benefit` is the unified business concept** — Bonus Months and Physical Gifts are two manifestations of the same idea.
+6. **`FreeMonths` keeps four independent counters/states**: Commercial Entitlement, Eligibility, Grant, Application.
+7. **Eligibility is reversible; Fulfillment is monotonic; Application is idempotent.**
 
-This document applies **four corrections** to the initial validation, then locks the final baseline:
+This document applies the **two final corrections**:
 
-* **C1.** `PaymentTerms` is the **commercial contractual decision**; `Installment` is the **financial execution consequence**. The invariant is directional: `PaymentTerms = Installments → installment schedule is required` and `PaymentTerms = FullUpfront → no installment schedule`. The previous bidirectional "≡" invariant is removed.
-* **C2.** `Contract.BonusMonths` is **not** `Σ FreeMonthsBenefits.GrantedMonths`. The commercial entitlement row carries `EntitlementMonths`; the grant event carries `GrantedMonths`; the subscription carries an `AppliedMonths` counter that is the authoritative extension of `EffectiveEndsAtUtc`. The three are independent and must not be coupled by a sum invariant.
-* **C3.** Bonus Months and Physical Gifts are unified under the conceptual model `Commercial Benefit → {Pricing Benefit, Entitlement Benefit → {FreeMonths, PhysicalGift}}`. They share eligibility semantics but remain **separate persistence aggregates** because their fulfillment lifecycles genuinely diverge.
-* **C4.** Lifecycle is split into two orthogonal concerns: **Eligibility** (`NotEligible / Eligible`, reversible) and **Fulfillment** (`Pending / Granted / Delivered|Applied`, irreversible). No `Earned`, `Consumed`, or `Withdrawn` states.
+* **C1. `PaymentTerms` is NOT inferred from `PromotionType`.** A promotion does not inherently determine the payment mode. Whether an offer requires upfront payment is a rule of **that particular commercial offer** carried on `Offer.PaymentTerms`. All four combinations (`PayForXMonths | PromotionalPrice`) × (`FullUpfront | Installments`) must be representable.
+* **C2. No historical commercial facts are invented.** The repository is greenfield. Migrations establish schema and update existing fixtures explicitly; they do NOT infer `PaymentTerms` from installment rows and do NOT manufacture `FreeMonthsBenefit` rows from `Contract.BonusMonths > 0` without authoritative business evidence.
 
 ---
 
@@ -51,7 +52,7 @@ Invoked from a single handler [CheckBenefitEligibilityCommand.cs](file:///d:/New
 
 ### B.4 Installments — already authoritatively modeled
 
-Every prompt §13 requirement is present in [Installment.cs](file:///d:/New%20folder/Center%20Managements%20V1/Centerix/src/Centerix.Domain/Platform/Billing/Installments/Installment.cs#L21-L345) and [CreateInstallmentScheduleCommand.cs](file:///d:/New%20folder/Center%20Managements%20V1/Centerix/src/Centerix.Application/Platform/Billing/Installments/Commands/CreateInstallmentScheduleCommand.cs#L25-L270). The only gap is the missing `PaymentTerms` source-of-truth on Contract.
+Every requirement in the original prompt §13 is present in [Installment.cs](file:///d:/New%20folder/Center%20Managements%20V1/Centerix/src/Centerix.Domain/Platform/Billing/Installments/Installment.cs#L21-L345) and [CreateInstallmentScheduleCommand.cs](file:///d:/New%20folder/Center%20Managements%20V1/Centerix/src/Centerix.Application/Platform/Billing/Installments/Commands/CreateInstallmentScheduleCommand.cs#L25-L270). The schedule factory accepts arbitrary `InstallmentScheduleItem` rows (custom amounts, custom due dates, custom covered periods). No `Installment` schema, validation, or lifecycle change is required.
 
 ### B.5 Offers — promotion service carries price only
 
@@ -65,9 +66,11 @@ Every prompt §13 requirement is present in [Installment.cs](file:///d:/New%20fo
 * `PromotionalPrice` lowers total without extending term — Example C "12 for the price of 10".
 * `Plan.BonusMonths` is the only source of true "free months" — Example A "6 for the price of 5".
 
+`PromotionType` carries **price math only**. It does NOT determine `PaymentTerms` and does NOT determine benefit eligibility.
+
 ### B.7 Greenfield on benefits
 
-No seed data file, no production fixtures. Migrations end at `20260926221850_Task21_InvoiceMoneyPrecisionAlignment`. No historical `ContractBenefit` / `OfferBenefit` rows exist.
+No seed data file, no production fixtures. Migrations end at `20260926221850_Task21_InvoiceMoneyPrecisionAlignment`. No historical `ContractBenefit` / `OfferBenefit` rows exist. Tests construct the domain in-memory. **There is no production legacy customer population whose historical commercial entitlement must be reconstructed.**
 
 ---
 
@@ -92,25 +95,36 @@ No seed data file, no production fixtures. Migrations end at `20260926221850_Tas
 │   - OfferBenefits[]            │
 │     └ BenefitType=PhysicalGift │
 │       + EligibilityRule ◄── NEW│
+│     └ FreeMonthsBenefit snapshot │
+│       + EligibilityRule ◄── NEW│
 └──────────────┬─────────────────┘
                │  (only path to Contract)
                ▼
 ┌────────────────────────────────┐
 │ Contract        (immutable snapshot) │
 │   - DurationMonths             │
-│   - PaymentTerms ◄── NEW       │
-│   - BonusMonths (scalar; deprecated after FreeMonthsBenefit rollout)│
-│   - ContractedAmount           │
-│   - Benefits[]                 │
-│     └ ContractBenefit {        │
-│         BenefitType,           │
-│         ContractualValue,      │
-│         EligibilityRule ◄── NEW}│
-│   - FreeMonthsBenefits[] ◄── NEW navigation│
-│     └ EntitlementMonths (commercial entitlement)│
-│       + EligibilityRule ◄── NEW│
+│   - PaymentTerms ◄── NEW, snapshotted from Offer, immutable│
+│   - BonusMonths (legacy scalar; preserved unchanged)     │
+│   - ContractedAmount                                        │
+│   - Benefits[]                                               │
+│     └ ContractBenefit {                                     │
+│         BenefitType,                                         │
+│         ContractualValue,                                    │
+│         EligibilityRule ◄── NEW                              │
+│         EligibilityStatus                                    │
+│         FulfillmentStatus ◄── NEW                            │
+│       }                                                       │
+│   - FreeMonthsBenefits[] ◄── NEW navigation                  │
+│     └ FreeMonthsBenefit {                                    │
+│         EntitlementMonths (commercial entitlement, immutable) │
+│         EligibilityRule ◄── NEW                              │
+│         EligibilityStatus                                    │
+│         FulfillmentStatus ◄── NEW                            │
+│         GrantedAtUtc                                         │
+│         AppliedAtUtc                                         │
+│       }                                                       │
 └──────────────┬─────────────────┘
-               │  (Contract.GetSubscriptionSnapshot — schedule creation is a SEPARATE step)
+               │  (Contract.GetSubscriptionSnapshot)
                ▼
 ┌────────────────────────────────┐
 │ TenantPlan / Subscription      │
@@ -118,16 +132,16 @@ No seed data file, no production fixtures. Migrations end at `20260926221850_Tas
 │   - BonusMonths (applied counter; authoritative for EffectiveEndsAtUtc)│
 │   - StartsAtUtc, BaseEndsAtUtc │
 │   - EffectiveEndsAtUtc = Base + BonusMonths (calendar math)│
-│   - AppliedFreeMonthsBenefits[] ◄── NEW: which FreeMonthsBenefit rows have already been applied│
+│   - AppliedFreeMonthsBenefitIds[] ◄── NEW: which FreeMonthsBenefit rows have already been applied│
 └──────────────┬─────────────────┘
-               │  (Installment schedule is a separate lifecycle step driven by Contract.PaymentTerms == Installments)
+               │  (Installment schedule is a SEPARATE lifecycle step, created ONLY if Contract.PaymentTerms == Installments)
                ▼
 ┌────────────────────────────────┐
-│ Installment / Invoice / Payment / Refund / TenantCredit │
+│ Installment Schedule / Invoice / Payment / Refund / TenantCredit │
 └────────────────────────────────┘
 ```
 
-**Direction-of-truth correction:** `PaymentTerms` is the commercial decision on `Offer` and is snapshotted onto `Contract`. Installments are a *consequence* of `PaymentTerms == Installments` and are created by an explicit schedule-creation step at the appropriate lifecycle point (e.g. upon contract activation or first invoice issuance — to be decided in Task A based on activation flow).
+**Direction-of-truth:** `PaymentTerms` is the commercial decision on `Offer` and is snapshotted onto `Contract`. Installments are a *consequence* of `Contract.PaymentTerms == Installments` and are created by an explicit schedule-creation step. **PaymentTerms is never inferred from installment rows; installment rows are never used to determine the original commercial agreement.**
 
 ---
 
@@ -155,7 +169,7 @@ Commercial Benefit
 | **FreeMonths (Entitlement Benefit)** | New `FreeMonthsBenefit` row on `Contract` with its own navigation `Contract.FreeMonthsBenefits`. | Time-credit whose fulfillment is "applied to subscription", which mutates `TenantPlan`. |
 | **PhysicalGift (Entitlement Benefit)** | Existing `ContractBenefit` row on `Contract` with `BenefitType = PhysicalGift`. | Deliverable object whose fulfillment is `Delivered`. |
 
-A single `ContractBenefit` aggregate is **not** polymorphic enough to carry FreeMonths correctly: FreeMonths must call `TenantPlan.ApplyBonusMonths(...)` on fulfillment, while PhysicalGift must record `DeliveredBy` and stop. We therefore keep `FreeMonthsBenefit` and `ContractBenefit` as separate aggregates that share the `EligibilityRule` evaluation pipeline.
+A single `ContractBenefit` aggregate is **not** polymorphic enough to carry FreeMonths correctly: FreeMonths must call `TenantPlan.ApplyBonusMonths(...)` on fulfillment, while PhysicalGift must record `DeliveredBy` and stop. We therefore keep `FreeMonthsBenefit` and `ContractBenefit` as separate aggregates that share the `EligibilityRule` evaluation pipeline. **We do NOT introduce a third aggregate named `CommercialBenefit`** — the business concept is unified; the technical persistence is split because the fulfillment lifecycles genuinely differ.
 
 ### D.3 Shared semantics across Entitlement Benefits
 
@@ -163,29 +177,34 @@ Every Entitlement Benefit row — whether `FreeMonthsBenefit` or `ContractBenefi
 
 1. Granted by an Offer/Contract (Offer carries a snapshot, Contract snapshots it from the Offer).
 2. Commercial definition is **immutable** after Contract creation.
-3. Eligibility conditions are **explicit** and per-row.
+3. Eligibility conditions are **explicit** and per-row (carried in `EligibilityRule`).
 4. Historical state is **auditable** via the fulfillment lifecycle.
 5. Fulfillment is **idempotent**.
 
+### D.4 `PromotionType` does NOT determine benefit eligibility
+
+`PayForXMonths` and `PromotionalPrice` are **Pricing Benefits**. They affect the commercial amount only. Whether a particular offer's bonus requires upfront payment is a property of that offer's `FreeMonthsBenefit.EligibilityRule`, not a property of the promotion enum. A future offer may grant the same bonus with a different `EligibilityRule` (e.g. "pay 80% of contracted amount" instead of "FullUpfront") without changing `PromotionType`.
+
 ---
 
-## E. Payment Terms — directional, not bidirectional
+## E. Payment Terms — commercial decision, no inference
 
 ### E.1 Final placement
 
 * `enum PaymentTerms { FullUpfront = 0, Installments = 1 }`.
-* `Offer.PaymentTerms` — set at calculation time.
-* `Contract.PaymentTerms` — snapshotted from Offer at Contract creation. Immutable thereafter.
+* `Offer.PaymentTerms` — set explicitly by the platform operator at Offer calculation time.
+* `Contract.PaymentTerms` — snapshotted from Offer at Contract creation. **Immutable thereafter.**
 
 Not on `TenantPlan`, `Installment`, `Payment`, `BillingCycle`, `Invoice`.
 
-### E.2 Directional invariant (replaces the previous bidirectional one)
+### E.2 Directional invariant
 
 ```text
 Contract.PaymentTerms == Installments
     ⇒
-    an installment schedule MUST be created before the contract is fully operationally live
-    (i.e. before the first invoice for that contract can be issued)
+    an installment schedule MUST be created before the contract is fully
+    operationally live (i.e. before the first invoice for that contract
+    can be issued)
 
 Contract.PaymentTerms == FullUpfront
     ⇒
@@ -193,32 +212,82 @@ Contract.PaymentTerms == FullUpfront
     (any attempt to create one is rejected)
 ```
 
-The reverse direction is **not** a domain invariant: an existing installment schedule does NOT mean `PaymentTerms == Installments` — `PaymentTerms` is set at Offer time and snapshotted onto Contract, never inferred from installment rows.
+The **reverse direction is not an invariant**:
 
-This is a one-way consequence. The PaymentTerms value is the **commercial decision**; the schedule is the **financial execution**. Inferring one from the other would let post-contract operational events rewrite the commercial agreement.
+* The existence of installment rows does NOT mean `PaymentTerms == Installments`. An installment schedule could exist as a financial-execution artifact under a `FullUpfront` contract only by error; if so, the schedule is the anomaly, not `PaymentTerms`.
+* The absence of installment rows does NOT mean `PaymentTerms == FullUpfront`. An `Installments` contract may simply not yet have its schedule created (lifecycle ordering).
 
-### E.3 Default assignment at Offer calculation time
+**PaymentTerms is the commercial decision. The schedule is the financial execution. The schedule cannot rewrite PaymentTerms.**
 
-* If `PromotionType ∈ {PayForXMonths, PromotionalPrice}` ⇒ `FullUpfront`.
-* If `Plan.BonusMonths > 0` AND the promotion grants bonus months ⇒ `FullUpfront` (upfront is required for bonus eligibility).
-* Else ⇒ `Installments`.
+### E.3 PaymentTerms is NOT derived from `PromotionType`
 
-This default is overridden by an explicit `PaymentTerms` parameter on `CalculateAndPersistOfferCommand` when the platform operator wants to express non-default terms.
+The previous baseline contained rules such as:
 
-### E.4 Migration of existing data
+```text
+PayForXMonths / PromotionalPrice → FullUpfront
+Plan.BonusMonths > 0              → FullUpfront
+otherwise                          → Installments
+```
 
-* The repository is greenfield on benefits and on the new schema. No historical `Contract` row carries `PaymentTerms` yet.
-* The first migration that introduces `Contract.PaymentTerms` (T1 below) adds the column as **NOT NULL with a non-arbitrary default** (`Installments`) only if production data exists; for greenfield, the column is **NOT NULL** with the default `Installments` chosen by the safe-side rule "unknown → safer to allow installment behavior".
-* For each existing `Contract` row whose `BonusMonths > 0`, the migration also backfills a `FreeMonthsBenefit` row (see §F.4 and §K-T3) so the audit trail is not lost.
-* Tests and dev fixtures are updated to set `PaymentTerms` explicitly where commercial meaning is intended.
+These rules are **removed**. They were an unsupported commercial assumption.
+
+The actual business reality is that every combination of `PromotionType` × `PaymentTerms` must be expressible:
+
+```text
+12 months, PayForXMonths,      FullUpfront    // 6-for-5 paid up front
+12 months, PayForXMonths,      Installments   // 6-for-5 spread across installments
+12 months, PromotionalPrice,   FullUpfront    // 12 for the price of 10, paid up front
+12 months, PromotionalPrice,   Installments   // 12 for the price of 10, spread across installments
+```
+
+`PromotionType` carries **price math only**. Whether a specific offer requires upfront payment is determined by:
+
+1. The platform operator's explicit choice of `Offer.PaymentTerms` at Offer calculation time, and
+2. The `EligibilityRule` carried on each `FreeMonthsBenefit` / `ContractBenefit` row.
+
+### E.4 Eligibility rule is authoritative for bonus payment-mode requirements
+
+A bonus that requires upfront payment is expressed by the **EligibilityRule**, not by `PromotionType`:
+
+```text
+// Upfront-only bonus
+AllOf(
+    ContractActive,
+    PaymentTermsEq(FullUpfront),
+    AmountPaidAtLeast(ContractedAmount)
+)
+```
+
+A future bonus that allows either payment mode is expressed as:
+
+```text
+// Bonus regardless of payment mode
+AllOf(
+    ContractActive,
+    AmountPaidAtLeast(ContractedAmount)
+)
+```
+
+Both rules are valid; both are first-class. The benefit's rule, not the promotion enum, is authoritative for bonus eligibility.
+
+### E.5 Early settlement MUST NOT rewrite PaymentTerms
+
+```text
+Contract.PaymentTerms == Installments
+    ⇒
+    remains Installments for the lifetime of the contract, regardless of
+    how early the customer settles the installments.
+```
+
+Customer behavior (early payment, late payment, full settlement) operates on **financial execution**. It cannot alter the **commercial agreement**. A customer's `PaymentTerms` is the contractual fact that was in force at Offer acceptance time; it is preserved unchanged.
 
 ---
 
 ## F. FreeMonths Benefit — final model
 
-### F.1 The four distinctions
+### F.1 The four distinctions (preserved verbatim)
 
-The four counters / states that were conflated by the previous report are now **independent**:
+The four counters / states that were conflated by the initial validation are now **independent**:
 
 | Concept | Storage | Meaning | Mutability |
 |---|---|---|---|
@@ -227,15 +296,16 @@ The four counters / states that were conflated by the previous report are now **
 | **Grant** | `FreeMonthsBenefit.FulfillmentStatus = Granted` + `FreeMonthsBenefit.GrantedAtUtc` | "The grant decision has been recorded." Set once when eligibility becomes true. | Irreversible. |
 | **Application** | `TenantPlan.AppliedFreeMonthsBenefitIds[]` + `TenantPlan.BonusMonths` counter | "The grant has been added to the subscription's entitlement period." The authoritative extension of `EffectiveEndsAtUtc`. | Append-only; idempotent by `FreeMonthsBenefitId`. |
 
-### F.2 Critical invariants (corrected)
+### F.2 Critical invariants
 
-* `Contract.BonusMonths` is **NOT** `Σ FreeMonthsBenefits.GrantedMonths`. The scalar represents *commercial entitlement* (sum of `EntitlementMonths` across rows), not the count of grants.
-* A `FreeMonthsBenefit` row is **not** required to have `FulfillmentStatus = Granted` for the customer to be entitled — the contract can carry `EntitlementMonths = 1` while eligibility remains `NotEligible` (e.g. customer has not yet paid).
-* A grant, once recorded, **must not** double-apply to the subscription. The application step checks `TenantPlan.AppliedFreeMonthsBenefitIds` for the `FreeMonthsBenefit.Id` before incrementing `BonusMonths`. Idempotent.
-* Bonus months never increase the **billable contractual amount** — `ContractedAmount` is unchanged by `EntitlementMonths`. The price was settled at Offer calculation time.
+* `Contract.BonusMonths` is **NOT** `Σ FreeMonthsBenefits.GrantedMonths` and is **NOT** `Σ FreeMonthsBenefits.EntitlementMonths`. The legacy scalar is preserved unchanged for backward compatibility until T11 makes it derived; until then, the two are independent fields and `Contract.ValidateSnapshotCompleteness` does NOT enforce any sum invariant between them.
+* A `FreeMonthsBenefit` row with `EntitlementMonths = 1` represents the **commercial entitlement**: "the contract grants one free month." It does **not** mean `Granted = true` or `Applied = true`.
+* Eligibility can change (the rule may fail later).
+* Grant is historical (recorded once).
+* Application is historical and idempotent (the same `FreeMonthsBenefit.Id` may not extend the subscription twice).
+* Bonus months never increase the **billable contractual amount** — `ContractedAmount` is unchanged by `EntitlementMonths`.
 * Bonus months **may** increase service entitlement — `TenantPlan.EffectiveEndsAtUtc` extends when the bonus is applied.
-* Eligibility checking must not itself cause duplicate subscription extension — checking eligibility transitions `NotEligible → Eligible` only; the extension happens only on the explicit grant-and-apply step, which is idempotent.
-* The historical commercial entitlement remains auditable — the `FreeMonthsBenefit` row is immutable; the `GrantedAtUtc` / `AppliedAtUtc` timestamps are immutable.
+* Eligibility checking must not itself cause duplicate subscription extension — the extension happens only on the explicit grant-and-apply step, which is idempotent.
 
 ### F.3 Lifecycle
 
@@ -252,15 +322,9 @@ NotEligible  ──────► Eligible   ─────► Granted ──�
 
 * `Eligible → NotEligible` is allowed (re-evaluation of rule fails).
 * `NotEligible → AppliedToSubscription` is rejected.
-* `Pending → Granted` is the only grant transition; it is set when the eligibility evaluator first returns true and the benefit is processed by the grant handler.
+* `Pending → Granted` is the only grant transition.
 * `Granted → AppliedToSubscription` is the only application transition; it mutates `TenantPlan.BonusMonths` and `EffectiveEndsAtUtc` exactly once.
 * `AppliedToSubscription` is terminal.
-
-### F.4 Migration of existing `BonusMonths` data
-
-* Each existing `Contract` row with `BonusMonths > 0` gets **one** backfilled `FreeMonthsBenefit` row with `EntitlementMonths = Contract.BonusMonths`, `EligibilityRule = DefaultFreeMonthsRule (PaymentTermsEq(FullUpfront))`, `EligibilityStatus = NotEligible`, `FulfillmentStatus = Pending`.
-* `Contract.BonusMonths` is preserved unchanged (zero risk to existing tests / downstream consumers). It becomes a denormalized projection of `Σ FreeMonthsBenefits.EntitlementMonths` only **after** T3 ships and the next major version migration; before that, the two are independent fields and `Contract.ValidateSnapshotCompleteness` does NOT enforce a sum invariant.
-* When T3 ships, the canonical read path becomes: `BonusMonths` is read from `Σ FreeMonthsBenefits.EntitlementMonths`. The scalar column is retained on Contract as a historical-only field but is no longer written to after the migration.
 
 ---
 
@@ -298,7 +362,7 @@ EligibilityStatus:    NotEligible  ⇄  Eligible
 FulfillmentStatus:    Pending  →  Granted  →  Delivered  (terminal)
 ```
 
-* `Eligible` does NOT imply `Granted`. The grant is an explicit handler invocation (`MarkBenefitDeliveredCommand` after eligibility check).
+* `Eligible` does NOT imply `Granted`. The grant is an explicit handler invocation.
 * Once `Delivered`, the row is historically delivered forever. A later overdue installment may flip `Eligible → NotEligible` but must NOT touch `FulfillmentStatus`.
 
 #### FreeMonths (`FreeMonthsBenefit`)
@@ -329,27 +393,28 @@ EligibilityRule
 
 * Evaluated by `BenefitEligibilityEvaluator` (pure function over `(rule, contract, financialState, clock)`).
 * Per-row: each `ContractBenefit` and each `FreeMonthsBenefit` carries exactly one `EligibilityRule`.
+* Whether a particular benefit requires `PaymentTerms == FullUpfront` is a property of **that benefit's** rule. It is not a global rule of the system.
 
 ### G.5 Default rules for legacy data
 
 * Legacy `ContractBenefit` rows with `BenefitType = PhysicalGift` are backfilled with `DefaultPhysicalGiftRule = AllOf([ContractActive, AmountPaidAtLeast(ContractedAmount), NoOverdueInstallment])` — **bit-equivalent** to today's `BenefitEligibilityService.CanBecomeEligible`.
-* Legacy `FreeMonthsBenefit` rows backfilled from `Contract.BonusMonths > 0` carry `DefaultFreeMonthsRule = AllOf([ContractActive, PaymentTermsEq(FullUpfront), AmountPaidAtLeast(ContractedAmount)])`. This preserves the spirit of the existing upfront-only bonus semantics.
+* Legacy `FreeMonthsBenefit` rows — see §J.4 — are NOT backfilled from `Contract.BonusMonths > 0`. The migration does not invent historical commercial entitlements (see §J.4 and §E for rationale).
 
 ---
 
-## H. Installment Relationship (corrected)
+## H. Installment Relationship (directional)
 
-`Installment` remains the authoritative payment obligation / entitlement-period model. The **only** correction vs. the previous report is that `PaymentTerms` is **directional**, not bidirectional.
+`Installment` remains the authoritative payment obligation / entitlement-period model. The only correction vs. the original report is that the relationship is **directional**, not bidirectional.
 
 ```text
-Contract.PaymentTerms = Installments
+Contract.PaymentTerms == Installments
     → CreateInstallmentScheduleCommand must succeed before first invoice issuance
 
-Contract.PaymentTerms = FullUpfront
+Contract.PaymentTerms == FullUpfront
     → CreateInstallmentScheduleCommand is rejected for this contract
 ```
 
-Schedule creation is an explicit lifecycle step (Task A decides the precise trigger: at contract activation vs. at first invoice issuance vs. at first customer payment). It is NOT inferred from `PaymentTerms` for any other purpose. Conversely, `PaymentTerms` is NOT inferred from installment rows.
+Schedule creation is an explicit lifecycle step (Task A decides the precise trigger: at contract activation, at first invoice issuance, or at first customer payment). The reverse direction is not an invariant: an existing installment schedule does NOT determine `PaymentTerms`, and a missing schedule does NOT determine `PaymentTerms` either.
 
 No `Installment` schema, validation, or lifecycle change is required.
 
@@ -359,9 +424,9 @@ No `Installment` schema, validation, or lifecycle change is required.
 
 [RefundCalculationService.cs#L47-L199](file:///d:/New%20folder/Center%20Managements%20V1/Centerix/src/Centerix.Domain/Platform/Billing/Refunds/RefundCalculationService.cs#L47-L199) is preserved. The minimum changes required:
 
-* `RefundCalculationService.Calculate` gains an explicit `IReadOnlyList<FreeMonthsBenefit>` argument (separate from `IReadOnlyList<ContractBenefit>`). The handler `CalculateRefundCommand` loads both and the engine loops only over `ContractBenefit` for `BenefitContributions`; `FreeMonthsBenefit` rows are explicitly excluded with a comment justifying why (a bonus time-credit is not a recoverable monetary value).
+* `RefundCalculationService.Calculate` gains an explicit `IReadOnlyList<FreeMonthsBenefit>` argument (separate from `IReadOnlyList<ContractBenefit>`). The engine loops only over `ContractBenefit` for `BenefitContributions`; `FreeMonthsBenefit` rows are explicitly excluded with a comment justifying why (a bonus time-credit is not a recoverable monetary value).
 * The `IsGranted`-style check is replaced with `FulfillmentStatus ∈ { Granted, Delivered }`. For the migrated bit-equivalent default rule + the migration backfill (`IsGranted = true ⇒ FulfillmentStatus = Delivered`), every existing security test refund expectation remains valid.
-* `DiscountedMonths` is unchanged — already expressed as `ContractedAmount < BaseAmount`; no refund logic shift.
+* `DiscountedMonths` (Pricing Benefit) is unchanged — already expressed as `ContractedAmount < BaseAmount`; no refund logic shift.
 
 Bonus Months are never refunded as cash. PhysicalGift recovery continues to be day-based. No additional money math change.
 
@@ -369,7 +434,7 @@ Bonus Months are never refunded as cash. PhysicalGift recovery continues to be d
 
 ## J. Required Changes
 
-### Required (blocking the prompt scenarios)
+### J.1 Required (blocking the prompt scenarios)
 
 1. `enum PaymentTerms` + `Offer.PaymentTerms` + `Contract.PaymentTerms`.
 2. `EligibilityRule` value-object + per-row field on `ContractBenefit` and `FreeMonthsBenefit`.
@@ -377,75 +442,112 @@ Bonus Months are never refunded as cash. PhysicalGift recovery continues to be d
 4. `FreeMonthsBenefit` aggregate + `Contract.FreeMonthsBenefits[]` navigation.
 5. `FulfillmentStatus` enum on `ContractBenefit` and `FreeMonthsBenefit`; `EligibilityStatus` retained for reversible rule evaluation.
 6. `TenantPlan.AppliedFreeMonthsBenefitIds[]` to enforce idempotent application.
-7. Migration backfilling `Contract.PaymentTerms` (default `Installments` for greenfield) and one `FreeMonthsBenefit` row per existing `Contract` with `BonusMonths > 0`.
+7. **Schema migration only** for the new `PaymentTerms` and `FreeMonthsBenefits` tables (see §J.4 for the greenfield position).
 
-### Recommended (improves auditability)
+### J.2 Recommended (improves auditability)
 
-8. `PromotionType = BonusMonths` so the Offer chain can authoritatively create a `FreeMonthsBenefit` row from a promotion.
+8. `PromotionType = BonusMonths` so the Offer chain can authoritatively create a `FreeMonthsBenefit` row from a promotion (T9 below).
 9. `PromotionType = PhysicalGift` (analogous) so gift rows also originate in the promotion pipeline.
 10. `OfferBenefit` population in `CalculateAndPersistOfferCommand` from the new PromotionTypes.
-11. Test coverage for scenarios A–D (see §M).
+11. Test coverage for scenarios A–D (see §K).
 
-### Not Required
+### J.3 Not Required
 
 * No change to `Installment` schema, validation, or lifecycle.
 * No change to `RefundCalculationService` beyond (a) explicit exclusion of `FreeMonthsBenefit` from the benefit loop and (b) `FulfillmentStatus` lookup replacing `IsGranted`.
 * No change to `Invoice`, `Payment`, `PaymentAllocation`, `PaymentReceipt`, `BillingCycle`, `TenantCredit`, `Promotion` (other than adding the two new types), `Plan`, `SubscriptionPolicy`.
 * No change to tenancy, audit logging, or concurrency tokens.
 * No new aggregate named `CommercialBenefit`.
+* No automatic inference of `PaymentTerms` from `PromotionType`.
+* No historical reconstruction of `FreeMonthsBenefit` rows from `Contract.BonusMonths > 0`.
+
+### J.4 Migration / Greenfield Position (corrected)
+
+This repository is **greenfield on benefits**. No seed data, no production fixtures, no production legacy customer population. The `Seed*.cs` glob returns empty; all tests construct the domain in-memory.
+
+The migration policy is:
+
+1. **Schema migration** — establish the new schema (`Contract.PaymentTerms` column, `ContractBenefits.EligibilityRule` column, `ContractBenefits.FulfillmentStatus` column, new `FreeMonthsBenefits` table, `TenantPlans.AppliedFreeMonthsBenefitIds` column). For columns that must be `NOT NULL` for application correctness, an explicit operator-supplied default is the only acceptable value when actual persisted data exists.
+2. **Fixture update** — explicitly update existing tests / development fixtures to set `PaymentTerms` and benefit eligibility rules where commercial meaning is intended. No silent default values are invented.
+3. **No historical commercial reconstruction** — the migration does **NOT**:
+   * Infer `PaymentTerms` from existing installment rows.
+   * Default `PaymentTerms` to `Installments` (or anything else) based on "unknown historical state".
+   * Manufacture `FreeMonthsBenefit` rows from `Contract.BonusMonths > 0` without business evidence.
+   * Manufacture `ContractBenefit` rows from `ContractBenefit`-like legacy data without explicit operator confirmation.
+4. **Production data exception** — if, at the moment of migration, real production data exists with rows that would be rejected by the new schema, those rows must be handled by an explicit operator-supplied data-fix step that establishes the historical commercial meaning from authoritative business evidence (contracts, signed offers, billing records). The migration script itself must not invent this meaning.
+
+The migration is a **schema change**. It is not a **historical commercial reconstruction**. These are two different things and the implementation must keep them separate.
 
 ---
 
-## K. Implementation Task Breakdown (smallest safe sequence)
+## K. Final Scenario Validation
 
-**T1. `PaymentTerms` enum + Offer/Contract field + migration.**
-* `Platform/Promotions/Enums/PaymentTerms.cs` (new).
-* `Offer.PaymentTerms`, `Contract.PaymentTerms` (nullable column on both; Contract field becomes `required` after T3).
-* Default rule at Offer calculation: `FullUpfront` if `PayForXMonths|PromotionalPrice|BonusMonths>0`, else `Installments`.
-* Migration backfills existing contracts with `Installments` (greenfield-safe default) plus a backfilled `FreeMonthsBenefit` row for each with `BonusMonths > 0` (per §F.4).
+### Scenario A — 6 months for price of 5, upfront
 
-**T2. `EligibilityRule` value-object + default-rule factory.**
-* `Platform/Contracts/EligibilityRules/*.cs` (new sealed-class hierarchy).
-* `ContractBenefit.EligibilityRule` and `OfferBenefit.EligibilityRule` columns added nullable.
-* Backfill existing rows with `DefaultPhysicalGiftRule`.
+```text
+Duration = 6 months
+PaymentTerms = FullUpfront
+Commercial Benefit = FreeMonths(1)
+```
 
-**T3. `FreeMonthsBenefit` aggregate + `Contract.FreeMonthsBenefits[]` + migration.**
-* `Platform/Contracts/FreeMonthsBenefit.cs` (new) carrying `EntitlementMonths`, `EligibilityStatus`, `EligibilityRule`, `FulfillmentStatus`, `GrantedAtUtc`, `AppliedAtUtc`, `RuleSnapshot` (serialized rule for audit).
-* `Contract.AddFreeMonthsBenefit(...)` enforcing `EntitlementMonths > 0` and currency match.
-* `Contract.ValidateSnapshotCompleteness` becomes the place to verify the `FreeMonthsBenefits` snapshot is well-formed. The `BonusMonths == Σ EntitlementMonths` invariant is **not** enforced until T11 (when the scalar column becomes derived); before T11, the scalar is preserved independently.
+| Step | Expected behavior |
+|---|---|
+| Offer calculated with `PaymentTerms = FullUpfront`, `PromotionType = PayForXMonths` with `ChargedMonths = 5`, benefit row `FreeMonthsBenefit(EntitlementMonths = 1, EligibilityRule = AllOf([ContractActive, PaymentTermsEq(FullUpfront), AmountPaidAtLeast(ContractedAmount)]))`. | `Offer` carries the FreeMonths row snapshot. `PaymentTerms = FullUpfront` chosen explicitly by the operator (not inferred from `PayForXMonths`). |
+| Contract created from accepted Offer. | `Contract.PaymentTerms = FullUpfront` snapshotted. `Contract.FreeMonthsBenefits` mirrors the Offer row. **No installment schedule is created.** `ContractedAmount = 5 × MonthlyListPrice`. |
+| Customer pays `ContractedAmount` upfront. | `BenefitEligibilityEvaluator` returns `Eligible`. |
+| `GrantBenefitCommand` runs for the bonus row. | `FulfillmentStatus: Pending → Granted`. |
+| `ApplyFreeMonthsToSubscriptionCommand` runs for the bonus row. | `TenantPlan.BonusMonths += 1`, `EffectiveEndsAtUtc += 1 month` (calendar math). `TenantPlan.AppliedFreeMonthsBenefitIds += row.Id`. `FulfillmentStatus: Granted → AppliedToSubscription`. |
+| Idempotency re-check. | Second invocation of either command is a no-op. |
+| Billable amount? | `ContractedAmount` unchanged from `5 × MonthlyListPrice`. No accidental over-charge. Customer receives 6 months of service, pays for 5. |
 
-**T4. `BenefitEligibilityEvaluator` domain service.**
-* Pure evaluator. `IBenefitEligibilityService` interface unchanged so DI does not break. Internal implementation is replaced.
+### Scenario B — 6 months for price of 5, installments
 
-**T5. `CheckBenefitEligibilityCommand` refactor.**
-* Reads the benefit's `EligibilityRule`, calls the evaluator. Eligibility → `MarkEligible`. No grant step here.
+```text
+Duration = 6 months
+PaymentTerms = Installments
+Commercial Benefit rule requires FullUpfront
+```
 
-**T6. Fulfillment lifecycle split.**
-* `Platform/Contracts/Enums/FulfillmentStatus.cs` (new): `Pending / Granted / Delivered / AppliedToSubscription`.
-* `ContractBenefit.FulfillmentStatus` and `FreeMonthsBenefit.FulfillmentStatus` columns.
-* Migration backfill: `IsGranted = true ⇒ Delivered` (ContractBenefit), no backfill on FreeMonthsBenefit (greenfield).
-* `RefundCalculationService` switches to `FulfillmentStatus ∈ { Granted, Delivered }`.
+| Step | Expected behavior |
+|---|---|
+| Offer calculated with `PaymentTerms = Installments`, `PromotionType = PayForXMonths` with `ChargedMonths = 5`, benefit row `FreeMonthsBenefit(EntitlementMonths = 1, EligibilityRule = AllOf([ContractActive, PaymentTermsEq(FullUpfront), AmountPaidAtLeast(ContractedAmount)]))`. | `Offer` carries the FreeMonths row snapshot. `PaymentTerms = Installments` chosen explicitly (this is a valid combination even with `PayForXMonths`). |
+| Contract created. | `Contract.PaymentTerms = Installments` snapshotted. Installment schedule created. The FreeMonths row exists but its `EligibilityRule` includes `PaymentTermsEq(FullUpfront)` which FAILS for this contract. |
+| Customer pays all installments very early. | All installments move to `Paid`. **`Contract.PaymentTerms` is NOT mutated.** The FreeMonths row remains `NotEligible` because `PaymentTerms == Installments` is unchanged. |
+| Customer pays the full amount early. | **This does NOT retroactively convert the contract into FullUpfront.** The contractual commercial decision remains Installments. |
+| Refund on early cancellation. | No `Delivered` / `Applied` benefit to recover. Customer's refundable balance is `Paid - Used - 0`. No accidental bonus application. |
 
-**T7. `GrantBenefitCommand` (new).**
-* Explicit grant step. Reads the benefit's row, verifies `EligibilityStatus == Eligible` and `FulfillmentStatus == Pending`, sets `FulfillmentStatus = Granted` and `GrantedAtUtc`. Idempotent (returns success if already Granted).
-* Called from the same flow that today calls `CheckBenefitEligibilityCommand` + `MarkBenefitDeliveredCommand`, but as a separate explicit step.
+### Scenario C — Annual physical gift
 
-**T8. `ApplyFreeMonthsToSubscriptionCommand` (new).**
-* Reads the `FreeMonthsBenefit` row, verifies `FulfillmentStatus == Granted` and that `TenantPlan.AppliedFreeMonthsBenefitIds` does not already contain its Id, then mutates `TenantPlan.BonusMonths += EntitlementMonths` and `EffectiveEndsAtUtc = AddCalendarMonths(EffectiveEndsAtUtc, EntitlementMonths)`. Sets `FulfillmentStatus = AppliedToSubscription`. Idempotent.
-* Triggers `SubscriptionReconciliationService` to recompute lifecycle.
+```text
+Duration = 12 months
+PaymentTerms = FullUpfront
+PaymentMethod = Cash
+Payment completed within promotion window
+PhysicalGift = Printer / PC
+```
 
-**T9. PromotionType `BonusMonths` + `PhysicalGift`.**
-* Extend `PromotionCalculationService` to produce `OfferBenefits[]` rows for these two types.
-* `CalculateAndPersistOfferCommand` writes those rows.
+| Step | Expected behavior |
+|---|---|
+| Offer calculated with `PaymentTerms = FullUpfront`, `PromotionType = PercentageDiscount` (or any other), benefit row `ContractBenefit(BenefitType = PhysicalGift, ContractualValue = 1500, EligibilityRule = AllOf([ContractActive, DurationMonthsGte(12), PaymentMethodEq(Cash), CompletedByUtc(T)]))`. | `Offer` carries the PhysicalGift row snapshot. `PaymentTerms = FullUpfront` chosen explicitly. |
+| Contract created. | `Contract.Benefits` mirrors the Offer row. `Contract.PaymentTerms = FullUpfront`. No installments. |
+| Customer pays in cash before `T`. | Eligibility evaluator returns `Eligible` (`Cash` method verified from dominant payment method; `CompletedByUtc(T)` verified; `DurationMonths = 12 ≥ 12`). |
+| `GrantBenefitCommand` runs. | `FulfillmentStatus: Pending → Granted`. |
+| `MarkBenefitDeliveredCommand` runs. | `FulfillmentStatus: Granted → Delivered`. |
+| Customer later misses a payment obligation. | `EligibilityStatus` may flip to `NotEligible` if the rule re-evaluates against new state, but `FulfillmentStatus = Delivered` is **never** touched. Refund calculation continues to treat the gift as `Delivered`. |
 
-**T10. Refund explicit exclusion of `FreeMonthsBenefit`.**
-* `RefundCalculationService.Calculate` signature change (new `IReadOnlyList<FreeMonthsBenefit>` argument, loop ignored). Handler `CalculateRefundCommand` loads both.
+### Scenario D — Promotional price
 
-**T11. (Long-term) `Contract.BonusMonths` becomes derived.**
-* Drop the scalar column; the canonical source becomes `Σ FreeMonthsBenefits.EntitlementMonths`.
-* Out of scope for Task A; documented for the future cleanup task.
+```text
+Duration = 12 months
+PromotionType = PromotionalPrice
+```
 
-**T12. Test coverage for scenarios A–D** (see §M).
+| Step | Expected behavior |
+|---|---|
+| Offer calculated with `PromotionType = PromotionalPrice`, `FinalAmount = 10 × MonthlyPrice`, no benefit rows. | `Offer.PromotionType = PromotionalPrice`. **No `FreeMonthsBenefit` rows. No `ContractBenefit` rows. `Offer.PaymentTerms` chosen explicitly by the operator** (this scenario works with either `FullUpfront` or `Installments` — the PromotionType does not determine it). |
+| Contract created. | `Contract.ContractedAmount = FinalAmount` (10 × MonthlyPrice). `Contract.BonusMonths = 0`. `Contract.FreeMonthsBenefits` is empty. `Contract.Benefits` is empty. |
+| Customer pays `ContractedAmount`. | No benefit eligibility check fires (no rows). No bonus months. No gift. |
+| Refund on early cancellation. | Refundable surplus = `Paid - Used - Benefits = Paid - Used - 0`; the discount is implicitly returned as cash because `ContractedAmount` is the lower amount. |
 
 ---
 
@@ -453,63 +555,83 @@ Bonus Months are never refunded as cash. PhysicalGift recovery continues to be d
 
 In addition to the 20 invariants listed in the original prompt §16, this final baseline mandates:
 
-21. `Contract.PaymentTerms` MUST equal the `PaymentTerms` value snapshotted from the accepted Offer.
-22. **Directional**: `Contract.PaymentTerms == Installments ⇒ an installment schedule MUST exist before the first invoice for that contract can be issued`. The reverse is NOT an invariant.
-23. `Contract.PaymentTerms == FullUpfront ⇒ NO installment schedule is created for this contract; any attempt to create one is rejected`.
-24. Every benefit row (`ContractBenefit` and `FreeMonthsBenefit`) MUST carry exactly one `EligibilityRule`.
-25. The default eligibility rule for legacy `PhysicalGift` rows is `AllOf([ContractActive, AmountPaidAtLeast(ContractedAmount), NoOverdueInstallment])` — bit-equivalent to today.
-26. `FulfillmentStatus` is monotone: `Pending → Granted → (Delivered | AppliedToSubscription)`. No reverse transitions, no skip transitions.
-27. `EligibilityStatus` is reversible: `NotEligible ⇄ Eligible` based on rule evaluation.
-28. A `Delivered` PhysicalGift is historical and never reverts, regardless of later overdue state.
-29. A `FreeMonthsBenefit.Id` MUST appear at most once in `TenantPlan.AppliedFreeMonthsBenefitIds[]`; the application step is idempotent.
-30. `ContractedAmount` is independent of `FreeMonthsBenefits.EntitlementMonths` — bonus time credit does not increase the billable amount.
-31. The refund calculation never treats `FreeMonthsBenefit` rows as recoverable monetary value.
-32. The Offer/Contract snapshot of benefits is immutable after `Contract.Create(...)`; only `EligibilityStatus`, `FulfillmentStatus`, and `GrantedAtUtc`/`AppliedAtUtc` mutate thereafter.
+21. `Contract.PaymentTerms` MUST equal the `PaymentTerms` value explicitly accepted in the Offer. (Established by Offer creation, snapshotted at Contract creation.)
+22. `Contract.PaymentTerms` is **immutable** after Contract acceptance.
+23. **Directional**: `Contract.PaymentTerms == Installments ⇒ an installment schedule MUST exist before the first invoice for that contract can be issued`. The reverse is NOT an invariant. Payment execution cannot rewrite `Contract.PaymentTerms`.
+24. `Contract.PaymentTerms == FullUpfront ⇒ NO installment schedule is created for this contract; any attempt to create one is rejected`.
+25. `Contract.PaymentTerms` MUST NOT be inferred from `PromotionType` or from the existence of installment rows.
+26. Every benefit row (`ContractBenefit` and `FreeMonthsBenefit`) MUST carry exactly one `EligibilityRule`.
+27. The default eligibility rule for legacy `PhysicalGift` rows is `AllOf([ContractActive, AmountPaidAtLeast(ContractedAmount), NoOverdueInstallment])` — bit-equivalent to today.
+28. `FulfillmentStatus` is monotone: `Pending → Granted → (Delivered | AppliedToSubscription)`. No reverse transitions, no skip transitions.
+29. `EligibilityStatus` is reversible: `NotEligible ⇄ Eligible` based on rule evaluation.
+30. A `Delivered` PhysicalGift is historical and never reverts, regardless of later overdue state.
+31. A `FreeMonthsBenefit.Id` MUST appear at most once in `TenantPlan.AppliedFreeMonthsBenefitIds[]`; the application step is idempotent.
+32. `ContractedAmount` is independent of `FreeMonthsBenefits.EntitlementMonths` — bonus time credit does not increase the billable amount.
+33. The refund calculation never treats `FreeMonthsBenefit` rows as recoverable monetary value.
+34. The Offer/Contract snapshot of benefits is immutable after `Contract.Create(...)`; only `EligibilityStatus`, `FulfillmentStatus`, and `GrantedAtUtc`/`AppliedAtUtc` mutate thereafter.
+35. **No historical commercial facts are invented by migrations.** Schema migrations do not infer `PaymentTerms` from installment rows and do not manufacture `FreeMonthsBenefit` rows from `Contract.BonusMonths > 0`.
 
 ---
 
-## M. Final Scenario Validation
+## M. Implementation Task Breakdown (smallest safe sequence)
 
-### Scenario A — 6 months / FullUpfront / 6 for price of 5
+**T1. `PaymentTerms` enum + Offer/Contract field + schema migration.**
+* `Platform/Promotions/Enums/PaymentTerms.cs` (new).
+* `Offer.PaymentTerms`, `Contract.PaymentTerms` (nullable column on both; Contract field becomes `required` after T3).
+* **The migration does NOT default existing rows to any value** based on `PromotionType` or installment-row inference. For greenfield, the column starts nullable and tests / fixtures are updated to set it explicitly. For pre-existing data with real persisted rows, the operator must supply an explicit value via a documented data-fix step before the column is set to `NOT NULL`.
+* Files: `Platform/Promotions/Enums/PaymentTerms.cs` (new), `Offer.cs`, `Contract.cs`, `Centerix.Infrastructure/Data/Migrations/<TS>_AddPaymentTerms.cs`.
 
-| Step | Expected behavior |
-|---|---|
-| Offer calculated with `PaymentTerms = FullUpfront`, `PromotionType = BonusMonths`, `BonusQuantity = 1`. | `Offer.Benefits[]` gets one `FreeMonthsBenefit` snapshot (`EntitlementMonths = 1`, `EligibilityRule = PaymentTermsEq(FullUpfront)`). |
-| Contract created from accepted Offer. | `Contract.FreeMonthsBenefits` mirrors the Offer row. `Contract.PaymentTerms = FullUpfront`. No installment schedule created. `ContractedAmount = 5 × MonthlyListPrice`. |
-| Customer pays `ContractedAmount` immediately. | `BenefitEligibilityEvaluator` returns `Eligible`. |
-| `GrantBenefitCommand` runs for the bonus row. | `FulfillmentStatus: Pending → Granted`. |
-| `ApplyFreeMonthsToSubscriptionCommand` runs for the bonus row. | `TenantPlan.BonusMonths += 1`, `EffectiveEndsAtUtc += 1 month` (calendar math). `TenantPlan.AppliedFreeMonthsBenefitIds += row.Id`. `FulfillmentStatus: Granted → AppliedToSubscription`. |
-| Idempotency re-check. | Second invocation of either command is a no-op. |
-| Billable amount? | `ContractedAmount` unchanged from `5 × MonthlyListPrice`. No accidental over-charge. |
+**T2. `EligibilityRule` value-object + default-rule factory.**
+* `Platform/Contracts/EligibilityRules/*.cs` (new sealed-class hierarchy).
+* `ContractBenefit.EligibilityRule` and `OfferBenefit.EligibilityRule` columns added nullable.
+* Backfill existing rows with `DefaultPhysicalGiftRule` only if existing rows are part of test fixtures; production rows must be backfilled by an operator-supplied step.
+* Files: `Platform/Contracts/EligibilityRules/*.cs` (new), `ContractBenefit.cs`, `OfferBenefit.cs`, migration file.
 
-### Scenario B — 12 months / FullUpfront / Cash within promotional deadline
+**T3. `FreeMonthsBenefit` aggregate + `Contract.FreeMonthsBenefits[]` + schema migration.**
+* `Platform/Contracts/FreeMonthsBenefit.cs` (new) carrying `EntitlementMonths`, `EligibilityStatus`, `EligibilityRule`, `FulfillmentStatus`, `GrantedAtUtc`, `AppliedAtUtc`, `RuleSnapshot` (serialized rule for audit).
+* `Contract.AddFreeMonthsBenefit(...)` enforcing `EntitlementMonths > 0` and currency match.
+* **The migration adds the table; it does NOT populate it from `Contract.BonusMonths > 0`.** The `BonusMonths` scalar remains the legacy field. If the operator wants to expose bonus months as `FreeMonthsBenefit` rows for an existing contract, they do so via an explicit fixture / data-fix step.
+* Files: `Platform/Contracts/FreeMonthsBenefit.cs` (new), `Contract.cs`, migration file.
 
-| Step | Expected behavior |
-|---|---|
-| Offer calculated with `PaymentTerms = FullUpfront`, `PromotionType = PhysicalGift`, gift = "Barcode Printer", `PromotionalDeadline = T`. | `Offer.Benefits[]` gets one `ContractBenefit` snapshot (`BenefitType = PhysicalGift`, `EligibilityRule = AllOf([ContractActive, DurationMonthsGte(12), PaymentMethodEq(Cash), CompletedByUtc(T)])`). |
-| Contract created. | `Contract.Benefits` mirrors the Offer row. `Contract.PaymentTerms = FullUpfront`. No installments. |
-| Customer pays in cash before `T`. | Eligibility evaluator returns `Eligible` (`Cash` method verified from dominant payment method; `CompletedByUtc(T)` verified; `DurationMonths = 12 ≥ 12`). |
-| `GrantBenefitCommand` runs. | `FulfillmentStatus: Pending → Granted`. |
-| `MarkBenefitDeliveredCommand` runs (existing handler). | `FulfillmentStatus: Granted → Delivered`. |
-| Customer later misses a payment obligation. | `EligibilityStatus` may flip to `NotEligible` if the rule re-evaluates against new state, but `FulfillmentStatus = Delivered` is **never** touched. Refund calculation continues to treat the gift as `Delivered`. |
+**T4. `BenefitEligibilityEvaluator` domain service.**
+* Pure evaluator. `IBenefitEligibilityService` interface unchanged so DI does not break. Internal implementation is replaced.
+* Files: `Infrastructure/Platform/Services/BenefitEligibilityService.cs` (rewrite), `Application/Platform/Contracts/Services/IBenefitEligibilityService.cs` (unchanged).
 
-### Scenario C — 12 months / PromotionalPrice / 12 for the price of 10
+**T5. `CheckBenefitEligibilityCommand` refactor.**
+* Reads the benefit's `EligibilityRule`, calls the evaluator. Eligibility → `MarkEligible`. No grant step here.
+* Files: `Application/Platform/Contracts/Commands/CheckBenefitEligibilityCommand.cs`.
 
-| Step | Expected behavior |
-|---|---|
-| Offer calculated with `PromotionType = PromotionalPrice`, `FinalAmount = 10 × MonthlyPrice`. | No `OfferBenefit` rows created. No `FreeMonthsBenefits` row. |
-| Contract created. | `Contract.ContractedAmount = FinalAmount` (10 × MonthlyPrice). `Contract.BonusMonths = 0`. No installment schedule (FullUpfront). |
-| Customer pays `ContractedAmount`. | No benefit eligibility check fires (no rows). No bonus months. No gift. |
-| Refund on early cancellation. | Refundable surplus = `Paid - Used - Benefits = Paid - Used - 0`; the discount is implicitly returned as cash because `ContractedAmount` is the lower amount. |
+**T6. Fulfillment lifecycle split.**
+* `Platform/Contracts/Enums/FulfillmentStatus.cs` (new): `Pending / Granted / Delivered / AppliedToSubscription`.
+* `ContractBenefit.FulfillmentStatus` and `FreeMonthsBenefit.FulfillmentStatus` columns.
+* Migration backfill: `IsGranted = true ⇒ FulfillmentStatus = Delivered` (ContractBenefit), no backfill on FreeMonthsBenefit (greenfield).
+* `RefundCalculationService` switches to `FulfillmentStatus ∈ { Granted, Delivered }`.
+* Files: `BenefitEligibilityStatus.cs` (keep, do not delete), `Platform/Contracts/Enums/FulfillmentStatus.cs` (new), `ContractBenefit.cs`, `RefundCalculationService.cs`, migration file.
 
-### Scenario D — 6 months / Installments / customer pays everything early
+**T7. `GrantBenefitCommand` (new).**
+* Explicit grant step. Reads the benefit's row, verifies `EligibilityStatus == Eligible` and `FulfillmentStatus == Pending`, sets `FulfillmentStatus = Granted` and `GrantedAtUtc`. Idempotent (returns success if already Granted).
+* Files: `Application/Platform/Contracts/Commands/GrantBenefitCommand.cs` (new).
 
-| Step | Expected behavior |
-|---|---|
-| Offer calculated with `PaymentTerms = Installments`, `PromotionType = BonusMonths`, `BonusQuantity = 1`. | `Offer.Benefits[]` gets one `FreeMonthsBenefit` snapshot (`EntitlementMonths = 1`, `EligibilityRule = AllOf([ContractActive, PaymentTermsEq(FullUpfront)])`). |
-| Contract created. | `Contract.PaymentTerms = Installments`. Installment schedule created. The FreeMonths row exists but `EligibilityRule` includes `PaymentTermsEq(FullUpfront)` which FAILS for this contract. |
-| Customer pays all installments very early. | Installments move to `Paid`. No `Contract.PaymentTerms` mutation. The benefit remains `NotEligible` because `PaymentTerms` is unchanged. |
-| Refund on early cancellation. | No `Delivered` / `Applied` benefit to recover. Customer's refundable balance is `Paid - Used - 0`. No accidental bonus application. |
+**T8. `ApplyFreeMonthsToSubscriptionCommand` (new).**
+* Reads the `FreeMonthsBenefit` row, verifies `FulfillmentStatus == Granted` and that `TenantPlan.AppliedFreeMonthsBenefitIds` does not already contain its Id, then mutates `TenantPlan.BonusMonths += EntitlementMonths` and `EffectiveEndsAtUtc = AddCalendarMonths(EffectiveEndsAtUtc, EntitlementMonths)`. Sets `FulfillmentStatus = AppliedToSubscription`. **Idempotent** by `FreeMonthsBenefit.Id`.
+* Triggers `SubscriptionReconciliationService` to recompute lifecycle.
+* Files: `Application/Platform/Subscriptions/Commands/ApplyFreeMonthsToSubscriptionCommand.cs` (new).
+
+**T9. PromotionType `BonusMonths` + `PhysicalGift`.**
+* Extend `PromotionCalculationService` to produce `OfferBenefits[]` rows for these two types.
+* `CalculateAndPersistOfferCommand` writes those rows.
+* The `PromotionType` is **price math only**; the benefit row carries its own `EligibilityRule` (which may or may not include `PaymentTermsEq(FullUpfront)`).
+* Files: `PromotionCalculationService.cs`, `CalculateAndPersistOfferCommand.cs`.
+
+**T10. Refund explicit exclusion of `FreeMonthsBenefit`.**
+* `RefundCalculationService.Calculate` signature change (new `IReadOnlyList<FreeMonthsBenefit>` argument, loop ignored). Handler `CalculateRefundCommand` loads both.
+* Files: `RefundCalculationService.cs`, `CalculateRefundCommand.cs`, `ExecuteRefundCommand.cs`.
+
+**T11. (Long-term) `Contract.BonusMonths` becomes derived.**
+* Drop the scalar column; the canonical source becomes `Σ FreeMonthsBenefits.EntitlementMonths`.
+* Out of scope for Task A; documented for the future cleanup task.
+
+**T12. Test coverage for scenarios A–D** (see §K).
 
 ---
 
@@ -522,12 +644,14 @@ In addition to the 20 invariants listed in the original prompt §16, this final 
 
 ```text
 Plan (catalog) → Offer (immutable snapshot)
-                     │  PaymentTerms, DurationMonths, PromotionType, ChargedMonths
-                     │  BonusMonths (catalog hint snapshot), OfferBenefits[]
+                     │  PaymentTerms (operator-chosen, NOT inferred from PromotionType)
+                     │  DurationMonths, PromotionType (price-only), ChargedMonths
+                     │  BonusMonths (catalog hint), OfferBenefits[]
                      ▼
                   Contract (immutable snapshot)
-                     │  PaymentTerms, DurationMonths, ContractedAmount, ChargedMonths
-                     │  BonusMonths (scalar, becomes derived in T11)
+                     │  PaymentTerms (snapshotted from Offer, immutable)
+                     │  DurationMonths, ContractedAmount, ChargedMonths
+                     │  BonusMonths (legacy scalar; becomes derived in T11)
                      │  Benefits[] = ContractBenefit {BenefitType=PhysicalGift,
                      │      ContractualValue, EligibilityRule, EligibilityStatus,
                      │      FulfillmentStatus}
@@ -539,7 +663,7 @@ Plan (catalog) → Offer (immutable snapshot)
                      │  EffectiveEndsAtUtc = Base + BonusMonths (calendar math)
                      │  AppliedFreeMonthsBenefitIds[] (idempotency)
                      ▼
-                  Installment Schedule (ONLY if Contract.PaymentTerms == Installments)
+                  Installment Schedule  (ONLY if Contract.PaymentTerms == Installments)
                      │
                      ▼
                   BillingCycle → Invoice → Payment → PaymentAllocation → Refund
@@ -548,9 +672,13 @@ Plan (catalog) → Offer (immutable snapshot)
 ## 2. Final PaymentTerms Semantics
 
 * `enum PaymentTerms { FullUpfront = 0, Installments = 1 }`.
-* `Offer.PaymentTerms` set at calculation time. Default: `FullUpfront` if `PromotionType ∈ {PayForXMonths, PromotionalPrice}` or `Plan.BonusMonths > 0`; else `Installments`.
-* `Contract.PaymentTerms` snapshotted from Offer at Contract creation; immutable thereafter.
-* **Directional invariant**: `PaymentTerms == Installments ⇒ schedule required` and `PaymentTerms == FullUpfront ⇒ schedule forbidden`. The reverse direction is not an invariant.
+* `Offer.PaymentTerms` is set **explicitly** by the platform operator at Offer calculation time. **It is NOT inferred from `PromotionType`** and **NOT inferred from any other commercial field**. All four combinations (`PayForXMonths | PromotionalPrice`) × (`FullUpfront | Installments`) are valid.
+* `Contract.PaymentTerms` is **snapshotted from Offer at Contract creation and is immutable thereafter**.
+* **Directional invariant only**:
+  * `PaymentTerms == Installments ⇒ installment schedule is required before first invoice issuance`.
+  * `PaymentTerms == FullUpfront ⇒ no installment schedule may be created`.
+  * The reverse direction is NOT an invariant. The installment schedule does not determine `PaymentTerms`, and `PaymentTerms` is not changed by payment execution events.
+* **Customer behavior (early payment, late payment, full settlement) operates on financial execution and cannot alter `PaymentTerms`.**
 
 ## 3. Final Commercial Benefit Model
 
@@ -564,7 +692,7 @@ Commercial Benefit
     └── PhysicalGift           → ContractBenefit.BenefitType = PhysicalGift
 ```
 
-Both Entitlement Benefit types share eligibility semantics but are **separate persistence aggregates** because their fulfillment actions diverge (subscription extension vs. physical handover).
+Both Entitlement Benefit types share eligibility semantics but are **separate persistence aggregates** because their fulfillment actions diverge (subscription extension vs. physical handover). **We do NOT introduce a third aggregate named `CommercialBenefit`** — the business concept is unified; the technical persistence is split because the fulfillment lifecycles genuinely differ.
 
 ## 4. Final FreeMonths Model
 
@@ -577,7 +705,7 @@ Four independent counters / states:
 | Grant | `FreeMonthsBenefit.FulfillmentStatus = Granted` + `GrantedAtUtc` (one-way) |
 | Application | `TenantPlan.AppliedFreeMonthsBenefitIds[]` + `TenantPlan.BonusMonths` (one-way, idempotent) |
 
-`Contract.BonusMonths` is independent of these counters until T11; thereafter it becomes a denormalized projection.
+`EntitlementMonths = 1` means **"the contract grants one free month."** It does NOT mean `Granted = true` or `Applied = true`. The same `FreeMonthsBenefit` must never extend the subscription twice.
 
 ## 5. Final PhysicalGift Model
 
@@ -602,8 +730,9 @@ No `Earned`, `Consumed`, or `Withdrawn` states.
 ## 7. Final Installment Relationship
 
 * `Installment` remains the authoritative payment obligation / entitlement-period model. No schema, validation, or lifecycle change.
-* `Installment` schedule creation is triggered only when `Contract.PaymentTerms == Installments` and only at the lifecycle point chosen in Task A (likely contract activation).
+* `Installment` schedule creation is triggered only when `Contract.PaymentTerms == Installments` and only at the lifecycle point chosen in Task A (genuinely unresolved — see §N).
 * `Contract.PaymentTerms == FullUpfront` rejects any attempt to create an installment schedule for that contract.
+* `Installment` is the **financial execution**. It does NOT determine `Contract.PaymentTerms`.
 
 ## 8. Final Refund Implications
 
@@ -614,26 +743,80 @@ No `Earned`, `Consumed`, or `Withdrawn` states.
 
 ## 9. Final Domain Invariants
 
-See §L (invariants 21–32). Highlights:
+See §L (invariants 21–35). Highlights:
 
-* Invariant 21: `Contract.PaymentTerms` equals the Offer snapshot value.
-* Invariant 22: directional only — `Installments ⇒ schedule`; never the reverse.
-* Invariant 26: `FulfillmentStatus` is monotone.
-* Invariant 28: a `Delivered` PhysicalGift never reverts.
-* Invariant 29: `FreeMonthsBenefit.Id` appears at most once in `TenantPlan.AppliedFreeMonthsBenefitIds[]`.
-* Invariant 30: bonus months never increase `ContractedAmount`.
+* Invariant 21: `Contract.PaymentTerms` equals the Offer snapshot value (set explicitly by the operator).
+* Invariant 22: `Contract.PaymentTerms` is immutable after Contract acceptance.
+* Invariant 23: directional only — `Installments ⇒ schedule`; never the reverse. Payment execution cannot rewrite PaymentTerms.
+* Invariant 25: `PaymentTerms` is NOT inferred from `PromotionType` or from installment rows.
+* Invariant 28: `FulfillmentStatus` is monotone.
+* Invariant 30: a `Delivered` PhysicalGift never reverts.
+* Invariant 31: `FreeMonthsBenefit.Id` appears at most once in `TenantPlan.AppliedFreeMonthsBenefitIds[]`.
+* Invariant 32: bonus months never increase `ContractedAmount`.
+* Invariant 35: no historical commercial facts are invented by migrations.
 
 ## 10. Final Implementation Sequence for Task A Onward
 
-T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9 → T10 → T11 → T12 (see §K for details). Tasks T1–T8 are the Task A critical path; T9–T12 are follow-up.
+T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9 → T10 → T11 → T12 (see §M for details). Tasks T1–T8 are the Task A critical path; T9–T12 are follow-up.
+
+## 11. Final Principles (Unambiguous)
+
+```text
+Offer defines commercial terms.
+Contract snapshots commercial terms.
+PaymentTerms is a commercial term.
+Installment is financial execution.
+Payment execution cannot rewrite PaymentTerms.
+PromotionType does not inherently determine PaymentTerms.
+Benefit eligibility is explicit and per-benefit.
+Bonus and Gift are one Commercial Benefit concept.
+FreeMonths entitlement ≠ grant ≠ application.
+Eligibility is reversible.
+Fulfillment is historical/monotonic.
+FreeMonths application is idempotent.
+Bonus months never increase billable contractual amount.
+No historical commercial facts are invented.
+```
+
+---
+
+## N. Genuinely Unresolved Business Decisions
+
+These cannot be determined from the repository and require explicit business-owner input before or during Task A. They are NOT settled by assumptions.
+
+1. **Exact mechanism by which the platform operator selects `PaymentTerms` when creating/calculating an Offer.** Is `PaymentTerms`:
+   * a parameter on `CalculateAndPersistOfferCommand`,
+   * a field on the `Promotion` catalog entity (so each promotion declares its own payment mode),
+   * a field on the `Plan` catalog entity (so each plan declares its preferred mode),
+   * or a combination?
+   This affects both the API surface and the migration of catalog data. **No assumption is made here.**
+
+2. **Exact payment schedule structure for `Installments`.** Today `CreateInstallmentScheduleCommand` accepts arbitrary `InstallmentScheduleItem` rows (custom amounts, custom due dates, custom covered periods) and supports equal-count schedules implicitly. The open question is: should the platform enforce any canonical structure (e.g. equal amounts, contiguous months aligned with billing cycle), or should it continue to accept arbitrary operator-supplied schedules? **The repository already supports arbitrary schedules; the question is whether any policy should constrain them.**
+
+3. **Exact timing of installment schedule creation.** When is `CreateInstallmentScheduleCommand` invoked for a `Contract.PaymentTerms == Installments` contract?
+   * at Contract activation,
+   * at first invoice issuance,
+   * at first customer payment,
+   * or at another lifecycle point?
+   This affects invoice / installment integration tests and the order of side-effects in `CreateSubscriptionFromContractCommand`. **No assumption is made here.**
+
+4. **Catalog-level expression of bonus rules.** Should `Promotion.BonusRules` (or equivalent) exist as a first-class catalog entity, so the bonus rule is configured once at the promotion level and inherited by all `FreeMonthsBenefit` rows created from that promotion? Or should each `FreeMonthsBenefit` row carry its own `EligibilityRule` independently? The `Promotion` catalog does not currently model bonus rules at all; this decision shapes whether T9 introduces `Promotion.BonusRules` or leaves rules per-row. **No assumption is made here.**
+
+5. **Treatment of `Contract.BonusMonths` in the greenfield migration.** Since the migration does not invent historical rows, what does `Contract.BonusMonths > 0` mean for any pre-existing contract after T3 ships? Three options:
+   * leave the scalar untouched (current baseline — backward-compatible, no meaning change);
+   * backfill one `FreeMonthsBenefit` row per contract with `BonusMonths > 0` (an explicit data-fix step, performed once, by the operator);
+   * leave the scalar and require each operator to create `FreeMonthsBenefit` rows manually for existing contracts (no data-fix step).
+   The current baseline recommends option 1 for Task A and option 2 as a one-time data-fix whenever the operator decides to migrate. **No automatic migration is performed.**
 
 ---
 
 ## Stop Condition Confirmed
 
-This document is the **binding design baseline** for Task A and beyond. It is documentation only.
+This document is the **binding design baseline for Task A implementation**. It is documentation only.
 
 * Files changed in this commit: `docs/COMMERCIAL-BENEFIT-DESIGN-VALIDATION.md` (rewritten).
-* No production code, migrations, entities, controllers, or workflows were modified.
-* All four open decisions from the previous report are now **resolved** in this baseline (see §D.1 / §E.3 / §F.4 / §G.5).
-* No genuinely unresolved business decisions remain for Task A.
+* No production code, migrations, entities, controllers, or tests were modified.
+* The two final corrections from the architecture review are applied: no `PromotionType → PaymentTerms` inference; no invented historical commercial facts.
+* The four-level FreeMonths model and Commercial Benefit unification are preserved.
+* The final five principles (offer defines commercial terms; payment execution cannot rewrite PaymentTerms; benefit eligibility is per-benefit; bonus entitlement ≠ grant ≠ application; no invented historical facts) are stated unambiguously in §11.
+* Five genuinely unresolved business decisions are listed in §N.
