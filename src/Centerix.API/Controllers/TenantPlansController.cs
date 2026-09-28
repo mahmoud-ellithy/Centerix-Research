@@ -2,6 +2,7 @@ using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform.Commands;
 using Centerix.Application.Platform.Queries;
 using Centerix.Application.Platform.Subscriptions.Queries;
+using Centerix.Domain.Platform.Promotions.Enums;
 using Centerix.Infrastructure.Auth;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
@@ -68,6 +69,8 @@ public class TenantPlansController(ILocalizer localizer, IMediator mediator) : A
     /// PLATFORM: Renews a subscription as a NEW commercial transaction.
     /// Creates a new Offer → Contract → Subscription chain using current commercial terms.
     /// Old promotions/discounts/benefits are NOT inherited. The old subscription remains immutable.
+    /// PaymentTerms is an explicit commercial decision supplied by the caller; it is never
+    /// derived from the current/previous subscription, PromotionType, BonusMonths, or installments.
     /// </summary>
     [HttpPost("{id}/renew-commercial")]
     [HasPermission(Permissions.Subscriptions.Manage)]
@@ -79,7 +82,8 @@ public class TenantPlansController(ILocalizer localizer, IMediator mediator) : A
         var command = new RenewSubscriptionOfferCommand(
             id,
             request?.PlanId,
-            request?.DurationMonths);
+            request?.DurationMonths,
+            request?.PaymentTerms);
 
         var result = await mediator.Send(command, cancellationToken);
 
@@ -98,6 +102,8 @@ public class TenantPlansController(ILocalizer localizer, IMediator mediator) : A
     /// The old subscription is ended (cancelled) at the effective date.
     /// Old promotions/discounts/benefits are NOT inherited. The old subscription's snapshot is never modified.
     /// No automatic early-cancellation refund is triggered.
+    /// PaymentTerms is an explicit commercial decision supplied by the caller; it is never
+    /// derived from the current/previous subscription, PromotionType, BonusMonths, or installments.
     /// </summary>
     [HttpPost("{id}/change-plan")]
     [HasPermission(Permissions.Subscriptions.Manage)]
@@ -108,7 +114,8 @@ public class TenantPlansController(ILocalizer localizer, IMediator mediator) : A
     {
         var command = new ChangeSubscriptionPlanCommand(
             id,
-            request.NewPlanId);
+            request.NewPlanId,
+            request.PaymentTerms);
 
         var result = await mediator.Send(command, cancellationToken);
 
@@ -174,6 +181,7 @@ public class TenantPlansController(ILocalizer localizer, IMediator mediator) : A
 /// Request body for the commercial renewal endpoint.
 /// Only PlanId and DurationMonths are allowed as optional overrides.
 /// All commercial values (price, discount, benefits) are server-derived from the Offer engine.
+/// PaymentTerms is NOT derived — it must be supplied explicitly by the caller.
 /// </summary>
 public class RenewSubscriptionCommercialRequest
 {
@@ -182,6 +190,12 @@ public class RenewSubscriptionCommercialRequest
 
     /// <summary>Optional: override the duration. Null = use plan's default duration.</summary>
     public int? DurationMonths { get; set; }
+
+    /// <summary>
+    /// REQUIRED: the explicit commercial payment decision for the new transaction.
+    /// 0 = FullUpfront, 1 = Installments. Never defaulted and never inferred from any other field.
+    /// </summary>
+    public PaymentTerms? PaymentTerms { get; set; }
 }
 
 /// <summary>
@@ -200,9 +214,16 @@ public class CancelSubscriptionRequest
 /// <summary>
 /// Request body for the change-plan endpoint.
 /// Only NewPlanId is accepted. All commercial values are server-derived from the Offer engine.
+/// PaymentTerms is NOT derived — it must be supplied explicitly by the caller.
 /// </summary>
 public class ChangePlanRequest
 {
     /// <summary>Required: the target plan ID to change to.</summary>
     public int NewPlanId { get; set; }
+
+    /// <summary>
+    /// REQUIRED: the explicit commercial payment decision for the new transaction.
+    /// 0 = FullUpfront, 1 = Installments. Never defaulted and never inferred from any other field.
+    /// </summary>
+    public PaymentTerms? PaymentTerms { get; set; }
 }

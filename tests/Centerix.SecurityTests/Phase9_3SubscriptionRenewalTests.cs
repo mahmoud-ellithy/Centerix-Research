@@ -1,4 +1,4 @@
-﻿namespace Centerix.SecurityTests;
+namespace Centerix.SecurityTests;
 
 using Centerix.Application.Platform.Commands;
 using Centerix.Domain.Common.Results;

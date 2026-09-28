@@ -1,4 +1,4 @@
-﻿using System.Data;
+using System.Data;
 using System.Reflection;
 using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform.Commands;
