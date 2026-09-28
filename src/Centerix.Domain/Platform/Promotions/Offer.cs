@@ -108,6 +108,15 @@ public class Offer : AuditableEntity<Guid>
     /// </summary>
     public int? ChargedMonths { get; private set; }
 
+    /// <summary>
+    /// Commercial payment mode recorded on the offer. This is an explicit commercial
+    /// decision supplied by the platform operator at Offer creation/calculation time.
+    /// It is NOT derived from <see cref="PromotionType"/>, <c>Plan.BonusMonths</c>,
+    /// installment rows, or any other indirect field. Snapshotted immutably to
+    /// <c>Contract.PaymentTerms</c> on Contract creation.
+    /// </summary>
+    public PaymentTerms PaymentTerms { get; private set; }
+
     // ---- Lifecycle timestamps ----
 
     /// <summary>UTC timestamp when the offer was calculated.</summary>
@@ -169,6 +178,7 @@ public class Offer : AuditableEntity<Guid>
         string promotionType,
         decimal? discountPercentage,
         int? chargedMonths,
+        PaymentTerms paymentTerms,
         DateTime calculatedAtUtc,
         DateTime? expiresAtUtc)
         : base(id)
@@ -196,6 +206,7 @@ public class Offer : AuditableEntity<Guid>
         PromotionType = promotionType;
         DiscountPercentage = discountPercentage;
         ChargedMonths = chargedMonths;
+        PaymentTerms = paymentTerms;
         CalculatedAtUtc = calculatedAtUtc;
         ExpiresAtUtc = expiresAtUtc;
     }
@@ -213,6 +224,7 @@ public class Offer : AuditableEntity<Guid>
         decimal finalAmount,
         decimal monthlyListPrice,
         string currencyCode,
+        PaymentTerms paymentTerms,
         int? promotionId = null,
         string? promotionName = null,
         string? promotionCode = null,
@@ -263,6 +275,10 @@ public class Offer : AuditableEntity<Guid>
         if (expiresAtUtc.HasValue && expiresAtUtc.Value <= calculatedAtUtc)
             return Error.Validation("Offer.ExpiresAt_Invalid", "Expiration must be after calculation time");
 
+        if (!Enum.IsDefined(typeof(PaymentTerms), paymentTerms))
+            return Error.Validation("Offer.PaymentTerms_Invalid",
+                $"PaymentTerms value '{paymentTerms}' is not defined.");
+
         return new Offer(
             id,
             tenantId.Trim(),
@@ -287,6 +303,7 @@ public class Offer : AuditableEntity<Guid>
             promotionType,
             discountPercentage,
             chargedMonths,
+            paymentTerms,
             calculatedAtUtc == default ? DateTime.UtcNow : calculatedAtUtc,
             expiresAtUtc);
     }

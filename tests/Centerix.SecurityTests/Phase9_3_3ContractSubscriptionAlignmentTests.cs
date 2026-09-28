@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using System.Reflection;
 using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform.Commands;
@@ -211,7 +211,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
             discountAmount: 1000m,
             promotionId: 1,
             promotionType: "PercentageDiscount",
-            chargedMonths: 10, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            chargedMonths: 10, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
 
         var oldBenefit = ContractBenefit.Create(
             Guid.NewGuid(), oldContract.Id, ContractBenefitType.PhysicalGift,
@@ -242,7 +242,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
             currencyCode: "EGP",
             grossAmount: 14400m,
             contractedAmount: 14400m,
-            discountAmount: 0m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            discountAmount: 0m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
 
         // Old contract remains unchanged
         Assert.Equal(oldMonthly, oldContract.MonthlyListPrice);
@@ -271,7 +271,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
         var contract = Contract.Create(
             Guid.NewGuid(), tenantId, "CTR-ALIGN-001", 1,
             subStart, subStart.AddMonths(12), 12,
-            1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
         sub.LinkToContract(contract.Id);
 
         // BillingCycle aligned with subscription
@@ -313,7 +313,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
         var contract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-DUR-001", 1,
             startsAt, endsAt, durationMonths,
-            1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
 
         // Contract end is based on DurationMonths using AddCalendarMonths
         Assert.Equal(startsAt, contract.EffectiveAtUtc);
@@ -357,13 +357,13 @@ public class Phase9_3_3ContractSubscriptionAlignmentTests
             Guid.NewGuid(), "t-1", "CTR-OLD-001", 1,
             new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
-            12, 1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            12, 1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
 
         var newStart = oldContract.EndsAtUtc;
         var newContract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-NEW-001", 1,
             newStart, newStart.AddMonths(12),
-            12, 1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            12, 1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
 
         // New contract starts at or after old contract ends
         Assert.True(newContract.EffectiveAtUtc >= oldContract.EndsAtUtc);
@@ -550,7 +550,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentSqlServerTests
         var handler = CreateHandler(db2, fixedTime: now);
 
         var result = await handler.Handle(
-            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 12),
+            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 12, PaymentTerms: PaymentTerms.Installments),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess, string.Join(", ", result.Errors?.Select(e => e.Code) ?? []));
@@ -615,7 +615,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentSqlServerTests
         var handler = CreateHandler(db2, fixedTime: now);
 
         var result = await handler.Handle(
-            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 12),
+            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 12, PaymentTerms: PaymentTerms.Installments),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess, string.Join(", ", result.Errors?.Select(e => e.Code) ?? []));
@@ -671,7 +671,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentSqlServerTests
         var handler = CreateHandler(db2, fixedTime: now);
 
         var result = await handler.Handle(
-            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 6),
+            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 6, PaymentTerms: PaymentTerms.Installments),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess, string.Join(", ", result.Errors?.Select(e => e.Code) ?? []));
@@ -727,7 +727,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentSqlServerTests
         var handler = CreateHandler(db2, fixedTime: now);
 
         var result = await handler.Handle(
-            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 12),
+            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 12, PaymentTerms: PaymentTerms.Installments),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess, string.Join(", ", result.Errors?.Select(e => e.Code) ?? []));
@@ -777,7 +777,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentSqlServerTests
 
         var handler = CreateHandler(db, fixedTime: now);
         var result = await handler.Handle(
-            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 6),
+            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 6, PaymentTerms: PaymentTerms.Installments),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess, string.Join(", ", result.Errors?.Select(e => e.Code) ?? []));
@@ -848,6 +848,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentSqlServerTests
                 grossAmount: 10000m,
                 contractedAmount: 9000m,
                 entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+                paymentTerms: PaymentTerms.Installments,
                 discountAmount: 1000m,
                 promotionId: 1, promotionType: "PercentageDiscount", chargedMonths: 10).Value;
             db.Contracts.Add(oldContract);
@@ -879,7 +880,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentSqlServerTests
         var handler = CreateHandler(db2, fixedTime: now);
 
         var result = await handler.Handle(
-            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 12),
+            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 12, PaymentTerms: PaymentTerms.Installments),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess, string.Join(", ", result.Errors?.Select(e => e.Code) ?? []));

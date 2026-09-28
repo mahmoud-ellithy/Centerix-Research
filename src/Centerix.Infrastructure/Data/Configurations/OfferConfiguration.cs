@@ -1,6 +1,7 @@
 namespace Centerix.Infrastructure.Data.Configurations;
 
 using Centerix.Domain.Platform.Promotions;
+using Centerix.Domain.Platform.Promotions.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -99,6 +100,17 @@ public class OfferConfiguration : IEntityTypeConfiguration<Offer>
             .HasPrecision(5, 2);
 
         builder.Property(o => o.ChargedMonths);
+
+        // Task A — Commercial payment mode (explicit commercial decision).
+        // Stored as a single-byte column mirroring the PaymentTerms enum.
+        // NEVER inferred from PromotionType, BonusMonths, installment rows, or any other field.
+        // The column is NOT NULL and has no SQL default: every Offer that reaches the database
+        // must supply an explicit value (enforced by Offer.Create at the domain boundary). The
+        // migration is safe because the repository is greenfield on this column — no historical
+        // rows exist to backfill.
+        builder.Property(o => o.PaymentTerms)
+            .HasConversion<byte>()
+            .IsRequired();
 
         // Lifecycle timestamps
         builder.Property(o => o.CalculatedAtUtc)

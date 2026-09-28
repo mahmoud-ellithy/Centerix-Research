@@ -43,7 +43,8 @@ using Microsoft.EntityFrameworkCore.Storage;
 public record RenewSubscriptionOfferCommand(
     Guid SubscriptionId,
     int? PlanId = null,
-    int? DurationMonths = null) : IRequest<Result<Guid>>;
+    int? DurationMonths = null,
+    PaymentTerms? PaymentTerms = null) : IRequest<Result<Guid>>;
 
 public class RenewSubscriptionOfferValidator : AbstractValidator<RenewSubscriptionOfferCommand>
 {
@@ -52,6 +53,13 @@ public class RenewSubscriptionOfferValidator : AbstractValidator<RenewSubscripti
         RuleFor(x => x.SubscriptionId).NotEmpty();
         RuleFor(x => x.PlanId).GreaterThan(0).When(x => x.PlanId.HasValue);
         RuleFor(x => x.DurationMonths).GreaterThan(0).When(x => x.DurationMonths.HasValue);
+
+        // PaymentTerms is an explicit commercial decision and must be supplied.
+        RuleFor(x => x.PaymentTerms)
+            .NotNull()
+            .WithMessage("PaymentTerms is an explicit commercial decision and must be supplied.")
+            .Must(pt => pt.HasValue && Enum.IsDefined(typeof(PaymentTerms), pt.Value))
+            .WithMessage("PaymentTerms must be a defined value: FullUpfront (0) or Installments (1).");
     }
 }
 
@@ -203,6 +211,13 @@ public class RenewSubscriptionOfferHandler(
             // ── Step 8: Persist the Offer as an immutable snapshot.
             // Plan IS authoritative at this moment: entitlement values and pricing
             // tiers are captured into the Offer before acceptance.
+            // PaymentTerms is an explicit commercial decision. The validator is
+            // expected to have already rejected a null/empty value, but we defensively
+            // re-check here so direct handler invocations (e.g. tests) cannot bypass
+            // the invariant and silently fabricate a commercial default.
+            if (request.PaymentTerms is null || !Enum.IsDefined(typeof(PaymentTerms), request.PaymentTerms.Value))
+                return ContractErrors.PaymentTermsRequired;
+
             var offerResult = Offer.Create(
                 id: Guid.NewGuid(),
                 tenantId: oldSubscription.TenantId,
@@ -228,7 +243,8 @@ public class RenewSubscriptionOfferHandler(
                 maxTeachers: plan.MaxTeachers,
                 storageGb: plan.StorageGB,
                 smsQuota: plan.SMSQuota,
-                entitlementSnapshotVersion: Offer.CompleteEntitlementSnapshotVersion);
+                entitlementSnapshotVersion: Offer.CompleteEntitlementSnapshotVersion,
+                paymentTerms: request.PaymentTerms.Value);
 
             if (!offerResult.IsSuccess)
                 return offerResult.Errors!;
@@ -277,6 +293,7 @@ public class RenewSubscriptionOfferHandler(
                 grossAmount: calc.BaseAmount,
                 contractedAmount: calc.FinalAmount,
                 entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+                paymentTerms: offer.PaymentTerms,
                 discountAmount: calc.DiscountAmount,
                 promotionReference: calc.PromotionName,
                 promotionId: calc.PromotionId,

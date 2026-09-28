@@ -4,6 +4,7 @@ using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Contracts.Enums;
+using Centerix.Domain.Platform.Promotions.Enums;
 using Centerix.Domain.Platform.Subscriptions;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -34,6 +35,7 @@ public record CreateContractCommand(
     string CurrencyCode,
     decimal ContractedAmount,
     decimal DiscountAmount,
+    PaymentTerms PaymentTerms,
     string? PromotionReference,
     List<CreatePricingTierRequest> PricingTiers,
     List<CreateBenefitRequest> Benefits,
@@ -124,6 +126,7 @@ public class CreateContractHandler : IRequestHandler<CreateContractCommand, Resu
             grossAmount,
             request.ContractedAmount,
             Contract.CompleteEntitlementSnapshotVersion,
+            request.PaymentTerms,
             request.DiscountAmount,
             request.PromotionReference,
             request.PromotionId,

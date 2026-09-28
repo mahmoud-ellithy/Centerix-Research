@@ -163,6 +163,7 @@ public class Task21_FinalInvoiceIdentityAndPrecisionTests
             grossAmount: offer.BaseAmount,
             contractedAmount: offer.FinalAmount,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments,
             discountAmount: offer.DiscountAmount,
             promotionReference: offer.PromotionName,
             promotionId: offer.PromotionId,

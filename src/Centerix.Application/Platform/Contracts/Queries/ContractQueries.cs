@@ -57,6 +57,7 @@ public class GetContractByIdHandler : IRequestHandler<GetContractByIdQuery, Resu
             PromotionId = contract.PromotionId,
             PromotionType = contract.PromotionType,
             ChargedMonths = contract.ChargedMonths,
+            PaymentTerms = contract.PaymentTerms,
             CreatedAtUtc = contract.CreatedAtUtc,
             PricingTiers = contract.PricingTiers.Select(t => new ContractPricingTierDto
             {
@@ -116,6 +117,7 @@ public class ListContractsHandler : IRequestHandler<ListContractsQuery, Result<L
                 PromotionId = c.PromotionId,
                 PromotionType = c.PromotionType,
                 ChargedMonths = c.ChargedMonths,
+                PaymentTerms = c.PaymentTerms,
                 CreatedAtUtc = c.CreatedAtUtc
             })
             .ToListAsync(cancellationToken);

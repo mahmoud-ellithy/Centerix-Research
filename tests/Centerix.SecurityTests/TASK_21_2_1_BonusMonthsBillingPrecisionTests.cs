@@ -190,6 +190,7 @@ public class TASK_21_2_1_BonusMonthsBillingPrecisionTests
             grossAmount: offer.BaseAmount,
             contractedAmount: offer.FinalAmount,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments,
             discountAmount: offer.DiscountAmount,
             promotionReference: offer.PromotionName,
             promotionId: offer.PromotionId,
@@ -644,7 +645,7 @@ public class TASK_21_2_1_BonusMonthsBillingPrecisionTests
             FrozenClock(Now2026));
 
         var result = await handler.Handle(
-            new RenewSubscriptionOfferCommand(oldSubscription.Id, PlanId: plan.Id, DurationMonths: 12),
+            new RenewSubscriptionOfferCommand(oldSubscription.Id, PlanId: plan.Id, DurationMonths: 12, PaymentTerms: PaymentTerms.Installments),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess, Describe(result.Errors));
@@ -709,7 +710,7 @@ public class TASK_21_2_1_BonusMonthsBillingPrecisionTests
             FrozenClock(Now2026));
 
         var result = await handler.Handle(
-            new ChangeSubscriptionPlanCommand(oldSubscription.Id, newPlan.Id),
+            new ChangeSubscriptionPlanCommand(oldSubscription.Id, newPlan.Id, PaymentTerms: PaymentTerms.Installments),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess, Describe(result.Errors));

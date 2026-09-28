@@ -12,6 +12,7 @@ using Centerix.Domain.Platform.Billing.Refunds;
 using Centerix.Domain.Platform.Billing.Refunds.Enums;
 using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Contracts.Enums;
+using Centerix.Domain.Platform.Promotions.Enums;
 using Centerix.Domain.Platform.Subscriptions;
 using Centerix.Domain.Platform.Subscriptions.Enums;
 using Centerix.Domain.Platform.Tenants;
@@ -43,7 +44,7 @@ public class Phase9_4CancellationTests
         var r = Contract.Create(Guid.NewGuid(), tenantId, "CNT-" + Guid.NewGuid().ToString("N")[..8], 1,
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(months),
-            months, monthly, monthly, "EGP", monthly * months, monthly * months, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
+            months, monthly, monthly, "EGP", monthly * months, monthly * months, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments);
         Assert.True(r.IsSuccess);
         var c = r.Value;
         c.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), c.Id, 1, monthly, "EGP", monthly, 1).Value);

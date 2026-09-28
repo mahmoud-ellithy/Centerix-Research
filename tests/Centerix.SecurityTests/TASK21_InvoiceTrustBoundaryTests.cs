@@ -5,6 +5,7 @@ using Centerix.Application.Platform.Billing.Commands;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Contracts;
+using Centerix.Domain.Platform.Promotions.Enums;
 using Centerix.Domain.Platform.Subscriptions;
 using Centerix.Infrastructure.Data;
 using MediatR;
@@ -65,6 +66,7 @@ public class TASK21_InvoiceTrustBoundaryTests
             grossAmount: grossAmount,
             contractedAmount: contractedAmount,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments,
             discountAmount: discountAmount);
 
         if (!contractResult.IsSuccess)

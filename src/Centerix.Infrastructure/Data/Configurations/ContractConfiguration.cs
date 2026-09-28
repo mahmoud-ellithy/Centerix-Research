@@ -1,6 +1,7 @@
 namespace Centerix.Infrastructure.Data.Configurations;
 
 using Centerix.Domain.Platform.Contracts;
+using Centerix.Domain.Platform.Promotions.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -86,6 +87,17 @@ public class ContractConfiguration : IEntityTypeConfiguration<Contract>
             .HasMaxLength(50);
 
         builder.Property(c => c.ChargedMonths);
+
+        // Task A — Commercial payment mode snapshotted from the accepted Offer.
+        // Immutable after Contract creation. NEVER derived from PromotionType, BonusMonths,
+        // installment rows, or any other indirect field.
+        // The column is NOT NULL and has no SQL default: every Contract that reaches the database
+        // must supply an explicit value (enforced by Contract.Create at the domain boundary). The
+        // migration is safe because the repository is greenfield on this column — no historical
+        // rows exist to backfill.
+        builder.Property(c => c.PaymentTerms)
+            .HasConversion<byte>()
+            .IsRequired();
 
         // Snapshot limit fields: Plan limits copied at contract creation
         builder.Property(c => c.BonusMonths)

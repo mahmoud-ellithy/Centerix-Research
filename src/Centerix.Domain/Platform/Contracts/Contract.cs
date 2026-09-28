@@ -4,6 +4,7 @@ using Centerix.Domain.Common;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Contracts.Enums;
 using Centerix.Domain.Platform.Contracts.Events;
+using Centerix.Domain.Platform.Promotions.Enums;
 using Centerix.Domain.Platform.Subscriptions;
 
 /// <summary>
@@ -104,6 +105,16 @@ public class Contract : AuditableEntity<Guid>
     /// </summary>
     public int BonusMonths { get; private set; }
 
+    /// <summary>
+    /// Commercial payment mode snapshotted from the accepted Offer. Immutable
+    /// after Contract creation. NEVER derived from <c>PromotionType</c>,
+    /// <c>BonusMonths</c>, installment rows, or any other indirect field.
+    /// Invariant: <c>Contract.PaymentTerms == accepted Offer.PaymentTerms</c>.
+    /// Invariant: <c>Contract.PaymentTerms == FullUpfront ⇒ no installment
+    /// schedule may be created for this contract</c>.
+    /// </summary>
+    public PaymentTerms PaymentTerms { get; private set; }
+
     /// <summary>Snapshot of Plan limits at contract creation. Used by SubscriptionFactory.</summary>
     public int MaxStudents { get; private set; }
     public int MaxUsers { get; private set; }
@@ -165,6 +176,7 @@ public class Contract : AuditableEntity<Guid>
         string? promotionType,
         int? chargedMonths,
         int bonusMonths,
+        PaymentTerms paymentTerms,
         int maxStudents,
         int maxUsers,
         int maxBranches,
@@ -192,6 +204,7 @@ public class Contract : AuditableEntity<Guid>
         PromotionType = promotionType;
         ChargedMonths = chargedMonths;
         BonusMonths = bonusMonths;
+        PaymentTerms = paymentTerms;
         MaxStudents = maxStudents;
         MaxUsers = maxUsers;
         MaxBranches = maxBranches;
@@ -218,6 +231,7 @@ public class Contract : AuditableEntity<Guid>
         decimal grossAmount,
         decimal contractedAmount,
         int entitlementSnapshotVersion,
+        PaymentTerms paymentTerms,
         decimal discountAmount = 0,
         string? promotionReference = null,
         int? promotionId = null,
@@ -283,6 +297,9 @@ public class Contract : AuditableEntity<Guid>
             return Error.Validation("Contract.ContractedAmount_Inconsistent",
                 $"ContractedAmount ({contractedAmount}) must equal GrossAmount ({grossAmount}) - DiscountAmount ({discountAmount})");
 
+        if (!Enum.IsDefined(typeof(PaymentTerms), paymentTerms))
+            return ContractErrors.PaymentTermsInvalid(paymentTerms);
+
         var contract = new Contract(
             id,
             tenantId.Trim(),
@@ -303,6 +320,7 @@ public class Contract : AuditableEntity<Guid>
             promotionType,
             chargedMonths,
             bonusMonths,
+            paymentTerms,
             maxStudents,
             maxUsers,
             maxBranches,

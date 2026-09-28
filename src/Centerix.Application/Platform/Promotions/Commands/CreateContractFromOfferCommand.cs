@@ -91,6 +91,8 @@ public class CreateContractFromOfferHandler(
 
         // Create the Contract aggregate using ONLY Offer-derived commercial terms + Offer entitlements
         // Commercial snapshot: GrossAmount = BaseAmount (pre-discount), ContractedAmount = FinalAmount (post-discount)
+        // PaymentTerms is the explicit commercial decision snapshotted from the accepted Offer.
+        // It is NEVER derived from PromotionType, BonusMonths, installment rows, or any other indirect field.
         var contractResult = Contract.Create(
             id: Guid.NewGuid(),
             tenantId: tenantId,
@@ -105,6 +107,7 @@ public class CreateContractFromOfferHandler(
             grossAmount: offer.BaseAmount,
             contractedAmount: offer.FinalAmount,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: offer.PaymentTerms,
             discountAmount: offer.DiscountAmount,
             promotionReference: offer.PromotionName,
             promotionId: offer.PromotionId,

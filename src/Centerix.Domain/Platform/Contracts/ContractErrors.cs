@@ -2,6 +2,7 @@ namespace Centerix.Domain.Platform.Contracts;
 
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Contracts.Enums;
+using Centerix.Domain.Platform.Promotions.Enums;
 
 public static class ContractErrors
 {
@@ -34,6 +35,18 @@ public static class ContractErrors
 
     public static Error StatusInvalid =>
         Error.Validation("Contract.Status_Invalid", "Invalid contract status");
+
+    public static Error PaymentTermsRequired =>
+        Error.Validation("Contract.PaymentTerms_Required",
+            "PaymentTerms is an explicit commercial decision and must be supplied.");
+
+    public static Error PaymentTermsInvalid(PaymentTerms value) =>
+        Error.Validation("Contract.PaymentTerms_Invalid",
+            $"PaymentTerms value '{value}' is not defined. Valid values: FullUpfront, Installments.");
+
+    public static Error FullUpfrontInstallmentScheduleForbidden =>
+        Error.Conflict("Contract.FullUpfront_InstallmentScheduleForbidden",
+            "An installment schedule cannot be created for a contract with PaymentTerms == FullUpfront.");
 
     public static Error ContractedAmountInvalid =>
         Error.Validation("Contract.ContractedAmount_Invalid", "Contracted amount cannot be negative");

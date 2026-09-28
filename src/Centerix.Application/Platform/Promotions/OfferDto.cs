@@ -1,6 +1,7 @@
 namespace Centerix.Application.Platform.Promotions;
 
 using Centerix.Domain.Platform.Contracts.Enums;
+using Centerix.Domain.Platform.Promotions.Enums;
 
 /// <summary>
 /// DTO for an Offer returned to API clients.
@@ -22,6 +23,7 @@ public class OfferDto
     public string PromotionType { get; set; } = default!;
     public decimal? DiscountPercentage { get; set; }
     public int? ChargedMonths { get; set; }
+    public PaymentTerms PaymentTerms { get; set; }
     public DateTime CalculatedAtUtc { get; set; }
     public DateTime? ExpiresAtUtc { get; set; }
     public DateTime? AcceptedAtUtc { get; set; }

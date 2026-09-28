@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using System.Reflection;
 using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform.Commands;
@@ -138,7 +138,7 @@ public class Phase9_3_1RenewalHardeningTests
             Guid.NewGuid(), "t-1", "CTR-001", plan.Id,
             UtcNow, UtcNow.AddMonths(durationMonths), durationMonths,
             monthlyListPrice: 1000m, contractualMonthlyValue: 1000m,
-            currencyCode: "EGP", grossAmount: 5220m, contractedAmount: 5220m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            currencyCode: "EGP", grossAmount: 5220m, contractedAmount: 5220m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
 
         var sub = TenantPlan.Create(
             Guid.NewGuid(), "t-1", plan.Id, 1000m, 1000m, "EGP",
@@ -165,7 +165,7 @@ public class Phase9_3_1RenewalHardeningTests
             currencyCode: offer.Value.CurrencyCode,
             grossAmount: offer.Value.FinalAmount + offer.Value.DiscountAmount,
             contractedAmount: offer.Value.FinalAmount,
-            discountAmount: offer.Value.DiscountAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            discountAmount: offer.Value.DiscountAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
 
         Assert.Equal(offer.Value.FinalAmount, contract.ContractedAmount);
         Assert.Equal(offer.Value.DiscountAmount, contract.DiscountAmount);
@@ -200,7 +200,7 @@ public class Phase9_3_1RenewalHardeningTests
             contractualMonthlyValue: offer.Value.MonthlyListPrice,
             currencyCode: offer.Value.CurrencyCode,
             grossAmount: offer.Value.FinalAmount + offer.Value.DiscountAmount,
-            contractedAmount: offer.Value.FinalAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            contractedAmount: offer.Value.FinalAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
 
         Assert.Equal("USD", contract.CurrencyCode);
 
@@ -266,7 +266,8 @@ public class Phase9_3_1RenewalHardeningTests
         var oldContract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-OLD", 1,
             UtcNow.AddMonths(-12), UtcNow, 12,
-            1000m, 1000m, "EGP", 11000m, 10000m, Contract.CompleteEntitlementSnapshotVersion, 1000m,
+            1000m, 1000m, "EGP", 11000m, 10000m, Contract.CompleteEntitlementSnapshotVersion,
+            PaymentTerms.Installments, 1000m,
             promotionId: 1, promotionType: "PercentageDiscount", chargedMonths: 10).Value;
 
         var oldMonthly = oldContract.MonthlyListPrice;
@@ -276,7 +277,7 @@ public class Phase9_3_1RenewalHardeningTests
         var newContract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-NEW", 2,
             UtcNow, UtcNow.AddMonths(12), 12,
-            1200m, 1200m, "EGP", 14400m, 14400m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            1200m, 1200m, "EGP", 14400m, 14400m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
 
         Assert.Equal(oldMonthly, oldContract.MonthlyListPrice);
         Assert.Equal(oldAmount, oldContract.ContractedAmount);
@@ -304,6 +305,7 @@ public class Phase9_3_1RenewalHardeningTests
     {
         var oldOffer = Offer.Create(
             Guid.NewGuid(), "t-1", 1, 12, 10000m, 1000m, 9000m, 1000m, "EGP",
+            paymentTerms: PaymentTerms.Installments,
             promotionId: 1, promotionName: "Old Promo",
             promotionType: "PercentageDiscount", discountPercentage: 10m,
             calculatedAtUtc: UtcNow.AddMonths(-12),
@@ -322,7 +324,7 @@ public class Phase9_3_1RenewalHardeningTests
         var oldContract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-TIER", 1,
             UtcNow.AddMonths(-12), UtcNow, 12,
-            1000m, 1000m, "EGP", 10000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            1000m, 1000m, "EGP", 10000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
         var oldTier = ContractPricingTier.Create(
             Guid.NewGuid(), oldContract.Id, 12, 10000m, "EGP", 1000m, 1).Value;
         oldContract.AddPricingTier(oldTier);
@@ -353,6 +355,7 @@ public class Phase9_3_1RenewalHardeningTests
     {
         var offer = Offer.Create(
             Guid.NewGuid(), "t-1", 1, 12, 10000m, 0, 10000m, 1000m, "EGP",
+            paymentTerms: PaymentTerms.Installments,
             calculatedAtUtc: UtcNow, expiresAtUtc: UtcNow.AddHours(24)).Value;
 
         var benefit = OfferBenefit.Create(
@@ -370,7 +373,7 @@ public class Phase9_3_1RenewalHardeningTests
         var oldContract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-OLD", 1,
             UtcNow.AddMonths(-12), UtcNow, 12,
-            1000m, 1000m, "EGP", 10000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            1000m, 1000m, "EGP", 10000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
         var oldBenefit = ContractBenefit.Create(
             Guid.NewGuid(), oldContract.Id, ContractBenefitType.PhysicalGift,
             "Old Gift", null, 1000m, "EGP").Value;
@@ -379,7 +382,7 @@ public class Phase9_3_1RenewalHardeningTests
         var newContract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-NEW", 1,
             UtcNow, UtcNow.AddMonths(12), 12,
-            1000m, 1000m, "EGP", 10000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            1000m, 1000m, "EGP", 10000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
 
         Assert.Empty(newContract.Benefits);
         Assert.Single(oldContract.Benefits);
@@ -390,6 +393,7 @@ public class Phase9_3_1RenewalHardeningTests
     {
         var offer = Offer.Create(
             Guid.NewGuid(), "t-1", 1, 12, 10000m, 0, 10000m, 1000m, "EGP",
+            paymentTerms: PaymentTerms.Installments,
             calculatedAtUtc: UtcNow, expiresAtUtc: UtcNow.AddHours(24)).Value;
 
         Assert.Empty(offer.Benefits);
@@ -397,7 +401,7 @@ public class Phase9_3_1RenewalHardeningTests
         var contract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-NEW", 1,
             UtcNow, UtcNow.AddMonths(12), 12,
-            1000m, 1000m, "EGP", 10000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            1000m, 1000m, "EGP", 10000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
 
         Assert.Empty(contract.Benefits);
     }
@@ -430,7 +434,7 @@ public class Phase9_3_1RenewalHardeningTests
         var contract = Contract.Create(
             Guid.NewGuid(), tenantId, "CTR-001", 1,
             UtcNow, UtcNow.AddMonths(6), 6,
-            1000m, 1000m, "EGP", 5220m, 5220m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            1000m, 1000m, "EGP", 5220m, 5220m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
         sub.LinkToContract(contract.Id);
 
         var bc = BillingCycle.Create(
@@ -549,7 +553,7 @@ public class Phase9_3_1RenewalHardeningTests
         var contract = Contract.Create(
             Guid.NewGuid(), tenantId, "CTR-001", 1,
             UtcNow, UtcNow.AddMonths(12), 12,
-            1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
 
         var billingCycle = BillingCycle.Create(
             Guid.NewGuid(), tenantId, sub.Id,
@@ -614,7 +618,7 @@ public class Phase9_3_1RenewalHardeningTests
             contractualMonthlyValue: offer.Value.MonthlyListPrice,
             currencyCode: offer.Value.CurrencyCode,
             grossAmount: offer.Value.FinalAmount + offer.Value.DiscountAmount,
-            contractedAmount: offer.Value.FinalAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            contractedAmount: offer.Value.FinalAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
 
         Assert.Equal(requestedDuration, contract.DurationMonths);
 
@@ -676,7 +680,7 @@ public class Phase9_3_1RenewalHardeningTests
         var contract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-TRACE", 1,
             UtcNow, UtcNow.AddMonths(12), 12,
-            1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
 
         var prevSubId = Guid.NewGuid();
         var result = contract.LinkToPreviousSubscription(prevSubId);
@@ -691,7 +695,7 @@ public class Phase9_3_1RenewalHardeningTests
         var contract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-FRESH", 1,
             UtcNow, UtcNow.AddMonths(12), 12,
-            1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
 
         Assert.Null(contract.PreviousSubscriptionId);
     }
@@ -706,7 +710,7 @@ public class Phase9_3_1RenewalHardeningTests
         var oldContract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-OLD", 1,
             UtcNow.AddMonths(-12), UtcNow, 12,
-            1000m, 1000m, "EGP", 10000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            1000m, 1000m, "EGP", 10000m, 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
         var oldTier = ContractPricingTier.Create(
             Guid.NewGuid(), oldContract.Id, 12, 10000m, "EGP", 1000m, 1).Value;
         oldContract.AddPricingTier(oldTier);
@@ -714,7 +718,7 @@ public class Phase9_3_1RenewalHardeningTests
         var newContract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-NEW", 2,
             UtcNow, UtcNow.AddMonths(12), 12,
-            1200m, 1200m, "EGP", 14400m, 14400m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            1200m, 1200m, "EGP", 14400m, 14400m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
         var newTier = ContractPricingTier.Create(
             Guid.NewGuid(), newContract.Id, 12, 12000m, "EGP", 1200m, 1).Value;
         newContract.AddPricingTier(newTier);
@@ -733,13 +737,14 @@ public class Phase9_3_1RenewalHardeningTests
             UtcNow.AddMonths(-12), UtcNow, 12,
             1000m, 1000m, "EGP", 10000m, 9000m,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments,
             discountAmount: 1000m,
             promotionId: 1, promotionType: "PercentageDiscount").Value;
 
         var newContract = Contract.Create(
             Guid.NewGuid(), "t-1", "CTR-FRESH", 1,
             UtcNow, UtcNow.AddMonths(12), 12,
-            1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            1000m, 1000m, "EGP", 12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments).Value;
 
         Assert.Equal(1000m, oldContract.DiscountAmount);
         Assert.Equal(0m, newContract.DiscountAmount);
@@ -783,8 +788,8 @@ public class Phase9_3_1RenewalHardeningTests
         Assert.False(validator.Validate(new RenewSubscriptionOfferCommand(Guid.NewGuid(), PlanId: -1)).IsValid);
         Assert.False(validator.Validate(new RenewSubscriptionOfferCommand(Guid.NewGuid(), DurationMonths: 0)).IsValid);
         Assert.False(validator.Validate(new RenewSubscriptionOfferCommand(Guid.Empty)).IsValid);
-        Assert.True(validator.Validate(new RenewSubscriptionOfferCommand(Guid.NewGuid())).IsValid);
-        Assert.True(validator.Validate(new RenewSubscriptionOfferCommand(Guid.NewGuid(), PlanId: 1, DurationMonths: 6)).IsValid);
+        Assert.False(validator.Validate(new RenewSubscriptionOfferCommand(Guid.NewGuid())).IsValid);
+        Assert.True(validator.Validate(new RenewSubscriptionOfferCommand(Guid.NewGuid(), PlanId: 1, DurationMonths: 6, PaymentTerms: PaymentTerms.Installments)).IsValid);
     }
 }
 
@@ -924,7 +929,7 @@ public class Phase9_3_1RenewalSqlServerTests
             barrier.SignalAndWait(TestTimeout);
 
             var result = await handler.Handle(
-                new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 6),
+                new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 6, PaymentTerms: PaymentTerms.Installments),
                 CancellationToken.None);
 
             if (result.IsSuccess)
@@ -967,7 +972,7 @@ public class Phase9_3_1RenewalSqlServerTests
         var handler = CreateHandler(db2);
 
         var result = await handler.Handle(
-            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 6),
+            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 6, PaymentTerms: PaymentTerms.Installments),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess, string.Join(", ", result.Errors?.Select(e => e.Code) ?? []));
@@ -1028,7 +1033,7 @@ public class Phase9_3_1RenewalSqlServerTests
         var handler = CreateHandler(db2);
 
         var result = await handler.Handle(
-            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 12),
+            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 12, PaymentTerms: PaymentTerms.Installments),
             CancellationToken.None);
 
         Assert.True(result.IsSuccess, string.Join(", ", result.Errors?.Select(e => e.Code) ?? []));
@@ -1077,7 +1082,7 @@ public class Phase9_3_1RenewalSqlServerTests
         var handler1 = CreateHandler(db1);
 
         var first = await handler1.Handle(
-            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 6),
+            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 6, PaymentTerms: PaymentTerms.Installments),
             CancellationToken.None);
         Assert.True(first.IsSuccess, string.Join(", ", first.Errors?.Select(e => e.Code) ?? []));
 
@@ -1087,7 +1092,7 @@ public class Phase9_3_1RenewalSqlServerTests
         var handler2 = CreateHandler(db2);
 
         var second = await handler2.Handle(
-            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 6),
+            new RenewSubscriptionOfferCommand(subId, PlanId: planId, DurationMonths: 6, PaymentTerms: PaymentTerms.Installments),
             CancellationToken.None);
         Assert.False(second.IsSuccess);
     }

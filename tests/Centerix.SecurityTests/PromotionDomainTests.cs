@@ -728,7 +728,8 @@ public class PromotionDomainTests
             promotionReference: offer.PromotionName,
             promotionId: offer.PromotionId,
             promotionType: offer.PromotionType,
-            chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contracts.CompleteEntitlementSnapshotVersion);
+            chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contracts.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments);
 
         Assert.True(contractResult.IsSuccess);
         var contract = contractResult.Value;

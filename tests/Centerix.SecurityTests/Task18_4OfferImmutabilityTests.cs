@@ -23,6 +23,7 @@ public class Task18_4OfferBenefitImmutabilityTests
         finalAmount: 12000m,
         monthlyListPrice: 1000m,
         currencyCode: "EGP",
+        paymentTerms: PaymentTerms.Installments,
         calculatedAtUtc: FixedNow,
         expiresAtUtc: FixedNow.AddDays(1),
         bonusMonths: 0,

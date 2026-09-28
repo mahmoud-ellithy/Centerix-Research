@@ -7,6 +7,7 @@ using Centerix.Domain.Platform.Billing.Payments;
 using Centerix.Domain.Platform.Billing.Payments.Enums;
 using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Contracts.Enums;
+using Centerix.Domain.Platform.Promotions.Enums;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -294,7 +295,7 @@ public class Phase8InstallmentAllocationTests : IClassFixture<TestWebApplication
             1000m,
             1000m,
             "EGP",
-            12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
+            12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments);
 
         contract.Value!.SubmitForApproval();
         contract.Value!.Activate(DateTime.UtcNow);
@@ -314,7 +315,7 @@ public class Phase8InstallmentAllocationTests : IClassFixture<TestWebApplication
             1000m,
             1000m,
             "EGP",
-            12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
+            12000m, 12000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion, paymentTerms: PaymentTerms.Installments);
 
         contract.Value!.SubmitForApproval();
         contract.Value!.Activate(DateTime.UtcNow);

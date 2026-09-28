@@ -15,6 +15,7 @@ using Centerix.Domain.Platform.Billing.Refunds.Enums;
 using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Contracts.Enums;
 using Centerix.Domain.Platform.Plans;
+using Centerix.Domain.Platform.Promotions.Enums;
 using Centerix.Domain.Platform.Subscriptions;
 using Centerix.Domain.Platform.Subscriptions.Enums;
 using FluentValidation;
@@ -49,7 +50,8 @@ using Microsoft.EntityFrameworkCore.Storage;
 /// </summary>
 public record ChangeSubscriptionPlanCommand(
     Guid SubscriptionId,
-    int NewPlanId) : IRequest<Result<Guid>>;
+    int NewPlanId,
+    PaymentTerms? PaymentTerms = null) : IRequest<Result<Guid>>;
 
 public class ChangeSubscriptionPlanValidator : AbstractValidator<ChangeSubscriptionPlanCommand>
 {
@@ -57,6 +59,13 @@ public class ChangeSubscriptionPlanValidator : AbstractValidator<ChangeSubscript
     {
         RuleFor(x => x.SubscriptionId).NotEmpty();
         RuleFor(x => x.NewPlanId).GreaterThan(0);
+
+        // PaymentTerms is an explicit commercial decision and must be supplied.
+        RuleFor(x => x.PaymentTerms)
+            .NotNull()
+            .WithMessage("PaymentTerms is an explicit commercial decision and must be supplied.")
+            .Must(pt => pt.HasValue && Enum.IsDefined(typeof(PaymentTerms), pt.Value))
+            .WithMessage("PaymentTerms must be a defined value: FullUpfront (0) or Installments (1).");
     }
 }
 
@@ -211,6 +220,13 @@ public class ChangeSubscriptionPlanHandler(
 
             var calc = calculated.Value;
 
+            // PaymentTerms is an explicit commercial decision. The validator is
+            // expected to have already rejected a null/empty value, but we defensively
+            // re-check here so direct handler invocations (e.g. tests) cannot bypass
+            // the invariant and silently fabricate a commercial default.
+            if (request.PaymentTerms is null || !Enum.IsDefined(typeof(PaymentTerms), request.PaymentTerms.Value))
+                return ContractErrors.PaymentTermsRequired;
+
             var offerResult = Offer.Create(
                 id: Guid.NewGuid(),
                 tenantId: oldSubscription.TenantId,
@@ -236,7 +252,8 @@ public class ChangeSubscriptionPlanHandler(
                 maxTeachers: plan.MaxTeachers,
                 storageGb: plan.StorageGB,
                 smsQuota: plan.SMSQuota,
-                entitlementSnapshotVersion: Offer.CompleteEntitlementSnapshotVersion);
+                entitlementSnapshotVersion: Offer.CompleteEntitlementSnapshotVersion,
+                paymentTerms: request.PaymentTerms.Value);
 
             if (!offerResult.IsSuccess)
                 return offerResult.Errors!;
@@ -280,6 +297,7 @@ public class ChangeSubscriptionPlanHandler(
                 grossAmount: calc.BaseAmount,
                 contractedAmount: calc.FinalAmount,
                 entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+                paymentTerms: offer.PaymentTerms,
                 discountAmount: calc.DiscountAmount,
                 promotionReference: calc.PromotionName,
                 promotionId: calc.PromotionId,

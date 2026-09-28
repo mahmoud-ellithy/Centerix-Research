@@ -13,10 +13,16 @@ using Microsoft.EntityFrameworkCore;
 /// Benefits are NOT accepted from the client — they are sourced from
 /// trusted commercial configuration. If no trusted source exists,
 /// the Offer contains zero Benefits.
+///
+/// <see cref="PaymentTerms"/> is an explicit commercial decision supplied by
+/// the platform operator at Offer calculation time. It is NOT derived from
+/// <c>PromotionType</c>, <c>Plan.BonusMonths</c>, installment rows, or any
+/// other indirect field.
 /// </summary>
 public record CalculateAndPersistOfferCommand(
     int PlanId,
     int DurationMonths,
+    PaymentTerms PaymentTerms,
     DateTime? EvaluationTimeUtc = null) : IRequest<Result<OfferDto>>;
 
 public class CalculateAndPersistOfferHandler(
@@ -97,7 +103,8 @@ public class CalculateAndPersistOfferHandler(
             maxTeachers: plan.MaxTeachers,
             storageGb: plan.StorageGB,
             smsQuota: plan.SMSQuota,
-            entitlementSnapshotVersion: Domain.Platform.Promotions.Offer.CompleteEntitlementSnapshotVersion);
+            entitlementSnapshotVersion: Domain.Platform.Promotions.Offer.CompleteEntitlementSnapshotVersion,
+            paymentTerms: request.PaymentTerms);
 
         if (!offer.IsSuccess)
             return offer.Errors!;
@@ -151,6 +158,7 @@ public class CalculateAndPersistOfferHandler(
         PromotionType = offer.PromotionType,
         DiscountPercentage = offer.DiscountPercentage,
         ChargedMonths = offer.ChargedMonths,
+        PaymentTerms = offer.PaymentTerms,
         CalculatedAtUtc = offer.CalculatedAtUtc,
         ExpiresAtUtc = offer.ExpiresAtUtc,
         AcceptedAtUtc = offer.AcceptedAtUtc,

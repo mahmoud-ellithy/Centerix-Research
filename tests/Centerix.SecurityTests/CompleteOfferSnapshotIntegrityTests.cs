@@ -10,6 +10,7 @@ using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Features;
 using Centerix.Domain.Platform.Plans;
 using Centerix.Domain.Platform.Promotions;
+using Centerix.Domain.Platform.Promotions.Enums;
 using Centerix.Domain.Platform.Subscriptions;
 using Centerix.Infrastructure.Data;
 using MediatR;
@@ -163,7 +164,7 @@ public class CompleteOfferSnapshotIntegrityTests
         var calculateHandler = new CalculateAndPersistOfferHandler(
             db, new PromotionCalculationService(), tenant);
         var offerResult = await calculateHandler.Handle(
-            new CalculateAndPersistOfferCommand(plan.Id, 12, FixedNow), CancellationToken.None);
+            new CalculateAndPersistOfferCommand(plan.Id, 12, PaymentTerms.Installments, FixedNow), CancellationToken.None);
         Assert.True(offerResult.IsSuccess);
 
         // 3. Accept the Offer (actual production handler)
@@ -227,7 +228,7 @@ public class CompleteOfferSnapshotIntegrityTests
         var calculateHandler = new CalculateAndPersistOfferHandler(
             db, new PromotionCalculationService(), tenant);
         var offerResult = await calculateHandler.Handle(
-            new CalculateAndPersistOfferCommand(plan.Id, 12, FixedNow), CancellationToken.None);
+            new CalculateAndPersistOfferCommand(plan.Id, 12, PaymentTerms.Installments, FixedNow), CancellationToken.None);
         Assert.True(offerResult.IsSuccess);
 
         var acceptHandler = new AcceptOfferHandler(db, tenant);
@@ -293,6 +294,7 @@ public class CompleteOfferSnapshotIntegrityTests
         var offer = Offer.Create(
             Guid.NewGuid(), tenantId, plan.Id, 12,
             12000m, 0m, 12000m, 1000m, "EGP",
+            paymentTerms: PaymentTerms.Installments,
             calculatedAtUtc: FixedNow,
             expiresAtUtc: FixedNow.AddDays(1)).Value;
         Assert.True(offer.Accept(FixedNow).IsSuccess);

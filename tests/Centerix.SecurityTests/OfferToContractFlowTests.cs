@@ -138,6 +138,7 @@ public class OfferToContractFlowTests
             finalAmount: finalAmount,
             monthlyListPrice: monthlyListPrice,
             currencyCode: "EGP",
+            paymentTerms: PaymentTerms.Installments,
             promotionId: 1,
             promotionName: "Test Promo",
             promotionType: "PercentageDiscount",
@@ -363,6 +364,7 @@ public class OfferToContractFlowTests
             finalAmount: 3000m,
             monthlyListPrice: 1000m,
             currencyCode: "EGP",
+            paymentTerms: PaymentTerms.Installments,
             calculatedAtUtc: now,
             expiresAtUtc: now.AddHours(-1));
 
@@ -449,7 +451,8 @@ public class OfferToContractFlowTests
             promotionReference: offer.PromotionName,
             promotionId: offer.PromotionId,
             promotionType: offer.PromotionType,
-            chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion);
+            chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments);
 
         Assert.True(contractResult.IsSuccess);
         var contract = contractResult.Value;
@@ -488,7 +491,8 @@ public class OfferToContractFlowTests
             discountAmount: offer.DiscountAmount,
             promotionId: offer.PromotionId,
             promotionType: offer.PromotionType,
-            chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments).Value;
 
         Assert.Equal(10000m, contract.ContractedAmount);
         Assert.Equal(2000m, contract.DiscountAmount);
@@ -514,7 +518,8 @@ public class OfferToContractFlowTests
             currencyCode: offer.CurrencyCode,
             grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
-            discountAmount: offer.DiscountAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            discountAmount: offer.DiscountAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments).Value;
 
         Assert.Equal(9000m, contract.ContractedAmount);
     }
@@ -537,7 +542,8 @@ public class OfferToContractFlowTests
             currencyCode: offer.CurrencyCode,
             grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
-            discountAmount: offer.DiscountAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            discountAmount: offer.DiscountAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments).Value;
 
         Assert.Equal(1000m, contract.DiscountAmount);
     }
@@ -562,7 +568,8 @@ public class OfferToContractFlowTests
             contractedAmount: offer.FinalAmount,
             discountAmount: offer.DiscountAmount,
             promotionId: offer.PromotionId,
-            promotionType: offer.PromotionType, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            promotionType: offer.PromotionType, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments).Value;
 
         Assert.Equal(offer.PromotionId, contract.PromotionId);
         Assert.Equal(offer.PromotionType, contract.PromotionType);
@@ -587,7 +594,8 @@ public class OfferToContractFlowTests
             grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
             discountAmount: offer.DiscountAmount,
-            chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments).Value;
 
         Assert.Equal(offer.ChargedMonths, contract.ChargedMonths);
     }
@@ -620,7 +628,8 @@ public class OfferToContractFlowTests
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
             grossAmount: 10000m,
-            contractedAmount: 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            contractedAmount: 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments).Value;
 
         var benefit = ContractBenefit.Create(
             Guid.NewGuid(),
@@ -659,6 +668,7 @@ public class OfferToContractFlowTests
             finalAmount: calculated.FinalAmount,
             monthlyListPrice: calculated.MonthlyListPrice,
             currencyCode: calculated.CurrencyCode,
+            paymentTerms: PaymentTerms.Installments,
             promotionId: calculated.PromotionId,
             promotionName: calculated.PromotionName,
             promotionType: calculated.PromotionType,
@@ -708,7 +718,8 @@ public class OfferToContractFlowTests
             discountAmount: offer.DiscountAmount,
             promotionId: offer.PromotionId,
             promotionType: offer.PromotionType,
-            chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments).Value;
 
         promo.Deactivate();
         CreatePromotion(id: 99, percentage: 20m, durationMonths: 3);
@@ -734,7 +745,8 @@ public class OfferToContractFlowTests
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
             grossAmount: 10000m,
-            contractedAmount: 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            contractedAmount: 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments).Value;
 
         contract.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contract.Id, 1, 1000m, "EGP", 1000m, 1).Value);
         contract.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contract.Id, 3, 2700m, "EGP", 1000m, 2).Value);
@@ -754,15 +766,15 @@ public class OfferToContractFlowTests
     [Fact]
     public void Offer_Create_ValidatesRequiredFields()
     {
-        Assert.False(Offer.Create(Guid.Empty, "tenant-1", 1, 12, 10000m, 0, 10000m, 1000m, "EGP").IsSuccess);
-        Assert.False(Offer.Create(Guid.NewGuid(), "", 1, 12, 10000m, 0, 10000m, 1000m, "EGP").IsSuccess);
-        Assert.False(Offer.Create(Guid.NewGuid(), "tenant-1", 0, 12, 10000m, 0, 10000m, 1000m, "EGP").IsSuccess);
-        Assert.False(Offer.Create(Guid.NewGuid(), "tenant-1", 1, 0, 10000m, 0, 10000m, 1000m, "EGP").IsSuccess);
-        Assert.False(Offer.Create(Guid.NewGuid(), "tenant-1", 1, 12, -1m, 0, 10000m, 1000m, "EGP").IsSuccess);
-        Assert.False(Offer.Create(Guid.NewGuid(), "tenant-1", 1, 12, 10000m, -1m, 10000m, 1000m, "EGP").IsSuccess);
-        Assert.False(Offer.Create(Guid.NewGuid(), "tenant-1", 1, 12, 10000m, 0, -1m, 1000m, "EGP").IsSuccess);
-        Assert.False(Offer.Create(Guid.NewGuid(), "tenant-1", 1, 12, 10000m, 0, 10000m, -1m, "EGP").IsSuccess);
-        Assert.False(Offer.Create(Guid.NewGuid(), "tenant-1", 1, 12, 10000m, 0, 10000m, 1000m, "US").IsSuccess);
+        Assert.False(Offer.Create(Guid.Empty, "tenant-1", 1, 12, 10000m, 0, 10000m, 1000m, "EGP", PaymentTerms.Installments).IsSuccess);
+        Assert.False(Offer.Create(Guid.NewGuid(), "", 1, 12, 10000m, 0, 10000m, 1000m, "EGP", PaymentTerms.Installments).IsSuccess);
+        Assert.False(Offer.Create(Guid.NewGuid(), "tenant-1", 0, 12, 10000m, 0, 10000m, 1000m, "EGP", PaymentTerms.Installments).IsSuccess);
+        Assert.False(Offer.Create(Guid.NewGuid(), "tenant-1", 1, 0, 10000m, 0, 10000m, 1000m, "EGP", PaymentTerms.Installments).IsSuccess);
+        Assert.False(Offer.Create(Guid.NewGuid(), "tenant-1", 1, 12, -1m, 0, 10000m, 1000m, "EGP", PaymentTerms.Installments).IsSuccess);
+        Assert.False(Offer.Create(Guid.NewGuid(), "tenant-1", 1, 12, 10000m, -1m, 10000m, 1000m, "EGP", PaymentTerms.Installments).IsSuccess);
+        Assert.False(Offer.Create(Guid.NewGuid(), "tenant-1", 1, 12, 10000m, 0, -1m, 1000m, "EGP", PaymentTerms.Installments).IsSuccess);
+        Assert.False(Offer.Create(Guid.NewGuid(), "tenant-1", 1, 12, 10000m, 0, 10000m, -1m, "EGP", PaymentTerms.Installments).IsSuccess);
+        Assert.False(Offer.Create(Guid.NewGuid(), "tenant-1", 1, 12, 10000m, 0, 10000m, 1000m, "US", PaymentTerms.Installments).IsSuccess);
     }
 
     [Fact]
@@ -771,7 +783,7 @@ public class OfferToContractFlowTests
         var result = Offer.Create(
             Guid.NewGuid(), "tenant-1", 1, 12,
             baseAmount: 1000m, discountAmount: 2000m, finalAmount: 0m,
-            monthlyListPrice: 1000m, currencyCode: "EGP");
+            monthlyListPrice: 1000m, currencyCode: "EGP", paymentTerms: PaymentTerms.Installments);
 
         Assert.False(result.IsSuccess);
     }
@@ -1006,7 +1018,8 @@ public class OfferToContractFlowTests
             currencyCode: offer.CurrencyCode,
             grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
-            discountAmount: offer.DiscountAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            discountAmount: offer.DiscountAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments).Value;
 
         foreach (var ob in offer.Benefits)
         {
@@ -1050,7 +1063,8 @@ public class OfferToContractFlowTests
             currencyCode: offer.CurrencyCode,
             grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
-            discountAmount: offer.DiscountAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            discountAmount: offer.DiscountAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments).Value;
 
         foreach (var ob in offer.Benefits)
         {
@@ -1130,7 +1144,8 @@ public class OfferToContractFlowTests
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
             grossAmount: 10000m,
-            contractedAmount: 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            contractedAmount: 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments).Value;
 
         var b1 = ContractBenefit.Create(Guid.NewGuid(), contract.Id, ContractBenefitType.PhysicalGift, "A", null, 1500m, "EGP").Value;
         var b2 = ContractBenefit.Create(Guid.NewGuid(), contract.Id, ContractBenefitType.PhysicalGift, "B", null, 1500m, "EGP").Value;
@@ -1157,7 +1172,8 @@ public class OfferToContractFlowTests
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
             grossAmount: 10000m,
-            contractedAmount: 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            contractedAmount: 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments).Value;
 
         var physicalBenefit = ContractBenefit.Create(Guid.NewGuid(), contract.Id, ContractBenefitType.PhysicalGift, "Printer", null, 1000m, "EGP").Value;
         contract.AddBenefit(physicalBenefit);
@@ -1208,7 +1224,8 @@ public class OfferToContractFlowTests
             discountAmount: offer.DiscountAmount,
             promotionId: offer.PromotionId,
             promotionType: offer.PromotionType,
-            chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments).Value;
 
         Assert.Equal(1000m, contract.MonthlyListPrice);
         Assert.Equal(9000m, contract.ContractedAmount);
@@ -1233,6 +1250,7 @@ public class OfferToContractFlowTests
             finalAmount: calculated.FinalAmount,
             monthlyListPrice: calculated.MonthlyListPrice,
             currencyCode: calculated.CurrencyCode,
+            paymentTerms: PaymentTerms.Installments,
             promotionId: calculated.PromotionId,
             promotionName: calculated.PromotionName,
             promotionType: calculated.PromotionType,
@@ -1258,7 +1276,8 @@ public class OfferToContractFlowTests
             discountAmount: offer.DiscountAmount,
             promotionId: offer.PromotionId,
             promotionType: offer.PromotionType,
-            chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments).Value;
 
         promo.Deactivate();
         CreatePromotion(id: 99, percentage: 20m, durationMonths: 3);
@@ -1292,7 +1311,8 @@ public class OfferToContractFlowTests
             currencyCode: offer.CurrencyCode,
             grossAmount: offer.FinalAmount + offer.DiscountAmount,
             contractedAmount: offer.FinalAmount,
-            discountAmount: offer.DiscountAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            discountAmount: offer.DiscountAmount, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments).Value;
 
         foreach (var ob in offer.Benefits)
         {
@@ -1427,6 +1447,7 @@ public class OfferToContractFlowTests
             finalAmount: result.Value.FinalAmount,
             monthlyListPrice: result.Value.MonthlyListPrice,
             currencyCode: result.Value.CurrencyCode,
+            paymentTerms: PaymentTerms.Installments,
             calculatedAtUtc: result.Value.CalculatedAtUtc).Value;
 
         Assert.Empty(offer.Benefits);
@@ -1451,6 +1472,7 @@ public class OfferToContractFlowTests
             finalAmount: calculated.FinalAmount,
             monthlyListPrice: calculated.MonthlyListPrice,
             currencyCode: calculated.CurrencyCode,
+            paymentTerms: PaymentTerms.Installments,
             calculatedAtUtc: calculated.CalculatedAtUtc).Value;
 
         var originalBaseAmount = offer.BaseAmount;
@@ -1489,7 +1511,8 @@ public class OfferToContractFlowTests
             discountAmount: offer.DiscountAmount,
             promotionId: offer.PromotionId,
             promotionType: offer.PromotionType,
-            chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            chargedMonths: offer.ChargedMonths, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments).Value;
 
         foreach (var ob in offer.Benefits)
         {
@@ -1538,7 +1561,8 @@ public class OfferToContractFlowTests
             contractualMonthlyValue: 1000m,
             currencyCode: "EGP",
             grossAmount: 10000m,
-            contractedAmount: 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion).Value;
+            contractedAmount: 10000m, entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments).Value;
 
         var b1 = ContractBenefit.Create(Guid.NewGuid(), contract.Id, ContractBenefitType.PhysicalGift, "A", null, 1500m, "EGP").Value;
         var b2 = ContractBenefit.Create(Guid.NewGuid(), contract.Id, ContractBenefitType.PhysicalGift, "B", null, 1500m, "EGP").Value;

@@ -8,6 +8,7 @@ using Centerix.Domain.Platform.Billing.Invoicing;
 using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Plans;
 using Centerix.Domain.Platform.Promotions;
+using Centerix.Domain.Platform.Promotions.Enums;
 using Centerix.Domain.Platform.Subscriptions;
 using Centerix.Domain.Platform.Subscriptions.Enums;
 using Centerix.Infrastructure.Data;
@@ -494,6 +495,7 @@ public class Task21_FinalInvoiceIntegritySqlServerTests
             monthlyListPrice: offer.MonthlyListPrice, contractualMonthlyValue: offer.MonthlyListPrice,
             currencyCode: offer.CurrencyCode, grossAmount: offer.BaseAmount, contractedAmount: offer.FinalAmount,
             entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.Installments,
             discountAmount: offer.DiscountAmount, promotionReference: offer.PromotionName,
             promotionId: offer.PromotionId, promotionType: offer.PromotionType,
             chargedMonths: offer.ChargedMonths, bonusMonths: 0,

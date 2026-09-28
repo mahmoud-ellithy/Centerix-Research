@@ -1,5 +1,7 @@
 namespace Centerix.Application.Platform.Contracts;
 
+using Centerix.Domain.Platform.Promotions.Enums;
+
 /// <summary>
 /// DTO for Contract data returned to API clients.
 /// Preserves the immutable commercial snapshot.
@@ -22,6 +24,12 @@ public class ContractDto
     public int? PromotionId { get; set; }
     public string? PromotionType { get; set; }
     public int? ChargedMonths { get; set; }
+
+    /// <summary>
+    /// Commercial payment mode snapshotted from the accepted Offer. Immutable.
+    /// </summary>
+    public PaymentTerms PaymentTerms { get; set; }
+
     public DateTimeOffset CreatedAtUtc { get; set; }
 }
 

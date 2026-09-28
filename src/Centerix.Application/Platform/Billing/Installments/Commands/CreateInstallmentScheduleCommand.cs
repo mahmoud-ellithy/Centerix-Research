@@ -5,6 +5,7 @@ using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Billing.Installments;
 using Centerix.Domain.Platform.Contracts;
+using Centerix.Domain.Platform.Promotions.Enums;
 using MediatR;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -110,6 +111,14 @@ public class CreateInstallmentScheduleHandler(
 
         if (contract.Status != Domain.Platform.Contracts.Enums.ContractStatus.Active)
             return InstallmentErrors.ContractNotActive;
+
+        // Task A — Commercial PaymentTerms invariant:
+        //   Contract.PaymentTerms == FullUpfront ⇒ no installment schedule may be created.
+        // Installment schedules are a financial-execution consequence of PaymentTerms == Installments,
+        // not the source of truth for the commercial agreement. A schedule must not be created for a
+        // FullUpfront contract under any condition.
+        if (contract.PaymentTerms == PaymentTerms.FullUpfront)
+            return ContractErrors.FullUpfrontInstallmentScheduleForbidden;
 
         if (request.SubscriptionId == Guid.Empty)
             return InstallmentErrors.SubscriptionRequired;
