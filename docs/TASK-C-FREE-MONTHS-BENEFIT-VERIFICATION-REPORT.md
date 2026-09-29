@@ -18,8 +18,9 @@ eligibility evaluator, `GrantBenefitCommand`, `ApplyFreeMonthsToSubscriptionComm
 
 **Repository state at audit time:** implementation commit `2530af1`,
 Correction 1 commit `bdac0b1`, Correction 2 commit
-`fix(billing): enforce free months eligibility rule snapshot`.
-Previous commits: `8e52171`
+`c0055e1` (`fix(billing): enforce free months eligibility rule snapshot`).
+HEAD: `c0055e1`.
+Previous commits: `f8c7ae1` (record Correction 1 SHA), `8e52171`
 (Task B.2 SQL Server verification report), `4e34087` (Task B production flow fix),
 `fc6cfea` (Task B.2 SQL tests), `5516e60` (Task B.1 PaymentMethod canonicalisation),
 `6b44648` (Task B EligibilityRule foundation), `e744009` (Task A PaymentTerms
@@ -511,7 +512,7 @@ matches, and it is non-executable.
 | Hidden-inference audit | Clean (no derivation, no fabrication, no inference) |
 | Implementation commit | `2530af1` (`feat(billing): add free months benefit foundation`) |
 | Correction 1 commit | `bdac0b1` (`fix(billing): decouple free months eligibility from fulfillment`) |
-| Correction 2 commit | `fix(billing): enforce free months eligibility rule snapshot` |
+| Correction 2 commit | `c0055e1` (`fix(billing): enforce free months eligibility rule snapshot`) |
 
 ### 10.1 Exact full-suite skip
 
@@ -702,3 +703,85 @@ Offer -> Contract copies EligibilityRule exactly
 * **Full regression:** see §10.1 for the exact totals and the exact skipped test.
 * **EF Core migrations:** `dotnet ef migrations has-pending-model-changes` returns "No changes have been made to the model since the last migration."
 * **No unrelated diff:** Only `OfferBenefit.cs`, `CreateContractFromOfferCommand.cs`, `FreeMonthsBenefitConfiguration.cs`, the three Task C test files, this report, and the new migration (plus its designer and the regenerated model snapshot) were modified.
+
+### 13.5 Re-verification evidence (post-correction-2 SHA backfill)
+
+Re-ran the full Task C verification surface at HEAD `c0055e1` to confirm the
+invariant holds on the committed baseline:
+
+| Command | Result |
+|---|---|
+| `dotnet build Centerix.slnx --no-restore` | 0 errors |
+| `dotnet test … --filter "FullyQualifiedName~TaskC_FreeMonthsBenefitFoundationTests"` | 41 passed, 0 failed, 0 skipped |
+| `dotnet test … --filter "FullyQualifiedName~TaskC_FreeMonthsBenefitSnapshotTests"` | 10 passed, 0 failed, 0 skipped |
+| `dotnet test … --filter "FullyQualifiedName~TaskC_FreeMonthsBenefitSqlServerTests"` (Local SQL Server: `Server=.`) | 8 passed, 0 failed, 0 skipped |
+| `dotnet test … --filter "FullyQualifiedName~TaskC"` (combined) | **59 passed, 0 failed, 0 skipped** (Duration 14 s) |
+| `dotnet ef migrations has-pending-model-changes --context AppDbContext` | "No changes have been made to the model since the last migration." |
+| `dotnet ef migrations has-pending-model-changes --context TenantDbContext` | "No changes have been made to the model since the last migration." |
+| Local SQL Server probe (`sqlcmd -S . -Q "SELECT @@VERSION"`) | Microsoft SQL Server 2022 RTM (16.0.1000.6) Developer Edition, reachable |
+| Docker daemon probe (`docker ps`) | Unavailable — confirms the fixture cannot silently fall back to Testcontainers; Local SQL Server is the only available target and was used |
+
+**No skipped tests.** No Task C test was filtered out. The single pre-existing
+full-suite skip named in §10.1 remains the only skipped test in the suite and
+is unrelated to Task C.
+
+---
+
+## 14. EligibilityRule Mandatory Invariant
+
+This is the canonical statement of the invariant Task C enforces. Any future
+change that violates any clause is a regression and must be rejected.
+
+### 14.1 Invariant clauses
+
+```text
+OfferFreeMonthsBenefit.Create
+    requires EligibilityRule                              (non-nullable parameter)
+    → rejects null with Error.Validation(
+          "OfferFreeMonthsBenefit.EligibilityRule_Required")
+    → no entity is materialized from a null rule           (Test35)
+
+CreateContractFromOfferHandler
+    never silently skips malformed FreeMonthsBenefits     (no `continue` on null rule)
+    → returns Error.Validation("Offer.IncompleteFreeMonthsBenefit", ...)
+      on the first OfferFreeMonthsBenefit whose EligibilityRule is null
+    → the whole Contract creation is aborted              (TestC10)
+    → the Offer is NOT marked ConvertedToContract
+    → no partial Contract row is persisted
+
+Malformed persisted OfferFreeMonthsBenefit row
+    causes explicit conversion failure                    (TestC10 + SqlC08)
+    → schema is NOT NULL on both OfferFreeMonthsBenefits and FreeMonthsBenefits
+    → EF rejects a null rule at write time on both InMemory and SQL Server
+    → the production handler additionally fails explicitly if a row somehow
+      reaches it with a null rule (defense in depth)
+
+No partial Contract is persisted                         (TestC10)
+    → SaveChangesAsync only runs after the entire snapshot copy succeeds
+    → on failure, no Contract / FreeMonthsBenefits rows are written
+
+Offer → Contract copies EligibilityRule exactly           (TestC06 + SqlC03)
+    → structural equality on the EligibilityRule value object
+    → byte-identical canonical JSON before and after the SQL round-trip
+```
+
+### 14.2 Why three layers of defense
+
+| Layer | Defense | Test |
+|---|---|---|
+| Domain factory | `OfferFreeMonthsBenefit.Create` rejects null at construction | `Test35` |
+| EF Core | `IsRequired()` on `EligibilityRule` prevents null persistence | `SqlC08` |
+| Production handler | Explicit failure on the (otherwise impossible) in-memory null | `TestC10` |
+
+Each layer blocks a different escape route. A regression in any single layer is
+caught by the test on a different layer.
+
+### 14.3 Search audit — no silent drops remain
+
+The full production source under `src/` was searched for the patterns
+`EligibilityRule is null`, `EligibilityRule? == null`, and any
+`continue` statement inside loops over `FreeMonthsBenefits`,
+`OfferFreeMonthsBenefits`, or `ContractFreeMonthsBenefits`. The only
+remaining hit is the explicit failure branch in
+`CreateContractFromOfferCommand.cs:218`, which is not a silent drop but
+the defensive explicit failure documented in §13.4 and verified by `TestC10`.
