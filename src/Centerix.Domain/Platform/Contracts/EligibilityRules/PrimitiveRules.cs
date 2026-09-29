@@ -38,41 +38,42 @@ public sealed class PaymentTermsEqualsRule : EligibilityRule
 }
 
 /// <summary>
-/// A rule that requires the payment method to equal a specific string (case-insensitive trimmed).
+/// A rule that requires the payment method to equal a specific string.
 /// Use <see cref="EligibilityRule.PaymentMethodEquals(string)"/>.
 /// </summary>
 /// <remarks>
-/// The payment method string is trimmed and stored as-is without upper/lower normalisation
-/// beyond trimming, because the domain does not maintain an authoritative payment-method vocabulary.
-/// Comparison is case-insensitive for equality.
+/// The payment method string is canonicalised at construction time:
+/// <c>Trim().ToUpperInvariant()</c>. Therefore <c>"Cash"</c>, <c>" cash "</c>, and
+/// <c>"CASH"</c> all collapse to the same stored value, producing identical hash codes
+/// and byte-identical serialised JSON. The canonical form follows the existing
+/// Centerix convention used by <see cref="Centerix.Domain.Platform.Promotions.OfferFeature"/>.
 /// </remarks>
 public sealed class PaymentMethodEqualsRule : EligibilityRule
 {
-    /// <summary>The required payment method (trimmed).</summary>
+    /// <summary>The canonical payment method (trimmed, upper-invariant).</summary>
     public string PaymentMethod { get; }
 
     /// <summary>
     /// Initialises the rule.
     /// </summary>
-    /// <param name="paymentMethod">Non-null, non-empty, trimmed string.</param>
+    /// <param name="paymentMethod">Non-null, non-empty string. Canonicalised via <c>Trim().ToUpperInvariant()</c>.</param>
     /// <exception cref="ArgumentException">Thrown when the value is null, empty, or whitespace-only.</exception>
     internal PaymentMethodEqualsRule(string paymentMethod)
     {
         if (string.IsNullOrWhiteSpace(paymentMethod))
             throw new ArgumentException("Payment method must be a non-empty string.", nameof(paymentMethod));
 
-        PaymentMethod = paymentMethod.Trim();
+        PaymentMethod = paymentMethod.Trim().ToUpperInvariant();
     }
 
     /// <inheritdoc />
     public override bool Equals(EligibilityRule? other)
         => other is PaymentMethodEqualsRule r &&
-           string.Equals(r.PaymentMethod, PaymentMethod, StringComparison.OrdinalIgnoreCase);
+           string.Equals(r.PaymentMethod, PaymentMethod, StringComparison.Ordinal);
 
     /// <inheritdoc />
     public override int GetHashCode()
-        => HashCode.Combine(typeof(PaymentMethodEqualsRule),
-            PaymentMethod.ToUpperInvariant());
+        => HashCode.Combine(typeof(PaymentMethodEqualsRule), PaymentMethod);
 
     /// <inheritdoc />
     public override string ToString() => $"PaymentMethodEq(\"{PaymentMethod}\")";

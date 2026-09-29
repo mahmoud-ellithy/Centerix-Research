@@ -71,13 +71,14 @@ public class TaskB_EligibilityRuleFoundationTests : IClassFixture<TaskAPaymentTe
     }
 
     [Fact]
-    public void Test05_PaymentMethodEq_Cash_CanBeCreated_AndTrimmed()
+    public void Test05_PaymentMethodEq_Cash_CanBeCreated_AndCanonicalised()
     {
+        // Canonical form: Trim().ToUpperInvariant() — see PrimitiveRules.cs
         var rule = EligibilityRule.PaymentMethodEquals("  Cash  ");
 
         Assert.NotNull(rule);
         var pmRule = Assert.IsType<PaymentMethodEqualsRule>(rule);
-        Assert.Equal("Cash", pmRule.PaymentMethod);
+        Assert.Equal("CASH", pmRule.PaymentMethod);
     }
 
     [Fact]
@@ -967,9 +968,183 @@ public class TaskB_EligibilityRuleFoundationTests : IClassFixture<TaskAPaymentTe
     public void Test52_PaymentMethodRule_TrimsInput_AndRejectsBlankValues()
     {
         var rule = (PaymentMethodEqualsRule)EligibilityRule.PaymentMethodEquals("  Cash  ");
-        Assert.Equal("Cash", rule.PaymentMethod);
+        Assert.Equal("CASH", rule.PaymentMethod);
 
         Assert.Throws<ArgumentException>(() => EligibilityRule.PaymentMethodEquals("   "));
         Assert.Throws<ArgumentException>(() => EligibilityRule.PaymentMethodEquals(null!));
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // 10. Task B.1 — PaymentMethod canonicalisation & equality/serialisation invariant
+    //    All rule types must satisfy: equal rules ⇒ identical serialised JSON.
+    // ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Test53_PaymentMethod_IsCanonicalised_CaseAndWhitespaceVariantsCollapseToSingleStoredValue()
+    {
+        var cash1 = (PaymentMethodEqualsRule)EligibilityRule.PaymentMethodEquals("Cash");
+        var cash2 = (PaymentMethodEqualsRule)EligibilityRule.PaymentMethodEquals(" cash ");
+        var cash3 = (PaymentMethodEqualsRule)EligibilityRule.PaymentMethodEquals("CASH");
+        var cash4 = (PaymentMethodEqualsRule)EligibilityRule.PaymentMethodEquals("\tCash\n");
+
+        // Canonical stored value
+        Assert.Equal("CASH", cash1.PaymentMethod);
+        Assert.Equal("CASH", cash2.PaymentMethod);
+        Assert.Equal("CASH", cash3.PaymentMethod);
+        Assert.Equal("CASH", cash4.PaymentMethod);
+
+        // Structural equality is preserved
+        Assert.Equal(cash1, cash2);
+        Assert.Equal(cash2, cash3);
+        Assert.Equal(cash3, cash4);
+        Assert.Equal(cash1, cash4);
+
+        // Equal rules must share the same hash code
+        Assert.Equal(cash1.GetHashCode(), cash2.GetHashCode());
+        Assert.Equal(cash2.GetHashCode(), cash3.GetHashCode());
+        Assert.Equal(cash3.GetHashCode(), cash4.GetHashCode());
+
+        // Equal rules must produce byte-identical serialised JSON
+        var json1 = EligibilityRuleSerializer.Serialize(cash1);
+        var json2 = EligibilityRuleSerializer.Serialize(cash2);
+        var json3 = EligibilityRuleSerializer.Serialize(cash3);
+        var json4 = EligibilityRuleSerializer.Serialize(cash4);
+
+        Assert.Equal(json1, json2);
+        Assert.Equal(json2, json3);
+        Assert.Equal(json3, json4);
+
+        // Round-trip through the serializer must keep canonical form
+        var roundTrip = (PaymentMethodEqualsRule)EligibilityRuleSerializer.Deserialize(json1);
+        Assert.Equal("CASH", roundTrip.PaymentMethod);
+        Assert.Equal(cash1, roundTrip);
+    }
+
+    [Fact]
+    public void Test54_DifferentPaymentMethods_AreNotEqual_AndProduceDifferentJson()
+    {
+        var cash = EligibilityRule.PaymentMethodEquals("Cash");
+        var card = EligibilityRule.PaymentMethodEquals("Card");
+        var transfer = EligibilityRule.PaymentMethodEquals("BankTransfer");
+
+        Assert.NotEqual(cash, card);
+        Assert.NotEqual(cash, transfer);
+        Assert.NotEqual(card, transfer);
+
+        Assert.NotEqual(
+            EligibilityRuleSerializer.Serialize(cash),
+            EligibilityRuleSerializer.Serialize(card));
+
+        // PaymentMethodEqualsRule must NOT equal PaymentTermsEqualsRule (different rule types)
+        var ptRule = EligibilityRule.PaymentTermsEquals(PaymentTerms.FullUpfront);
+        Assert.NotEqual(cash, ptRule);
+    }
+
+    [Fact]
+    public void Test55_EqualityImpliesIdenticalJson_ForAllTenRuleTypes()
+    {
+        // Build each of the 10 rule types from two independent constructions and assert
+        // that structural equality implies byte-identical serialised JSON. This enforces the
+        // canonical-snapshot invariant for every rule type, not just PaymentMethodEqualsRule.
+
+        // 1. AllOf
+        var allOf1 = EligibilityRule.AllOf(
+            EligibilityRule.ContractActive(),
+            EligibilityRule.AmountPaidAtLeast(100m),
+            EligibilityRule.NoOverdueInstallment());
+        var allOf2 = EligibilityRule.AllOf(
+            EligibilityRule.ContractActive(),
+            EligibilityRule.AmountPaidAtLeast(100m),
+            EligibilityRule.NoOverdueInstallment());
+        Assert.Equal(allOf1, allOf2);
+        Assert.Equal(
+            EligibilityRuleSerializer.Serialize(allOf1),
+            EligibilityRuleSerializer.Serialize(allOf2));
+
+        // 2. AnyOf
+        var anyOf1 = EligibilityRule.AnyOf(
+            EligibilityRule.PaymentTermsEquals(PaymentTerms.FullUpfront),
+            EligibilityRule.PaymentMethodEquals("Cash"));
+        var anyOf2 = EligibilityRule.AnyOf(
+            EligibilityRule.PaymentTermsEquals(PaymentTerms.FullUpfront),
+            EligibilityRule.PaymentMethodEquals("CASH"));
+        Assert.Equal(anyOf1, anyOf2);
+        Assert.Equal(
+            EligibilityRuleSerializer.Serialize(anyOf1),
+            EligibilityRuleSerializer.Serialize(anyOf2));
+
+        // 3. ContractActive
+        Assert.Equal(
+            EligibilityRuleSerializer.Serialize(EligibilityRule.ContractActive()),
+            EligibilityRuleSerializer.Serialize(EligibilityRule.ContractActive()));
+
+        // 4. PaymentTermsEqualsRule (must use enum-defined value, serialised by enum name)
+        var pt1 = EligibilityRule.PaymentTermsEquals(PaymentTerms.FullUpfront);
+        var pt2 = EligibilityRule.PaymentTermsEquals(PaymentTerms.FullUpfront);
+        Assert.Equal(pt1, pt2);
+        Assert.Equal(
+            EligibilityRuleSerializer.Serialize(pt1),
+            EligibilityRuleSerializer.Serialize(pt2));
+
+        // 5. PaymentMethodEqualsRule (canonical form invariant — explicit assertion here)
+        Assert.Equal(
+            EligibilityRuleSerializer.Serialize(EligibilityRule.PaymentMethodEquals("Cash")),
+            EligibilityRuleSerializer.Serialize(EligibilityRule.PaymentMethodEquals("CASH")));
+
+        // 6. CompletedByUtcRule (round-trip kind is preserved)
+        var utc = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+        var c1 = EligibilityRule.CompletedByUtc(utc);
+        var c2 = EligibilityRule.CompletedByUtc(utc);
+        Assert.Equal(c1, c2);
+        Assert.Equal(
+            EligibilityRuleSerializer.Serialize(c1),
+            EligibilityRuleSerializer.Serialize(c2));
+
+        // 7. NoOverdueInstallment
+        Assert.Equal(
+            EligibilityRuleSerializer.Serialize(EligibilityRule.NoOverdueInstallment()),
+            EligibilityRuleSerializer.Serialize(EligibilityRule.NoOverdueInstallment()));
+
+        // 8. AmountPaidAtLeast
+        var a1 = EligibilityRule.AmountPaidAtLeast(5000m);
+        var a2 = EligibilityRule.AmountPaidAtLeast(5000m);
+        Assert.Equal(a1, a2);
+        Assert.Equal(
+            EligibilityRuleSerializer.Serialize(a1),
+            EligibilityRuleSerializer.Serialize(a2));
+
+        // 9. DaysFromContractStartGte
+        var d1 = EligibilityRule.DaysFromContractStartGte(30);
+        var d2 = EligibilityRule.DaysFromContractStartGte(30);
+        Assert.Equal(d1, d2);
+        Assert.Equal(
+            EligibilityRuleSerializer.Serialize(d1),
+            EligibilityRuleSerializer.Serialize(d2));
+
+        // 10. DurationMonthsGte
+        var m1 = EligibilityRule.DurationMonthsGte(12);
+        var m2 = EligibilityRule.DurationMonthsGte(12);
+        Assert.Equal(m1, m2);
+        Assert.Equal(
+            EligibilityRuleSerializer.Serialize(m1),
+            EligibilityRuleSerializer.Serialize(m2));
+
+        // Deep nested composite — round-trips through JSON
+        var nested = EligibilityRule.AllOf(
+            EligibilityRule.ContractActive(),
+            EligibilityRule.AnyOf(
+                EligibilityRule.PaymentTermsEquals(PaymentTerms.FullUpfront),
+                EligibilityRule.PaymentMethodEquals("  cash  ")),
+            EligibilityRule.AmountPaidAtLeast(5000m));
+        var nestedCopy = EligibilityRule.AllOf(
+            EligibilityRule.ContractActive(),
+            EligibilityRule.AnyOf(
+                EligibilityRule.PaymentTermsEquals(PaymentTerms.FullUpfront),
+                EligibilityRule.PaymentMethodEquals("CASH")),
+            EligibilityRule.AmountPaidAtLeast(5000m));
+        Assert.Equal(nested, nestedCopy);
+        Assert.Equal(
+            EligibilityRuleSerializer.Serialize(nested),
+            EligibilityRuleSerializer.Serialize(nestedCopy));
     }
 }
