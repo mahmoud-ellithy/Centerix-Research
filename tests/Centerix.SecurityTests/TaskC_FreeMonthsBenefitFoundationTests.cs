@@ -616,4 +616,42 @@ public class TaskC_FreeMonthsBenefitFoundationTests
         Assert.Contains("\"type\":\"all_of\"", json);
         Assert.Contains("\"paymentTerms\":\"FullUpfront\"", json);
     }
+
+    // ─────────────────────────────────────────────────────────────────
+    // 11. OfferFreeMonthsBenefit EligibilityRule required (Correction 2)
+    // ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Test35_OfferFreeMonthsBenefit_Create_WithNullRule_Fails()
+    {
+        var result = OfferFreeMonthsBenefit.Create(
+            id: Guid.NewGuid(),
+            offerId: Guid.NewGuid(),
+            entitlementMonths: 1,
+            currencyCode: Currency,
+            eligibilityRule: null!);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("OfferFreeMonthsBenefit.EligibilityRule_Required", result.Errors!.First().Code);
+        // No object is created: the failed Result carries no value at all.
+        Assert.Throws<InvalidOperationException>(() => result.Value);
+    }
+
+    [Fact]
+    public void Test36_OfferFreeMonthsBenefit_Create_WithValidRule_Succeeds()
+    {
+        var rule = DefaultUpfrontBonusRule(7500m);
+
+        var result = OfferFreeMonthsBenefit.Create(
+            id: Guid.NewGuid(),
+            offerId: Guid.NewGuid(),
+            entitlementMonths: 2,
+            currencyCode: Currency,
+            eligibilityRule: rule);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(2, result.Value.EntitlementMonths);
+        Assert.Equal(rule, result.Value.EligibilityRule);
+        Assert.NotNull(result.Value.EligibilityRule);
+    }
 }

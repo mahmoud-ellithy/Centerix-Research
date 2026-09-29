@@ -244,7 +244,7 @@ public class OfferFreeMonthsBenefit : Entity
     /// this rule is copied verbatim into
     /// <see cref="Centerix.Domain.Platform.Contracts.FreeMonthsBenefit.EligibilityRule"/>.
     /// </summary>
-    public EligibilityRule? EligibilityRule { get; private set; }
+    public EligibilityRule EligibilityRule { get; private set; } = default!;
 
     private OfferFreeMonthsBenefit() { }
 
@@ -253,7 +253,7 @@ public class OfferFreeMonthsBenefit : Entity
         Guid offerId,
         int entitlementMonths,
         string currencyCode,
-        EligibilityRule? eligibilityRule)
+        EligibilityRule eligibilityRule)
     {
         Id = id;
         OfferId = offerId;
@@ -266,16 +266,17 @@ public class OfferFreeMonthsBenefit : Entity
     /// Creates an OfferFreeMonthsBenefit with validated parameters.
     /// </summary>
     /// <param name="eligibilityRule">
-    /// Required for production-snapshot paths: the Offer-side mirror of the
-    /// eventual FreeMonthsBenefit rule. Nullable is permitted only to support
-    /// legacy / pre-rule fixtures; new offer rows MUST supply a rule.
+    /// Required: every OfferFreeMonthsBenefit MUST carry exactly one
+    /// EligibilityRule (design invariant 26). A null rule is rejected with a
+    /// validation error — commercial entitlements must never be created without
+    /// a rule that defines when they become eligible.
     /// </param>
     public static Result<OfferFreeMonthsBenefit> Create(
         Guid id,
         Guid offerId,
         int entitlementMonths,
         string currencyCode,
-        EligibilityRule? eligibilityRule = null)
+        EligibilityRule eligibilityRule)
     {
         if (id == Guid.Empty)
             return Error.Validation("OfferFreeMonthsBenefit.Id_Required", "Offer free months benefit ID is required");
@@ -286,6 +287,10 @@ public class OfferFreeMonthsBenefit : Entity
         if (entitlementMonths <= 0)
             return Error.Validation("OfferFreeMonthsBenefit.EntitlementMonths_Invalid",
                 "EntitlementMonths must be a positive integer");
+
+        if (eligibilityRule is null)
+            return Error.Validation("OfferFreeMonthsBenefit.EligibilityRule_Required",
+                "Every OfferFreeMonthsBenefit must carry an EligibilityRule");
 
         if (string.IsNullOrWhiteSpace(currencyCode) || currencyCode.Trim().Length != 3)
             return Error.Validation("OfferFreeMonthsBenefit.InvalidCurrency",

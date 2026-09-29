@@ -562,4 +562,48 @@ public class TaskC_FreeMonthsBenefitSqlServerTests
                 "SELECT EligibilityRule AS [Value] FROM Platform.FreeMonthsBenefits WHERE Id = {0}", benefitId)
             .SingleAsync();
     }
+
+    // ====================================================================
+    // 8 — OfferFreeMonthsBenefits.EligibilityRule is NOT NULL in schema
+    //     (Correction 2: schema enforces required rule)
+    // ====================================================================
+
+    [Fact]
+    public async Task SqlC08_OfferFreeMonthsBenefits_EligibilityRule_IsNotNull_InSchema()
+    {
+        var tenantId = $"C-8-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantId);
+
+        using var scope = _env.Factory.Services.CreateScope();
+        AuthorizeTenant(scope.ServiceProvider, tenantId);
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var columns = await db.Database
+            .SqlQueryRaw<string>(
+                "SELECT CONCAT(TABLE_NAME, '|', IS_NULLABLE, '|', COALESCE(COLUMN_DEFAULT, '<none>'), " +
+                "'|', DATA_TYPE, '|', CHARACTER_MAXIMUM_LENGTH) AS [Value] " +
+                "FROM INFORMATION_SCHEMA.COLUMNS " +
+                "WHERE TABLE_SCHEMA='Platform' " +
+                "AND TABLE_NAME IN ('OfferFreeMonthsBenefits', 'FreeMonthsBenefits') " +
+                "AND COLUMN_NAME='EligibilityRule'")
+            .ToListAsync();
+
+        Assert.Equal(2, columns.Count);
+
+        foreach (var column in columns)
+        {
+            var parts = column.Split('|');
+
+            // nvarchar(4000) NOT NULL on BOTH the Offer snapshot and the Contract side.
+            Assert.Equal("NO", parts[1]);
+            Assert.Equal("nvarchar", parts[3]);
+            Assert.Equal("4000", parts[4]);
+
+            // No fabricated default was introduced by the tightening migration.
+            Assert.Equal("<none>", parts[2]);
+        }
+
+        Assert.Contains(columns, c => c.StartsWith("OfferFreeMonthsBenefits|"));
+        Assert.Contains(columns, c => c.StartsWith("FreeMonthsBenefits|"));
+    }
 }

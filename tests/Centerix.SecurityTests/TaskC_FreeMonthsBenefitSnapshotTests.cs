@@ -25,8 +25,9 @@ using Xunit;
 ///     independently.
 ///   * ContractedAmount is NOT derived from FreeMonthsBenefits.EntitlementMonths
 ///     (design invariant 32).
-///   * <c>OfferFreeMonthsBenefit.EligibilityRule == null</c> rows are skipped
-///     during snapshot (production path defence).
+///   * A null <c>OfferFreeMonthsBenefit.EligibilityRule</c> is impossible to
+///     create through the domain API, and the production handler fails
+///     explicitly rather than silently dropping the commercial entitlement.
 /// </summary>
 public class TaskC_FreeMonthsBenefitSnapshotTests : IClassFixture<TaskCFakeTenantTestFactory>
 {
@@ -296,53 +297,75 @@ public class TaskC_FreeMonthsBenefitSnapshotTests : IClassFixture<TaskCFakeTenan
     }
 
     [Fact]
-    public async Task TestC07_OfferToContract_NullEligibilityRule_OnOfferSide_IsSkippedDuringSnapshot()
+    public void TestC07_OfferFreeMonthsBenefit_Create_RejectsNullRule_CannotSilentlyLoseEntitlement()
     {
-        // Build an Offer that has a FreeMonthsBenefit row with a NULL rule
-        // (legacy / pre-rule row). The production handler must skip it —
-        // FreeMonthsBenefit requires a non-null rule at creation.
-        Guid offerId;
-        Guid contractId;
+        // Since OfferFreeMonthsBenefit.Create() now requires an EligibilityRule,
+        // it is impossible to construct a null-rule benefit through the domain API.
+        // This is the primary defence: no incomplete benefit can enter the system.
+        // The handler additionally fails explicitly rather than skipping; the schema
+        // enforces NOT NULL (verified by SqlC08 on Local SQL Server).
+        var result = OfferFreeMonthsBenefit.Create(
+            id: Guid.NewGuid(),
+            offerId: Guid.NewGuid(),
+            entitlementMonths: 2,
+            currencyCode: "EGP",
+            eligibilityRule: null!);
 
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
-            var tenant = scope.ServiceProvider.GetRequiredService<ICurrentTenant>();
+        Assert.False(result.IsSuccess);
+        Assert.Equal("OfferFreeMonthsBenefit.EligibilityRule_Required", result.Errors!.First().Code);
+    }
 
-            var offer = NewOffer(planId: 1);
+    [Fact]
+    public async Task TestC10_OfferToContract_WithNullRuleRow_FailsExplicitly_AndCreatesNoContract()
+    {
+        // Simulates a pre-invariant (legacy/corrupt) snapshot row that somehow carries
+        // no EligibilityRule. The domain factory and the NOT NULL schema prevent this,
+        // but the production handler must still fail explicitly instead of silently
+        // dropping the commercial entitlement.
+        var sourceRule = DefaultUpfrontBonusRule();
 
-            // Two rows: one valid (with rule), one legacy (no rule).
-            var validRule = DefaultUpfrontBonusRule();
-            offer.AddFreeMonthsBenefit(OfferFreeMonthsBenefit.Create(
-                Guid.NewGuid(), offer.Id, 1, "EGP", validRule).Value);
-            offer.AddFreeMonthsBenefit(OfferFreeMonthsBenefit.Create(
-                Guid.NewGuid(), offer.Id, 2, "EGP", eligibilityRule: null).Value);
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        var tenant = scope.ServiceProvider.GetRequiredService<ICurrentTenant>();
 
-            db.Offers.Add(offer);
-            db.StampAddedTenantIds(TenantId);
-            await db.SaveChangesAsync();
-            offerId = offer.Id;
+        var offer = NewOffer(planId: 1);
+        var offerBenefit = OfferFreeMonthsBenefit.Create(
+            id: Guid.NewGuid(),
+            offerId: offer.Id,
+            entitlementMonths: 1,
+            currencyCode: "EGP",
+            eligibilityRule: sourceRule).Value;
+        offer.AddFreeMonthsBenefit(offerBenefit);
 
-            var acceptHandler = new AcceptOfferHandler(db, tenant);
-            Assert.True((await acceptHandler.Handle(new AcceptOfferCommand(offer.Id), CancellationToken.None)).IsSuccess);
+        db.Offers.Add(offer);
+        db.StampAddedTenantIds(TenantId);
+        await db.SaveChangesAsync();
 
-            var contractHandler = new CreateContractFromOfferHandler(db, tenant);
-            var contractResult = await contractHandler.Handle(
-                new CreateContractFromOfferCommand(offer.Id, $"CTR-C-{Guid.NewGuid():N}"[..16]),
-                CancellationToken.None);
-            Assert.True(contractResult.IsSuccess);
-            contractId = contractResult.Value;
-        }
+        var acceptHandler = new AcceptOfferHandler(db, tenant);
+        Assert.True((await acceptHandler.Handle(
+            new AcceptOfferCommand(offer.Id), CancellationToken.None)).IsSuccess);
 
-        var db2 = _scope.ServiceProvider.GetRequiredService<IAppDbContext>();
-        var loadedContract = await db2.Contracts
-            .IgnoreQueryFilters()
-            .Include(c => c.FreeMonthsBenefits)
-            .FirstAsync(c => c.Id == contractId);
+        // Force the invariant violation AFTER persistence, on the tracked entity that
+        // the handler will resolve. EF (both InMemory and SQL Server) rejects a null
+        // rule at write time, so this is the only way to hand the production handler
+        // a row that a pre-invariant database could still contain.
+        typeof(OfferFreeMonthsBenefit)
+            .GetProperty(nameof(OfferFreeMonthsBenefit.EligibilityRule))!
+            .SetValue(offerBenefit, null);
 
-        // Only the row with a rule survived the snapshot.
-        Assert.Single(loadedContract.FreeMonthsBenefits);
-        Assert.Equal(1, loadedContract.FreeMonthsBenefits[0].EntitlementMonths);
+        var contractHandler = new CreateContractFromOfferHandler(db, tenant);
+        var contractNumber = $"CTR-C-{Guid.NewGuid():N}"[..16];
+        var contractResult = await contractHandler.Handle(
+            new CreateContractFromOfferCommand(offer.Id, contractNumber),
+            CancellationToken.None);
+
+        Assert.False(contractResult.IsSuccess);
+        Assert.Equal("Offer.IncompleteFreeMonthsBenefit", contractResult.Errors!.First().Code);
+
+        // The commercial entitlement was NOT silently dropped: the conversion aborted
+        // and no Contract row was persisted.
+        Assert.False(await db.Contracts.IgnoreQueryFilters()
+            .AnyAsync(c => c.ContractNumber == contractNumber));
     }
 
     // ─────────────────────────────────────────────────────────────────

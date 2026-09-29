@@ -211,13 +211,15 @@ public class CreateContractFromOfferHandler(
         {
             foreach (var offerFreeMonths in offer.FreeMonthsBenefits)
             {
-                // FreeMonthsBenefit requires a non-null rule at creation
-                // (design invariant 26). Skip any legacy rows that predate
-                // per-benefit rules; the migration does not backfill rules
-                // onto FreeMonthsBenefit rows so the production flow must
-                // defend against null.
+                // Every OfferFreeMonthsBenefit MUST carry an EligibilityRule
+                // (design invariant 26). A null rule indicates a corrupt or
+                // incomplete commercial snapshot — fail explicitly rather
+                // than silently dropping the entitlement.
                 if (offerFreeMonths.EligibilityRule is null)
-                    continue;
+                    return Error.Validation(
+                        "Offer.IncompleteFreeMonthsBenefit",
+                        $"OfferFreeMonthsBenefit '{offerFreeMonths.Id}' on Offer '{offer.Id}' " +
+                        "is missing its EligibilityRule. Commercial entitlements must never be silently dropped.");
 
                 var benefitResult = FreeMonthsBenefit.Create(
                     id: Guid.NewGuid(),

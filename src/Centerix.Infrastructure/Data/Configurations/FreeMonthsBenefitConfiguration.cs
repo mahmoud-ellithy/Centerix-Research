@@ -103,16 +103,15 @@ public class OfferFreeMonthsBenefitConfiguration : IEntityTypeConfiguration<Offe
             .HasMaxLength(3)
             .IsRequired();
 
-        // EligibilityRule is REQUIRED on production rows. Nullable in the
-        // snapshot column to mirror the existing OfferBenefit column shape and
-        // to permit null on legacy fixture rows; the FreeMonthsBenefit on the
-        // Contract validates non-null at creation.
+        // EligibilityRule is REQUIRED on every OfferFreeMonthsBenefit (design
+        // invariant 26). A commercial entitlement must never exist without a
+        // rule defining when it becomes eligible.
         builder.Property(b => b.EligibilityRule)
             .HasConversion(
                 rule => rule != null ? EligibilityRuleSerializer.Serialize(rule) : null,
                 json => !string.IsNullOrEmpty(json) ? EligibilityRuleSerializer.Deserialize(json) : null)
             .HasMaxLength(4000)
-            .IsRequired(false);
+            .IsRequired();
 
         builder.HasIndex(b => b.OfferId)
             .HasDatabaseName("IX_OfferFreeMonthsBenefits_OfferId");

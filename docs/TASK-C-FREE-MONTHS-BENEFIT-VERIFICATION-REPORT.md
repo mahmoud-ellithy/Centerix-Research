@@ -11,11 +11,15 @@ eligibility evaluator, `GrantBenefitCommand`, `ApplyFreeMonthsToSubscriptionComm
 `Contract.BonusMonths` derivation cleanup.
 
 **Posture:** Documentation only for this commit; the implementation commit is
-`2530af1` (Task C foundation). A follow-up correctness fix is captured in
-commit `bdac0b1` (see §12 — Eligibility/Fulfillment Independence).
+`2530af1` (Task C foundation). Two follow-up corrections follow it:
+`bdac0b1` (§7 — Eligibility/Fulfillment Independence) and
+`fix(billing): enforce free months eligibility rule snapshot`
+(§13 — EligibilityRule Completeness).
 
-**Repository state at audit time:** HEAD `bdac0b1`. Implementation commit
-`2530af1`. Correction commit `bdac0b1`. Previous commits: `8e52171`
+**Repository state at audit time:** implementation commit `2530af1`,
+Correction 1 commit `bdac0b1`, Correction 2 commit
+`fix(billing): enforce free months eligibility rule snapshot`.
+Previous commits: `8e52171`
 (Task B.2 SQL Server verification report), `4e34087` (Task B production flow fix),
 `fc6cfea` (Task B.2 SQL tests), `5516e60` (Task B.1 PaymentMethod canonicalisation),
 `6b44648` (Task B EligibilityRule foundation), `e744009` (Task A PaymentTerms
@@ -37,19 +41,23 @@ facts invented).
 All production paths are wired:
 * `Offer.FreeMonthsBenefits[]` → `Contract.FreeMonthsBenefits[]` snapshot
   through `CreateContractFromOfferCommand`.
-* `FreeMonthsBenefit.EligibilityRule` is required (per design invariant 26).
+* `EligibilityRule` is required on **both** `FreeMonthsBenefit` and
+  `OfferFreeMonthsBenefit` (per design invariant 26) — enforced in the domain
+  factory, in the EF model, and in the database schema.
+* A missing rule in the Offer snapshot fails the conversion explicitly; it is
+  never silently dropped.
 * `ContractedAmount` is independent of `FreeMonthsBenefits.EntitlementMonths`
   (per design invariant 32).
 
 Tests:
-* **37 pure-domain tests** (`TaskC_FreeMonthsBenefitFoundationTests`) — pass.
-* **9 InMemory EF / snapshot tests** (`TaskC_FreeMonthsBenefitSnapshotTests`) —
+* **41 pure-domain tests** (`TaskC_FreeMonthsBenefitFoundationTests`) — pass.
+* **10 InMemory EF / snapshot tests** (`TaskC_FreeMonthsBenefitSnapshotTests`) —
   pass.
-* **7 SQL Server integration tests** (`TaskC_FreeMonthsBenefitSqlServerTests`)
+* **8 SQL Server integration tests** (`TaskC_FreeMonthsBenefitSqlServerTests`)
   against the local SQL Server — pass.
 
-Full regression: **1522/1522** non-SQL tests pass; **214/214** SQL tests pass
-(1 pre-existing skip unrelated to Task C).
+**59 Task C tests**, all passing. Full regression: **1742 total, 1741 passed,
+0 failed, 1 skipped** (1 pre-existing skip unrelated to Task C — see §10).
 
 ---
 
@@ -127,20 +135,24 @@ preserve this distinction in the type system.
 
 ### 3.1 Production wiring
 
-`CreateContractFromOfferCommand` now includes `Offer.FreeMonthsBenefits` in its
-initial `Include` block. For each `OfferFreeMonthsBenefit` with a non-null
-`EligibilityRule`, the handler:
+`CreateContractFromOfferCommand` includes `Offer.FreeMonthsBenefits` in its
+initial `Include` block. For each `OfferFreeMonthsBenefit`, the handler:
 
-1. Calls `FreeMonthsBenefit.Create(...)` with the snapshotted
+1. Validates that the row carries an `EligibilityRule`. A null rule returns
+   `Error.Validation("Offer.IncompleteFreeMonthsBenefit", ...)` and aborts the
+   whole conversion. The row is **never skipped** — see §13.
+2. Calls `FreeMonthsBenefit.Create(...)` with the snapshotted
    `EntitlementMonths`, `CurrencyCode`, and `EligibilityRule`.
-2. Calls `Contract.AddFreeMonthsBenefit(...)` to attach the row.
+3. Calls `Contract.AddFreeMonthsBenefit(...)` to attach the row.
 
-Rows with a null `EligibilityRule` (legacy / pre-rule) are **skipped**, not
-fabricated with a default — this is the production-side defence for design
-invariant 26 ("every Entitlement Benefit row MUST carry exactly one
-EligibilityRule"). The migration does NOT backfill rules onto FreeMonthsBenefit
-rows (per design invariant 35), so the production flow must defend against null
-on the Offer side.
+The `OfferFreeMonthsBenefit.EligibilityRule` is **required** at every layer
+(domain factory, EF model, and database schema), so a commercial entitlement
+can no longer exist without a rule, and a corrupt row can no longer be silently
+discarded. The migration does NOT backfill rules onto existing rows (per design
+invariant 35); the tightening migration
+`20260929193144_RequireEligibilityRuleOnOfferFreeMonths` alters the column to
+`NOT NULL` with **no fabricated default**, so a pre-existing null row would fail
+loudly at conversion time rather than disappear.
 
 ### 3.2 Idempotency and lifecycle entry
 
@@ -201,15 +213,16 @@ Platform.OfferFreeMonthsBenefits  (new)
   ├─ OfferId       →  Platform.Offers.Id  (cascade)
   ├─ EntitlementMonths
   ├─ CurrencyCode
-  └─ EligibilityRule  (nvarchar(4000), NULL — legacy defence)
+  └─ EligibilityRule  (nvarchar(4000), NOT NULL, canonical JSON)
   └─ IX_OfferFreeMonthsBenefits_OfferId
 ```
 
-The `EligibilityRule` column on `FreeMonthsBenefits` is **NOT NULL** because the
-domain invariant requires a rule on every FreeMonthsBenefit at construction.
-The column on `OfferFreeMonthsBenefits` is nullable to permit the
-production-side `null`-skip defence (legacy fixtures; production Offer rows
-MUST carry a rule).
+The `EligibilityRule` column is **NOT NULL on both tables**. The domain
+invariant requires a rule on every FreeMonthsBenefit *and* on every
+OfferFreeMonthsBenefit at construction, so the schema mirrors the domain
+exactly. Making the Offer-side column nullable would have allowed a commercial
+entitlement to exist without a rule, which the production conversion path would
+then have had to decide what to do with (§13).
 
 `AppDbContext` exposes `DbSet<FreeMonthsBenefit> FreeMonthsBenefits` and
 `DbSet<OfferFreeMonthsBenefit> OfferFreeMonthsBenefits`. The existing
@@ -226,6 +239,13 @@ The migration `20260929174030_AddFreeMonthsBenefits` is **schema-only**:
 * Adds the `Platform.OfferFreeMonthsBenefits` table with the configured
   columns, indexes, and FK.
 * Adds three indexes on `FreeMonthsBenefits` for efficient lookup.
+
+A second, follow-up migration
+`20260929193144_RequireEligibilityRuleOnOfferFreeMonths` (see §13) alters
+`Platform.OfferFreeMonthsBenefits.EligibilityRule` from nullable to
+`nvarchar(4000) NOT NULL`. It is also **schema-only**: a single
+`AlterColumn` with `nullable: false` and **no** `defaultValue`, so no
+historical commercial fact is invented (§L.35).
 
 This is consistent with the design baseline position in §J.4: the migration is
 a **schema change**, not a **historical commercial reconstruction**. The
@@ -257,7 +277,7 @@ configuration, or the production snapshot wiring — and verified by a test.
 
 | # | Invariant | Enforced by | Test |
 |---|---|---|---|
-| 26 | Every benefit row (`ContractBenefit` and `FreeMonthsBenefit`) MUST carry exactly one EligibilityRule | `FreeMonthsBenefit.Create` rejects null rule; `ContractBenefit` already does | `Test06_Create_WithNullRule_Fails`, `SqlC01_Schema`, `SqlC03_Snapshot` |
+| 26 | Every benefit row (`ContractBenefit`, `FreeMonthsBenefit`, and `OfferFreeMonthsBenefit`) MUST carry exactly one EligibilityRule | `FreeMonthsBenefit.Create` and `OfferFreeMonthsBenefit.Create` reject a null rule; `ContractBenefit` already did; both EF columns are `NOT NULL`; the Offer → Contract handler fails explicitly on a null rule | `Test06_Create_WithNullRule_Fails`, `Test35_OfferFreeMonthsBenefit_Create_WithNullRule_Fails`, `Test36_..._WithValidRule_Succeeds`, `TestC07_...`, `TestC10_OfferToContract_WithNullRuleRow_FailsExplicitly_AndCreatesNoContract`, `SqlC01_Schema`, `SqlC03_Snapshot`, `SqlC08_..._IsNotNull_InSchema` |
 | 28 | FulfillmentStatus is monotone: `Pending → Granted → (AppliedToSubscription)`; no reverse | `Grant` and `MarkAppliedToSubscription` reject out-of-order transitions; `Grant` on `Granted`/`AppliedToSubscription` is idempotent | `Test15_...`, `Test16_...`, `Test18_...`, `Test19_...`, `Test25_...`, `SqlC05_StateTransitions` |
 | 29 | EligibilityStatus is reversible: `NotEligible ⇄ Eligible` based on rule evaluation — **independent of FulfillmentStatus** | `MarkEligible` and `MarkNotEligible` are bidirectional at any Fulfillment status | `Test11_...` through `Test14_...`, `Test27_...`, plus all four independence tests in §12 |
 | 31 | A FreeMonthsBenefit.Id MUST appear at most once in `TenantPlan.AppliedFreeMonthsBenefitIds[]` | TenantPlan-side invariant (out of scope here); aggregate-level: idempotent re-calls preserve first timestamp | `Test17_...`, `Test20_...` (idempotent re-call preserves `GrantedAtUtc`/`AppliedAtUtc`) |
@@ -291,6 +311,7 @@ Tenant authorisation follows the established reflection pattern:
 | `SqlC05` | State transitions | All three lifecycle transitions (Eligibility, Grant, Apply) survive a SQL round-trip with timestamps intact |
 | `SqlC06` | Persisted JSON safety | Nested composite `AllOf` containing `AnyOf` produces canonical JSON with no `$type`, `System.`, `Microsoft.`, `Centerix`, `EligibilityRule`, or `FreeMonthsBenefit` substrings |
 | `SqlC07` | No fabricated rows | After persisting a Contract with `BonusMonths = 0`, the `FreeMonthsBenefits` table is empty for that contract |
+| `SqlC08` | Schema requiredness | `INFORMATION_SCHEMA.COLUMNS` confirms `EligibilityRule` is `nvarchar(4000) NOT NULL` with **no** `COLUMN_DEFAULT` on **both** `Platform.FreeMonthsBenefits` and `Platform.OfferFreeMonthsBenefits` |
 
 ### 6.3 Schema verification (SqlC01)
 
@@ -315,6 +336,13 @@ EligibilityRule    | nvarchar     | NO       | 4000
 Foreign keys on `FreeMonthsBenefits.ContractId → Contracts.Id` (cascade): **1**.
 Non-PK indexes on `FreeMonthsBenefits`: **3** (ContractId,
 ContractId+EligibilityStatus, ContractId+FulfillmentStatus).
+
+### 6.3.1 Schema verification (SqlC08)
+
+`Platform.OfferFreeMonthsBenefits.EligibilityRule` is `nvarchar(4000) NOT NULL`
+with **no** default, matching `Platform.FreeMonthsBenefits.EligibilityRule`
+exactly. The absence of a `COLUMN_DEFAULT` proves the tightening migration
+introduced no fabricated rule value.
 
 ### 6.4 JSON safety (SqlC06)
 
@@ -401,9 +429,9 @@ The correction did NOT weaken `Grant`. The `Grant` method still requires
 The same independence is also implicitly exercised by
 `SqlC05_StateTransitions_SurviveSqlRoundTrip`, which round-trips a benefit
 through `MarkEligible → Grant → MarkAppliedToSubscription` against the live
-database. The correction does not affect persistence — no migration was
-required and `dotnet ef migrations has-pending-model-changes` returns
-"No changes have been made to the model since the last migration."
+database. Correction 1 did not affect persistence — no migration was required
+for it. (Correction 2 in §13 *did* add a migration, but for the Offer-side
+`EligibilityRule` column, unrelated to the state machine.)
 
 ---
 
@@ -472,18 +500,33 @@ matches, and it is non-executable.
 
 | Category | Result |
 |---|---|
-| Solution build | 0 errors, 0 warnings |
-| Task C unit tests (InMemory) | 39 passed, 0 failed |
-| Task C snapshot/EF tests (InMemory) | 9 passed, 0 failed |
-| Task C SQL Server tests | 7 passed, 0 failed |
-| Total Task C tests | 55 passed, 0 failed |
-| Full non-SQL regression | 1524 passed, 0 failed |
-| Full SQL regression | 214 passed, 1 pre-existing skip (Task18.5 unrelated) |
-| EF Core migrations | `20260929174030_AddFreeMonthsBenefits` applied successfully against Local SQL Server; no pending model changes after correction |
+| Solution build | 0 errors |
+| Task C unit tests (pure domain) | 41 passed, 0 failed |
+| Task C snapshot/EF tests (InMemory) | 10 passed, 0 failed |
+| Task C SQL Server tests | 8 passed, 0 failed |
+| Total Task C tests | 59 passed, 0 failed |
+| Full regression | 1743 total, 1742 passed, 0 failed, 1 skipped (pre-existing; exact test named in §10.1) |
+| EF Core migrations | `20260929174030_AddFreeMonthsBenefits` and `20260929193144_RequireEligibilityRuleOnOfferFreeMonths` both applied successfully against Local SQL Server |
 | `dotnet ef migrations has-pending-model-changes` | "No changes have been made to the model since the last migration." |
 | Hidden-inference audit | Clean (no derivation, no fabrication, no inference) |
 | Implementation commit | `2530af1` (`feat(billing): add free months benefit foundation`) |
-| Correction commit | `bdac0b1` (`fix(billing): decouple free months eligibility from fulfillment`) |
+| Correction 1 commit | `bdac0b1` (`fix(billing): decouple free months eligibility from fulfillment`) |
+| Correction 2 commit | `fix(billing): enforce free months eligibility rule snapshot` |
+
+### 10.1 Exact full-suite skip
+
+Exactly one test in the full suite is skipped. It is pre-existing and
+unrelated to Task C:
+
+```text
+Centerix.SecurityTests.Task18_5CreditEconomicOriginSqlServerTests
+    .Test15_Task1851_MixedLineageProportionalTransferredOrigin
+
+Skip reason (verbatim from its [Fact] attribute):
+  "Complex overlapping subscription scenario - covered by Test16 and other tests"
+```
+
+No Task C test is skipped.
 
 ---
 
@@ -545,15 +588,45 @@ matches, and it is non-executable.
     (Eligibility / Fulfillment Independence — Verification); updated §2.2,
     §5, §10, §12 to reflect the corrected semantics; removed every claim
     that eligibility is locked after Grant.
-* **No migration required.** `dotnet ef migrations has-pending-model-changes`
-  returns "No changes have been made to the model since the last migration."
-  The correction is a behavioural / domain-only change.
+* **No migration required for Correction 1.** `dotnet ef migrations
+  has-pending-model-changes` returned "No changes have been made to the model
+  since the last migration." at that point. The correction was a behavioural /
+  domain-only change.
+
+### Correction 2 (subsequent — EligibilityRule completeness)
+
+* **Modified (5 files):**
+  * `src/Centerix.Domain/Platform/Promotions/OfferBenefit.cs` —
+    `OfferFreeMonthsBenefit.EligibilityRule` made non-nullable and required in
+    `Create` (null rejected with
+    `OfferFreeMonthsBenefit.EligibilityRule_Required`). `OfferBenefit` (the
+    non-FreeMonths class) is unchanged and keeps its nullable rule.
+  * `src/Centerix.Application/Platform/Promotions/Commands/CreateContractFromOfferCommand.cs`
+    — removed the silent `continue`; a null rule now returns
+    `Error.Validation("Offer.IncompleteFreeMonthsBenefit", ...)`.
+  * `src/Centerix.Infrastructure/Data/Configurations/FreeMonthsBenefitConfiguration.cs`
+    — `OfferFreeMonthsBenefitConfiguration.EligibilityRule` marked
+    `.IsRequired()`.
+  * `src/Centerix.Infrastructure/Data/Migrations/AppDbContextModelSnapshot.cs`
+    — regenerated by EF tooling.
+  * The three `TaskC_FreeMonthsBenefit*Tests.cs` files.
+* **Added (2 files):**
+  * `src/Centerix.Infrastructure/Data/Migrations/20260929193144_RequireEligibilityRuleOnOfferFreeMonths.cs`
+  * `...RequireEligibilityRuleOnOfferFreeMonths.Designer.cs`
+* **Documentation updated:** this report (§3.1, §4.1, §4.2, §5, §6.2, §6.3.1,
+  §7.3, §10, §12, §13).
+* **Migration required** — the existing schema was **not** already correct:
+  `20260929174030_AddFreeMonthsBenefits` had created
+  `Platform.OfferFreeMonthsBenefits.EligibilityRule` as `nullable: true`. The
+  new migration alters it to `nvarchar(4000) NOT NULL` with **no**
+  `defaultValue` (EF's generated `defaultValue: ""` was removed to honour
+  design invariant 35).
 
 ---
 
 ## 12. Stop Condition
 
-Task C is closed (post-correction).
+Task C is closed (post-Correction 1 and Correction 2).
 
 * Domain aggregate + state machine + Offer → Contract snapshot + EF Core
   configuration + schema migration are implemented and tested.
@@ -564,12 +637,68 @@ Task C is closed (post-correction).
 * Fulfillment remains monotone: `Pending → Granted → AppliedToSubscription`.
   `Grant` still requires `EligibilityStatus == Eligible` at the moment of
   the `Pending → Granted` transition.
-* The migration is schema-only and does NOT manufacture FreeMonthsBenefit
-  rows from `Contract.BonusMonths > 0` (per design invariant 35).
+* Both migrations are schema-only and do NOT manufacture FreeMonthsBenefit
+  rows from `Contract.BonusMonths > 0`, and the tightening migration adds no
+  fabricated default (per design invariant 35).
+* `EligibilityRule` is required on both the Contract-side and Offer-side
+  snapshots in the domain, in the EF model, and in the database schema; a
+  missing rule in the Offer snapshot aborts the conversion with an explicit
+  validation error instead of silently dropping the commercial entitlement.
 * All relevant design invariants (§L.26, §L.28, §L.29, §L.31, §L.32, §L.34,
   §L.35) are enforced by the domain boundary and verified by tests.
-* 55 Task C tests + 1524 non-SQL + 214 SQL tests pass with zero regressions.
-* No migration required for the correction; EF pending-model-changes is clean.
+* 59 Task C tests pass, and the full suite passes with zero regressions
+  (1 pre-existing skip, named in §10.1).
+* EF pending-model-changes is clean.
 * The next task (Task D) can implement `GrantBenefitCommand` and
   `ApplyFreeMonthsToSubscriptionCommand` against the state-machine exposed
   here, plus `TenantPlan.AppliedFreeMonthsBenefitIds[]` for idempotency.
+
+---
+
+## 13. EligibilityRule Completeness / No Silent Commercial Entitlement Loss (Correction 2)
+
+**Status:** VERIFIED.
+
+The initial Task C implementation allowed OfferFreeMonthsBenefit.Create() to
+accept a null EligibilityRule (via an optional parameter defaulting to null).
+The production CreateContractFromOfferHandler silently skipped any
+OfferFreeMonthsBenefit with a null rule during Offer → Contract conversion.
+This contradicted design invariant 26 ("every Entitlement Benefit row MUST carry
+exactly one EligibilityRule") and risked silent loss of commercial entitlements.
+
+### 13.1 Changes applied
+
+| File | Change |
+|---|---|
+| [OfferBenefit.cs](file:///d:/New%20folder/Center%20Managements%20V1/Centerix/src/Centerix.Domain/Platform/Promotions/OfferBenefit.cs) | `OfferFreeMonthsBenefit.EligibilityRule` changed from `EligibilityRule?` to `EligibilityRule` (non-nullable). `Create()` changed from `EligibilityRule? eligibilityRule = null` to `EligibilityRule eligibilityRule` (required, no default, no optional creation mode retained). Null guard added: `if (eligibilityRule is null) return Error.Validation("OfferFreeMonthsBenefit.EligibilityRule_Required", ...)`. `OfferBenefit` (the non-FreeMonths class) is deliberately **unchanged** and keeps its nullable, default-null rule — only `OfferFreeMonthsBenefit` is corrected. |
+| [CreateContractFromOfferCommand.cs](file:///d:/New%20folder/Center%20Managements%20V1/Centerix/src/Centerix.Application/Platform/Promotions/Commands/CreateContractFromOfferCommand.cs) | Removed the silent `if (offerFreeMonths.EligibilityRule is null) continue;` skip. Replaced with explicit failure: `return Error.Validation("Offer.IncompleteFreeMonthsBenefit", ...)`. A null rule now aborts the whole Contract creation rather than silently dropping the benefit. |
+| [FreeMonthsBenefitConfiguration.cs](file:///d:/New%20folder/Center%20Managements%20V1/Centerix/src/Centerix.Infrastructure/Data/Configurations/FreeMonthsBenefitConfiguration.cs) | `OfferFreeMonthsBenefitConfiguration`: `EligibilityRule` marked `.IsRequired()`. The schema now enforces `NOT NULL` at the database level. |
+| [20260929193144_RequireEligibilityRuleOnOfferFreeMonths.cs](file:///d:/New%20folder/Center%20Managements%20V1/Centerix/src/Centerix.Infrastructure/Data/Migrations/20260929193144_RequireEligibilityRuleOnOfferFreeMonths.cs) | New migration altering `Platform.OfferFreeMonthsBenefits.EligibilityRule` from `nullable: true` to `nvarchar(4000) NOT NULL`. **No fabricated default** — EF's generated `defaultValue: ""` was removed per design invariant 35. |
+
+### 13.2 Invariant summary
+
+```text
+OfferFreeMonthsBenefit.EligibilityRule  != null   (domain + EF model + schema)
+FreeMonthsBenefit.EligibilityRule       != null   (domain + EF model + schema)
+CreateContractFromOfferHandler: NULL RULE -> EXPLICIT FAILURE (never a silent skip)
+Offer -> Contract copies EligibilityRule exactly
+```
+
+### 13.3 Tests added / updated
+
+| Test | File | Verifies |
+|---|---|---|
+| `Test35_OfferFreeMonthsBenefit_Create_WithNullRule_Fails` | [TaskC_FreeMonthsBenefitFoundationTests.cs](file:///d:/New%20folder/Center%20Managements%20V1/Centerix/tests/Centerix.SecurityTests/TaskC_FreeMonthsBenefitFoundationTests.cs) | `Create(..., null!)` fails with `OfferFreeMonthsBenefit.EligibilityRule_Required` **and no object is created** (`result.Value` throws). |
+| `Test36_OfferFreeMonthsBenefit_Create_WithValidRule_Succeeds` | Same | `Create(..., validRule)` succeeds and preserves `EntitlementMonths` and the rule. |
+| `TestC07_OfferFreeMonthsBenefit_Create_RejectsNullRule_CannotSilentlyLoseEntitlement` | [TaskC_FreeMonthsBenefitSnapshotTests.cs](file:///d:/New%20folder/Center%20Managements%20V1/Centerix/tests/Centerix.SecurityTests/TaskC_FreeMonthsBenefitSnapshotTests.cs) | Replaces the old test that built a null-rule benefit and asserted the silent skip. |
+| `TestC06_OfferToContract_SnapshotsFreeMonthsBenefitThroughProductionFlow` | Same | **Existing production-snapshot fidelity**: the real `AcceptOfferHandler` + `CreateContractFromOfferHandler` copy the rule verbatim (structural equality and byte-identical canonical JSON) with `EntitlementMonths` preserved. |
+| `TestC10_OfferToContract_WithNullRuleRow_FailsExplicitly_AndCreatesNoContract` | Same | **Defensive production conversion**: after persisting a valid Offer, the tracked row's rule is nulled out (the only way to reach the branch — EF rejects a null rule at write time on both InMemory and SQL Server). The real handler then fails with `Offer.IncompleteFreeMonthsBenefit` and **no Contract row is persisted**. |
+| `SqlC08_OfferFreeMonthsBenefits_EligibilityRule_IsNotNull_InSchema` | [TaskC_FreeMonthsBenefitSqlServerTests.cs](file:///d:/New%20folder/Center%20Managements%20V1/Centerix/tests/Centerix.SecurityTests/TaskC_FreeMonthsBenefitSqlServerTests.cs) | `INFORMATION_SCHEMA.COLUMNS` confirms `EligibilityRule` is `nvarchar(4000) NOT NULL` **and has no `COLUMN_DEFAULT`** on both `Platform.OfferFreeMonthsBenefits` and `Platform.FreeMonthsBenefits`. |
+
+### 13.4 Verification evidence
+
+* **Build:** `dotnet build Centerix.slnx --no-restore` — 0 errors.
+* **Task C tests:** 59 passed, 0 failed (41 pure-domain + 10 InMemory snapshot + 8 Local SQL Server).
+* **Full regression:** see §10.1 for the exact totals and the exact skipped test.
+* **EF Core migrations:** `dotnet ef migrations has-pending-model-changes` returns "No changes have been made to the model since the last migration."
+* **No unrelated diff:** Only `OfferBenefit.cs`, `CreateContractFromOfferCommand.cs`, `FreeMonthsBenefitConfiguration.cs`, the three Task C test files, this report, and the new migration (plus its designer and the regenerated model snapshot) were modified.
