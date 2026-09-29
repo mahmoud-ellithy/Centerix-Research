@@ -1,6 +1,7 @@
 namespace Centerix.SecurityTests;
 
 using Centerix.Application.Common.Interfaces;
+using Centerix.Application.Platform.Promotions.Commands;
 using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Contracts.EligibilityRules;
 using Centerix.Domain.Platform.Contracts.Enums;
@@ -450,73 +451,93 @@ public class TaskB_2_EligibilityRuleSqlServerTests
     }
 
     // ====================================================================
-    // 4 — OfferBenefit → ContractBenefit snapshot via SQL
+    // 4 — OfferBenefit → ContractBenefit snapshot via SQL,
+    //      using the REAL production Offer → Contract workflow
+    //      (AcceptOfferHandler + CreateContractFromOfferHandler).
     // ====================================================================
 
     [Fact]
-    public async Task Sql05_OfferToContract_PreservesEligibilityRuleAcrossSnapshot()
+    public async Task Sql05_OfferToContract_PreservesEligibilityRuleAcrossSnapshot_ThroughProductionFlow()
     {
         var tenantId = $"B2-5-{Guid.NewGuid():N}"[..16];
         await SeedTenantAsync(tenantId);
         var planId = await EnsurePlanAsync(tenantId);
 
+        // The source rule attached to the OfferBenefit. This is the commercial fact
+        // the production flow must snapshot unchanged into the resulting ContractBenefit.
         var sourceRule = EligibilityRule.AllOf(
             EligibilityRule.ContractActive(),
             EligibilityRule.PaymentTermsEquals(PaymentTerms.FullUpfront),
             EligibilityRule.AmountPaidAtLeast(10000m));
+        var sourceRuleJson = EligibilityRuleSerializer.Serialize(sourceRule);
 
-        var offer = NewOffer(tenantId, planId);
-        var offerBenefit = OfferBenefit.Create(
-            id: Guid.NewGuid(),
-            offerId: offer.Id,
-            benefitType: ContractBenefitType.PhysicalGift,
-            name: "VIP Gift",
-            description: "Snapshot preserved",
-            contractualValue: 2000m,
-            currencyCode: "EGP",
-            eligibilityRule: sourceRule).Value;
-        offer.AddBenefit(offerBenefit);
+        Guid offerId;
+        Guid contractId;
 
-        // Persist OfferBenefit through the production aggregate path.
+        // ────────────────────────────────────────────────────────────────
+        // Production path:
+        //   Offer (Calculated)
+        //       ↓ AcceptOfferHandler          (real production handler)
+        //   Offer (Accepted, IsConvertible=true)
+        //       ↓ CreateContractFromOfferHandler  (real production handler)
+        //   Contract + ContractBenefit.EligibilityRule == offerBenefit.EligibilityRule
+        // ────────────────────────────────────────────────────────────────
         using (var scope = _env.Factory.Services.CreateScope())
         {
             AuthorizeTenant(scope.ServiceProvider, tenantId);
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var tenant = scope.ServiceProvider.GetRequiredService<ICurrentTenant>();
+
+            // 1. Persist the Offer + OfferBenefit (with EligibilityRule).
+            //    `CalculateAndPersistOfferHandler` does NOT attach OfferBenefits in this
+            //    codebase, so we build the Offer directly through the domain factory and
+            //    attach the OfferBenefit via `offer.AddBenefit(...)`. This is the
+            //    existing Test-integrations pattern (TaskA_PaymentTermsFoundationTests,
+            //    TaskB_EligibilityRuleFoundationTests).
+            var offer = NewOffer(tenantId, planId);
+            var offerBenefit = OfferBenefit.Create(
+                id: Guid.NewGuid(),
+                offerId: offer.Id,
+                benefitType: ContractBenefitType.PhysicalGift,
+                name: "VIP Gift",
+                description: "Snapshot preserved",
+                contractualValue: 2000m,
+                currencyCode: "EGP",
+                eligibilityRule: sourceRule).Value;
+            offer.AddBenefit(offerBenefit);
+
             db.Offers.Add(offer);
             db.StampAddedTenantIds(tenantId);
             await db.SaveChangesAsync();
+            offerId = offer.Id;
+
+            // 2. Real production AcceptOfferHandler.
+            var acceptHandler = new AcceptOfferHandler(db, tenant);
+            var acceptResult = await acceptHandler.Handle(
+                new AcceptOfferCommand(offer.Id),
+                CancellationToken.None);
+            Assert.True(acceptResult.IsSuccess,
+                string.Join(",", acceptResult.Errors?.Select(e => e.Description) ?? Array.Empty<string>()));
+
+            // 3. Real production CreateContractFromOfferHandler — this is the snapshot path
+            //    under test. It must read offerBenefit.EligibilityRule and copy it verbatim
+            //    into the new ContractBenefit (per its existing implementation).
+            var contractHandler = new CreateContractFromOfferHandler(db, tenant);
+            var contractResult = await contractHandler.Handle(
+                new CreateContractFromOfferCommand(offer.Id, $"CTR-B2-{Guid.NewGuid():N}"[..16]),
+                CancellationToken.None);
+            Assert.True(contractResult.IsSuccess,
+                string.Join(",", contractResult.Errors?.Select(e => e.Description) ?? Array.Empty<string>()));
+            contractId = contractResult.Value;
         }
 
-        // Snapshot the source rule bytes as the reference.
-        var offerBenefitRuleJson = EligibilityRuleSerializer.Serialize(sourceRule);
-
-        // Build ContractBenefit through the existing production factory by passing the
-        // OfferBenefit.EligibilityRule verbatim (mirrors CreateContractFromOfferCommand).
-        var contract = NewContract(tenantId, planId);
-        var snapshotBenefit = ContractBenefit.Create(
-            id: Guid.NewGuid(),
-            contractId: contract.Id,
-            benefitType: offerBenefit.BenefitType,
-            name: offerBenefit.Name,
-            description: offerBenefit.Description,
-            contractualValue: offerBenefit.ContractualValue,
-            currencyCode: offerBenefit.CurrencyCode,
-            eligibilityRule: offerBenefit.EligibilityRule).Value;
-        var snapshotRule = snapshotBenefit.EligibilityRule!;
-        var snapshotRuleJson = EligibilityRuleSerializer.Serialize(snapshotRule);
-
-        contract.AddBenefit(snapshotBenefit);
-
-        using (var scope = _env.Factory.Services.CreateScope())
-        {
-            AuthorizeTenant(scope.ServiceProvider, tenantId);
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            db.Contracts.Add(contract);
-            db.StampAddedTenantIds(tenantId);
-            await db.SaveChangesAsync();
-        }
-
-        // Reload the ContractBenefit from SQL Server in a fresh scope.
+        // ────────────────────────────────────────────────────────────────
+        // Reload the ContractBenefit in a fresh DI scope against the LIVE database.
+        // This forces a true SQL round-trip — no in-memory cache, no constructed
+        // expectation.
+        // ────────────────────────────────────────────────────────────────
+        EligibilityRule? loadedRule;
+        string loadedJson;
         using (var scope = _env.Factory.Services.CreateScope())
         {
             AuthorizeTenant(scope.ServiceProvider, tenantId);
@@ -525,41 +546,43 @@ public class TaskB_2_EligibilityRuleSqlServerTests
                 .IgnoreQueryFilters()
                 .Include(c => c.Benefits)
                 .AsNoTracking()
-                .FirstAsync(c => c.Id == contract.Id);
+                .FirstAsync(c => c.Id == contractId);
 
             Assert.Single(loadedContract.Benefits);
-            var loadedBenefit = loadedContract.Benefits.Single();
-            Assert.NotNull(loadedBenefit.EligibilityRule);
-
-            // Snapshot survived persistence end-to-end.
-            Assert.Equal(sourceRule, loadedBenefit.EligibilityRule);
-            Assert.Equal(
-                offerBenefitRuleJson,
-                EligibilityRuleSerializer.Serialize(loadedBenefit.EligibilityRule!));
-            Assert.Equal(snapshotRuleJson, EligibilityRuleSerializer.Serialize(loadedBenefit.EligibilityRule!));
-
-            Assert.IsType<AllOfRule>(loadedBenefit.EligibilityRule!);
+            loadedRule = loadedContract.Benefits.Single().EligibilityRule;
+            loadedJson = EligibilityRuleSerializer.Serialize(loadedRule!);
         }
 
-        // Equality ↔ serialisation invariant for the snapshot.
+        Assert.NotNull(loadedRule);
+
+        // Structural equality survives the production flow + SQL round-trip.
+        Assert.Equal(sourceRule, loadedRule);
+
+        // Serialised JSON is byte-identical to the original OfferBenefit rule.
+        Assert.Equal(sourceRuleJson, loadedJson);
+
+        // Equality ↔ serialisation invariant: a rule built independently from
+        // scratch equals the persisted snapshot and produces identical JSON.
         var rebuilt = EligibilityRule.AllOf(
             EligibilityRule.ContractActive(),
             EligibilityRule.PaymentTermsEquals(PaymentTerms.FullUpfront),
             EligibilityRule.AmountPaidAtLeast(10000m));
+        Assert.Equal(rebuilt, loadedRule);
+        Assert.Equal(EligibilityRuleSerializer.Serialize(rebuilt), loadedJson);
+
+        // The Offer was transitioned by the production handlers.
         using (var scope = _env.Factory.Services.CreateScope())
         {
             AuthorizeTenant(scope.ServiceProvider, tenantId);
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var loadedContract = await db.Contracts
+            var reloadedOffer = await db.Offers
                 .IgnoreQueryFilters()
-                .Include(c => c.Benefits)
                 .AsNoTracking()
-                .FirstAsync(c => c.Id == contract.Id);
-            var loadedBenefit = loadedContract.Benefits.Single();
-            Assert.Equal(rebuilt, loadedBenefit.EligibilityRule);
+                .FirstAsync(o => o.Id == offerId);
             Assert.Equal(
-                EligibilityRuleSerializer.Serialize(rebuilt),
-                EligibilityRuleSerializer.Serialize(loadedBenefit.EligibilityRule!));
+                (byte)OfferStatus.ConvertedToContract,
+                (byte)reloadedOffer.Status);
+            Assert.Equal(contractId, reloadedOffer.ContractId);
         }
     }
 
