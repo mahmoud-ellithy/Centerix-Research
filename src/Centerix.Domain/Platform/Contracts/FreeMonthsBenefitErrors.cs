@@ -58,14 +58,6 @@ public static class FreeMonthsBenefitErrors
         Error.Conflict("Contract.FreeMonthsBenefit.AlreadyGranted",
             "FreeMonthsBenefit has already been granted");
 
-    public static Error CannotRevertFromGranted =>
-        Error.Conflict("Contract.FreeMonthsBenefit.CannotRevertFromGranted",
-            "Eligibility cannot be reverted to NotEligible once the benefit has been Granted");
-
-    public static Error CannotRevertFromApplied =>
-        Error.Conflict("Contract.FreeMonthsBenefit.CannotRevertFromApplied",
-            "Eligibility cannot be reverted once the benefit has been AppliedToSubscription");
-
     public static Error NotFound(Guid id) =>
         Error.NotFound("Contract.FreeMonthsBenefit.NotFound",
             $"FreeMonthsBenefit with ID '{id}' was not found");

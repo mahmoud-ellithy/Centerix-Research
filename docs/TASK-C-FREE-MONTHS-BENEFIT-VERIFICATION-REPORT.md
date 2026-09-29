@@ -11,9 +11,11 @@ eligibility evaluator, `GrantBenefitCommand`, `ApplyFreeMonthsToSubscriptionComm
 `Contract.BonusMonths` derivation cleanup.
 
 **Posture:** Documentation only for this commit; the implementation commit is
-`2530af1` (Task C foundation).
+`2530af1` (Task C foundation). A follow-up correctness fix is captured in
+commit `<correction-commit-sha>` (see §12 — Eligibility/Fulfillment Independence).
 
-**Repository state at audit time:** HEAD `2530af1`. Previous commits: `8e52171`
+**Repository state at audit time:** HEAD `<head-sha>`. Implementation commit
+`2530af1`. Correction commit `<correction-commit-sha>`. Previous commits: `8e52171`
 (Task B.2 SQL Server verification report), `4e34087` (Task B production flow fix),
 `fc6cfea` (Task B.2 SQL tests), `5516e60` (Task B.1 PaymentMethod canonicalisation),
 `6b44648` (Task B EligibilityRule foundation), `e744009` (Task A PaymentTerms
@@ -67,15 +69,23 @@ Full regression: **1522/1522** non-SQL tests pass; **214/214** SQL tests pass
 ### 2.2 State machine
 
 ```text
-Eligibility (reversible)         Fulfillment (irreversible, monotone)
-──────────────────────           ────────────────────────────────────
-NotEligible  ⇄  Eligible   ───►  Pending  →  Granted  →  AppliedToSubscription  (terminal)
+Eligibility (reversible, independent)     Fulfillment (irreversible, monotone)
+─────────────────────────────────────     ────────────────────────────────────
+NotEligible  ⇄  Eligible                  Pending  →  Granted  →  AppliedToSubscription  (terminal)
 ```
+
+**Eligibility and Fulfillment are independent state machines.** The two counters
+may legitimately reach any combination such as `NotEligible + Granted`,
+`Eligible + Granted`, `NotEligible + AppliedToSubscription`, or
+`Eligible + AppliedToSubscription`. Eligibility answers *"Is this benefit
+currently eligible according to its rule?"*; Fulfillment answers *"Has the
+commercial entitlement already been granted/applied?"*. The two questions are
+deliberately separate.
 
 | Method | Pre-state | Post-state | Failure precondition |
 |---|---|---|---|
-| `MarkEligible(now)` | `NotEligible` | `Eligible` | FulfillmentStatus ≥ Granted (CannotRevertFromGranted) |
-| `MarkNotEligible()` | `Eligible` | `NotEligible` | FulfillmentStatus ≥ Granted (CannotRevertFromGranted) |
+| `MarkEligible(now)` | `NotEligible` (any Fulfillment) | `Eligible` | none — eligibility is independent of fulfillment |
+| `MarkNotEligible()` | `Eligible` (any Fulfillment) | `NotEligible` | none — eligibility is independent of fulfillment |
 | `Grant(now)` | `Pending` + `Eligible` | `Granted` | FulfillmentStatus = Pending AND EligibilityStatus ≠ Eligible |
 | `MarkAppliedToSubscription(now)` | `Granted` | `AppliedToSubscription` | FulfillmentStatus ≠ Granted (NotGranted) |
 
@@ -104,7 +114,7 @@ preserve this distinction in the type system.
 | `ContractId` | Guid | Non-empty (rejected at `Create`) |
 | `EntitlementMonths` | int | `> 0` (rejected at `Create`); **immutable** thereafter |
 | `CurrencyCode` | string | 3-letter ISO-4217, normalised to upper-invariant at construction |
-| `EligibilityStatus` | enum | Reversible; locked once `FulfillmentStatus ≥ Granted` |
+| `EligibilityStatus` | enum | Reversible; **independent of `FulfillmentStatus`** (see §7) |
 | `FulfillmentStatus` | enum | Monotone: `Pending → Granted → AppliedToSubscription` (terminal) |
 | `EligibilityRule` | `EligibilityRule` | **Required** at `Create` (rejected if null) |
 | `EligibleAtUtc` | DateTime? | Set on first `MarkEligible`; cleared by `MarkNotEligible`; **never** set after `Grant`/`Apply` |
@@ -248,8 +258,8 @@ configuration, or the production snapshot wiring — and verified by a test.
 | # | Invariant | Enforced by | Test |
 |---|---|---|---|
 | 26 | Every benefit row (`ContractBenefit` and `FreeMonthsBenefit`) MUST carry exactly one EligibilityRule | `FreeMonthsBenefit.Create` rejects null rule; `ContractBenefit` already does | `Test06_Create_WithNullRule_Fails`, `SqlC01_Schema`, `SqlC03_Snapshot` |
-| 28 | FulfillmentStatus is monotone: `Pending → Granted → (AppliedToSubscription)`; no reverse | `Grant` and `MarkAppliedToSubscription` reject out-of-order transitions | `Test15_...`, `Test16_...`, `Test18_...`, `Test19_...`, `SqlC05_StateTransitions` |
-| 29 | EligibilityStatus is reversible: `NotEligible ⇄ Eligible` based on rule evaluation | `MarkEligible` and `MarkNotEligible` are bidirectional pre-Grant | `Test11_...` through `Test14_...`, `Test25_...` |
+| 28 | FulfillmentStatus is monotone: `Pending → Granted → (AppliedToSubscription)`; no reverse | `Grant` and `MarkAppliedToSubscription` reject out-of-order transitions; `Grant` on `Granted`/`AppliedToSubscription` is idempotent | `Test15_...`, `Test16_...`, `Test18_...`, `Test19_...`, `Test25_...`, `SqlC05_StateTransitions` |
+| 29 | EligibilityStatus is reversible: `NotEligible ⇄ Eligible` based on rule evaluation — **independent of FulfillmentStatus** | `MarkEligible` and `MarkNotEligible` are bidirectional at any Fulfillment status | `Test11_...` through `Test14_...`, `Test27_...`, plus all four independence tests in §12 |
 | 31 | A FreeMonthsBenefit.Id MUST appear at most once in `TenantPlan.AppliedFreeMonthsBenefitIds[]` | TenantPlan-side invariant (out of scope here); aggregate-level: idempotent re-calls preserve first timestamp | `Test17_...`, `Test20_...` (idempotent re-call preserves `GrantedAtUtc`/`AppliedAtUtc`) |
 | 32 | Bonus months never increase `ContractedAmount` | `Contract.AddFreeMonthsBenefit` performs no aggregate-value mutation | `TestC08_ContractedAmount_IsIndependentOfFreeMonthsBenefitEntitlementMonths` |
 | 34 | The Offer/Contract snapshot of benefits is immutable after `Contract.Create(...)`; only EligibilityStatus, FulfillmentStatus, GrantedAtUtc, AppliedAtUtc mutate | `EntitlementMonths`, `EligibilityRule`, `CurrencyCode` are private-set; only the four transition methods mutate state | `Test10_CommercialDefinition_IsImmutable_AfterConstruction`, `Test15_...` (state fields mutated, commercial fields preserved) |
@@ -341,7 +351,63 @@ confirms:
 
 ---
 
-## 7. Out-of-Scope (Deferred to Later Tasks)
+## 7. Eligibility / Fulfillment Independence — Verification
+
+**Status:** VERIFIED. The four required transitions below were each exercised
+by a dedicated domain test. None were skipped.
+
+The earlier Task C implementation incorrectly locked `EligibilityStatus` after
+`FulfillmentStatus` reached `Granted`. The correction (commit
+`<correction-commit-sha>`) removes the `if (FulfillmentStatus is Granted or
+AppliedToSubscription) return CannotRevertFromGranted;` guard from
+`MarkEligible` and `MarkNotEligible`. The XML documentation on
+`FreeMonthsBenefit.MarkEligible` / `MarkNotEligible` / `Grant` was rewritten to
+state the corrected semantics:
+
+* **Eligibility** is reversible.
+* **Fulfillment** is monotone.
+* **Application** is terminal / idempotent.
+
+The corrected `FreeMonthsBenefit` does NOT use "Granted is historical" as
+justification for locking eligibility. Historical fulfillment and current
+eligibility are deliberately separate state machines.
+
+### 7.1 Required transitions (all VERIFIED)
+
+| # | Starting state | Transition | Expected post-state | Test | Result |
+|---|---|---|---|---|---|
+| 1 | `Eligible + Pending` | `Grant(t)` | `Eligible + Granted`, `GrantedAtUtc = t` | `Test15_Grant_FromEligiblePending_TransitionsToGranted_StampsTimestamp` | **Passed** |
+| 2 | `Eligible + Granted` | `MarkNotEligible()` | `NotEligible + Granted`, `GrantedAtUtc` preserved | `Test21_Grant_DoesNotLockEligibility_MarkNotEligibleSucceedsAfterGrant` | **Passed** |
+| 3 | `NotEligible + Granted` | `MarkEligible(t2)` | `Eligible + Granted`, `GrantedAtUtc` preserved, `EligibleAtUtc = t2` | `Test23_Eligibility_CanBecomeEligibleAgainAfterGrant_FulfillmentUnchanged` | **Passed** |
+| 4 | `Eligible + AppliedToSubscription` | `MarkNotEligible()` | `NotEligible + AppliedToSubscription`, `GrantedAtUtc`/`AppliedAtUtc` preserved | `Test22_AppliedBenefit_CanBecomeNotEligible_FulfillmentPreserved` | **Passed** |
+| 5 | `NotEligible + AppliedToSubscription` | `MarkEligible(t2)` | `Eligible + AppliedToSubscription`, `GrantedAtUtc`/`AppliedAtUtc` preserved, `EligibleAtUtc = t2` | `Test24_Eligibility_CanBecomeEligibleAgainAfterApplication_FulfillmentAndTimestampsUnchanged` | **Passed** |
+
+All five transitions preserve `FulfillmentStatus` and the fulfillment
+timestamps (`GrantedAtUtc`, `AppliedAtUtc`) exactly. Only `EligibilityStatus`
+and `EligibleAtUtc` change.
+
+### 7.2 Grant precondition — preserved
+
+The correction did NOT weaken `Grant`. The `Grant` method still requires
+`EligibilityStatus == Eligible` at the moment of the actual
+`Pending → Granted` transition. Verified by:
+
+* `Test16_Grant_FromNotEligible_IsRejected` — `Pending + NotEligible → Grant` fails with `Contract.FreeMonthsBenefit.NotEligible` (passed).
+* `Test17_Grant_IsIdempotent_OnAlreadyGranted` — re-calling `Grant` on `Granted` is a no-op (passed).
+* `Test25_OnceApplied_Grant_IsNoOp_FulfillmentUnchanged` — re-calling `Grant` on `AppliedToSubscription` is a no-op (passed).
+
+### 7.3 SQL Server verification
+
+The same independence is also implicitly exercised by
+`SqlC05_StateTransitions_SurviveSqlRoundTrip`, which round-trips a benefit
+through `MarkEligible → Grant → MarkAppliedToSubscription` against the live
+database. The correction does not affect persistence — no migration was
+required and `dotnet ef migrations has-pending-model-changes` returns
+"No changes have been made to the model since the last migration."
+
+---
+
+## 8. Out-of-Scope (Deferred to Later Tasks)
 
 The following items are explicitly **NOT** implemented in Task C. They are
 called out here so that future tasks can implement them without violating
@@ -374,7 +440,7 @@ this commit's invariants.
 
 ---
 
-## 8. Hidden-Inference Audit
+## 9. Hidden-Inference Audit
 
 The Task C implementation was audited for the failure modes flagged in
 `docs/COMMERCIAL-BENEFIT-DESIGN-VALIDATION.md` §N (Genuinely Unresolved
@@ -402,24 +468,26 @@ matches, and it is non-executable.
 
 ---
 
-## 9. Verification Summary
+## 10. Verification Summary
 
 | Category | Result |
 |---|---|
 | Solution build | 0 errors, 0 warnings |
-| Task C unit tests (InMemory) | 37 passed, 0 failed |
+| Task C unit tests (InMemory) | 39 passed, 0 failed |
 | Task C snapshot/EF tests (InMemory) | 9 passed, 0 failed |
 | Task C SQL Server tests | 7 passed, 0 failed |
-| Total Task C tests | 53 passed, 0 failed |
-| Full non-SQL regression | 1522 passed, 0 failed |
+| Total Task C tests | 55 passed, 0 failed |
+| Full non-SQL regression | 1524 passed, 0 failed |
 | Full SQL regression | 214 passed, 1 pre-existing skip (Task18.5 unrelated) |
-| EF Core migrations | `20260929174030_AddFreeMonthsBenefits` applied successfully against Local SQL Server |
+| EF Core migrations | `20260929174030_AddFreeMonthsBenefits` applied successfully against Local SQL Server; no pending model changes after correction |
+| `dotnet ef migrations has-pending-model-changes` | "No changes have been made to the model since the last migration." |
 | Hidden-inference audit | Clean (no derivation, no fabrication, no inference) |
-| Commit | `2530af1` (`feat(billing): add free months benefit foundation`) |
+| Implementation commit | `2530af1` (`feat(billing): add free months benefit foundation`) |
+| Correction commit | `<correction-commit-sha>` (`fix(billing): decouple free months eligibility from fulfillment`) |
 
 ---
 
-## 10. Files Changed
+## 11. Files Changed
 
 ### Added (10 files)
 * `src/Centerix.Domain/Platform/Contracts/Enums/FreeMonthsEligibilityStatus.cs`
@@ -456,20 +524,52 @@ matches, and it is non-executable.
 ### Documentation
 * `docs/TASK-C-FREE-MONTHS-BENEFIT-VERIFICATION-REPORT.md` (this file).
 
+### Correction commit (subsequent, behavioural fix only)
+* **Modified (3 files):**
+  * `src/Centerix.Domain/Platform/Contracts/FreeMonthsBenefit.cs` — removed
+    the `CannotRevertFromGranted` guard from `MarkEligible` and
+    `MarkNotEligible`; rewrote XML doc comments to state the corrected
+    semantics ("Eligibility is reversible. Fulfillment is monotone.
+    Application is terminal / idempotent.").
+  * `src/Centerix.Domain/Platform/Contracts/FreeMonthsBenefitErrors.cs` —
+    removed the now-unreachable `CannotRevertFromGranted` and
+    `CannotRevertFromApplied` error codes.
+  * `tests/Centerix.SecurityTests/TaskC_FreeMonthsBenefitFoundationTests.cs`
+    — replaced `Test21_OnceGranted_MarkNotEligible_IsRejected` and
+    `Test22_OnceApplied_MarkNotEligible_IsRejected` with the four required
+    independence tests (`Test21`, `Test22`, `Test23`, `Test24`,
+    `Test25_OnceApplied_Grant_IsNoOp_FulfillmentUnchanged`); renumbered the
+    subsequent tests.
+* **Documentation updated:**
+  * `docs/TASK-C-FREE-MONTHS-BENEFIT-VERIFICATION-REPORT.md` — added §7
+    (Eligibility / Fulfillment Independence — Verification); updated §2.2,
+    §5, §10, §12 to reflect the corrected semantics; removed every claim
+    that eligibility is locked after Grant.
+* **No migration required.** `dotnet ef migrations has-pending-model-changes`
+  returns "No changes have been made to the model since the last migration."
+  The correction is a behavioural / domain-only change.
+
 ---
 
-## 11. Stop Condition
+## 12. Stop Condition
 
-Task C is closed.
+Task C is closed (post-correction).
 
 * Domain aggregate + state machine + Offer → Contract snapshot + EF Core
   configuration + schema migration are implemented and tested.
+* Eligibility and Fulfillment are independent state machines: each
+  combination such as `Eligible + Granted`, `NotEligible + Granted`,
+  `Eligible + AppliedToSubscription`, `NotEligible + AppliedToSubscription`
+  is reachable, verified by the four independence tests in §7.
+* Fulfillment remains monotone: `Pending → Granted → AppliedToSubscription`.
+  `Grant` still requires `EligibilityStatus == Eligible` at the moment of
+  the `Pending → Granted` transition.
 * The migration is schema-only and does NOT manufacture FreeMonthsBenefit
   rows from `Contract.BonusMonths > 0` (per design invariant 35).
-* All four design invariants (§L.26, §L.28, §L.29, §L.31, §L.32, §L.34,
-  §L.35) relevant to Task C are enforced by the domain boundary and
-  verified by tests.
-* 53 Task C tests + 1522 non-SQL + 214 SQL tests pass with zero regressions.
+* All relevant design invariants (§L.26, §L.28, §L.29, §L.31, §L.32, §L.34,
+  §L.35) are enforced by the domain boundary and verified by tests.
+* 55 Task C tests + 1524 non-SQL + 214 SQL tests pass with zero regressions.
+* No migration required for the correction; EF pending-model-changes is clean.
 * The next task (Task D) can implement `GrantBenefitCommand` and
   `ApplyFreeMonthsToSubscriptionCommand` against the state-machine exposed
   here, plus `TenantPlan.AppliedFreeMonthsBenefitIds[]` for idempotency.

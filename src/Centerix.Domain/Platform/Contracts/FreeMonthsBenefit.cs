@@ -27,7 +27,9 @@ using Centerix.Domain.Platform.Contracts.Enums;
 ///     <description>
 ///       <see cref="EligibilityStatus"/> — derived from
 ///       <see cref="EligibilityRule"/>; <b>reversible</b> via <see cref="MarkEligible"/>
-///       and <see cref="MarkNotEligible"/>.
+///       and <see cref="MarkNotEligible"/>. Eligibility is independent of
+///       <see cref="FulfillmentStatus"/> — historical fulfillment does not lock
+///       future eligibility re-evaluation.
 ///     </description>
 ///   </item>
 ///   <item>
@@ -35,7 +37,7 @@ using Centerix.Domain.Platform.Contracts.Enums;
 ///     <description>
 ///       <see cref="FulfillmentStatus"/> = <see cref="FreeMonthsFulfillmentStatus.Granted"/>
 ///       and <see cref="GrantedAtUtc"/> — recorded exactly once by <see cref="Grant"/>.
-///       <b>Monotone</b>.
+///       <b>Monotone</b> (no backwards transitions).
 ///     </description>
 ///   </item>
 ///   <item>
@@ -50,11 +52,21 @@ using Centerix.Domain.Platform.Contracts.Enums;
 /// </list>
 ///
 /// <para>
+/// State-machine summary (Eligibility vs Fulfillment are <b>independent</b>):
+/// </para>
+/// <list type="bullet">
+///   <item><description><b>Eligibility</b>: reversible (<c>NotEligible ⇄ Eligible</c>). Independent of Fulfillment.</description></item>
+///   <item><description><b>Fulfillment</b>: monotone (<c>Pending → Granted → AppliedToSubscription</c>). Terminal.</description></item>
+///   <item><description><b>Application</b>: idempotent by <c>FreeMonthsBenefit.Id</c> (TenantPlan.AppliedFreeMonthsBenefitIds[]).</description></item>
+/// </list>
+///
+/// <para>
 /// Critical invariants (per docs/COMMERCIAL-BENEFIT-DESIGN-VALIDATION.md §F.2):
 /// </para>
 /// <list type="bullet">
 ///   <item><description><c>EntitlementMonths</c> is the commercial definition. It does <b>not</b> mean <c>Granted = true</c> or <c>Applied = true</c>.</description></item>
 ///   <item><description>Eligibility is reversible; Fulfillment is monotone; Application is idempotent.</description></item>
+///   <item><description>Eligibility and Fulfillment are independent state machines; their combinations are not constrained beyond what each machine individually enforces.</description></item>
 ///   <item><description>Bonus months never increase the billable <c>ContractedAmount</c>.</description></item>
 ///   <item><description><c>Contract.BonusMonths</c> is <b>NOT</b> <c>Σ FreeMonthsBenefits.EntitlementMonths</c> and is <b>NOT</b> <c>Σ FreeMonthsBenefits.GrantedMonths</c>. The legacy scalar is preserved unchanged until T11 makes it derived.</description></item>
 /// </list>
@@ -197,21 +209,26 @@ public class FreeMonthsBenefit : Entity
     /// to <see cref="FreeMonthsEligibilityStatus.Eligible"/>. Idempotent.
     /// </summary>
     /// <remarks>
-    /// Rejected once the benefit has reached <see cref="FreeMonthsFulfillmentStatus.Granted"/>
-    /// — once a grant decision has been recorded, eligibility is locked. This
-    /// preserves the design invariant "Granted is historical / monotone".
+    /// <para>
+    /// <b>Eligibility is reversible.</b> This method is intentionally
+    /// independent of <see cref="FulfillmentStatus"/> — historical
+    /// fulfillment (Granted / AppliedToSubscription) MUST NOT prevent a later
+    /// re-evaluation that flips the benefit back to Eligible.
+    /// </para>
+    /// <para>
+    /// A benefit may legitimately be in any combination such as
+    /// <c>Eligible + Granted</c>, <c>NotEligible + Granted</c>,
+    /// <c>Eligible + AppliedToSubscription</c> or
+    /// <c>NotEligible + AppliedToSubscription</c>: eligibility describes the
+    /// CURRENT eligibility according to its rule, fulfillment describes the
+    /// HISTORICAL grant/apply decision. The two counters are deliberately
+    /// separate.
+    /// </para>
     /// </remarks>
     public Result<Updated> MarkEligible(DateTime utcNow)
     {
         if (!Enum.IsDefined(EligibilityStatus))
             return FreeMonthsBenefitErrors.InvalidEligibilityStatus;
-
-        // Once Granted (or AppliedToSubscription), eligibility is historical and
-        // cannot be moved to NotEligible; it is also meaningless to mark it Eligible
-        // again because the grant decision stands.
-        if (FulfillmentStatus is FreeMonthsFulfillmentStatus.Granted
-                                or FreeMonthsFulfillmentStatus.AppliedToSubscription)
-            return FreeMonthsBenefitErrors.CannotRevertFromGranted;
 
         if (EligibilityStatus == FreeMonthsEligibilityStatus.Eligible)
             return Result.Updated;
@@ -226,19 +243,23 @@ public class FreeMonthsBenefit : Entity
     /// back to <see cref="FreeMonthsEligibilityStatus.NotEligible"/>. Idempotent.
     /// </summary>
     /// <remarks>
-    /// Rejected once <see cref="FulfillmentStatus"/> has reached
-    /// <see cref="FreeMonthsFulfillmentStatus.Granted"/> or
-    /// <see cref="FreeMonthsFulfillmentStatus.AppliedToSubscription"/>. See
-    /// <see cref="MarkEligible"/> for the rationale.
+    /// <para>
+    /// <b>Eligibility is reversible.</b> This method is intentionally
+    /// independent of <see cref="FulfillmentStatus"/> — a later financial
+    /// state change may legitimately flip an already-Granted benefit back
+    /// to NotEligible. The historical Grant decision is preserved.
+    /// </para>
+    /// <para>
+    /// Allowed combinations include <c>NotEligible + Granted</c> and
+    /// <c>NotEligible + AppliedToSubscription</c>: the row carries both
+    /// historical execution (Fulfillment) and current rule evaluation
+    /// (Eligibility) without one overriding the other.
+    /// </para>
     /// </remarks>
     public Result<Updated> MarkNotEligible()
     {
         if (!Enum.IsDefined(EligibilityStatus))
             return FreeMonthsBenefitErrors.InvalidEligibilityStatus;
-
-        if (FulfillmentStatus is FreeMonthsFulfillmentStatus.Granted
-                                or FreeMonthsFulfillmentStatus.AppliedToSubscription)
-            return FreeMonthsBenefitErrors.CannotRevertFromGranted;
 
         if (EligibilityStatus == FreeMonthsEligibilityStatus.NotEligible)
             return Result.Updated;
@@ -259,10 +280,19 @@ public class FreeMonthsBenefit : Entity
     /// <see cref="GrantedAtUtc"/>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Requires <see cref="EligibilityStatus"/> to be
-    /// <see cref="FreeMonthsEligibilityStatus.Eligible"/> at the moment of grant —
-    /// this is the "GrantBenefitCommand verifies EligibilityStatus == Eligible"
-    /// invariant (per design §F.3 and §G.3). Idempotent on already-Granted.
+    /// <see cref="FreeMonthsEligibilityStatus.Eligible"/> at the moment of
+    /// the <c>Pending → Granted</c> transition. After the transition, a later
+    /// eligibility flip (e.g. <c>MarkNotEligible()</c>) is permitted and the
+    /// historical Grant is preserved.
+    /// </para>
+    /// <para>
+    /// Idempotent on already-Granted. Idempotent on already-AppliedToSubscription
+    /// (no re-application). The TenantPlan-side idempotency guard
+    /// (<c>TenantPlan.AppliedFreeMonthsBenefitIds[]</c>) is enforced by the
+    /// apply command, not here.
+    /// </para>
     /// </remarks>
     public Result<Updated> Grant(DateTime utcNow)
     {

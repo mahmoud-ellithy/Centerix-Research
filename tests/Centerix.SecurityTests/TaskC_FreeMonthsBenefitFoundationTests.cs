@@ -337,12 +337,17 @@ public class TaskC_FreeMonthsBenefitFoundationTests
     }
 
     // ─────────────────────────────────────────────────────────────────
-    // 5. Fulfillment is monotone; cannot be reverted once Granted
+    // 5. Eligibility/Fulfillment state independence
+    //    Eligibility is reversible independently of Fulfillment.
+    //    Fulfillment remains monotone (Pending → Granted → AppliedToSubscription).
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Test21_OnceGranted_MarkNotEligible_IsRejected()
+    public void Test21_Grant_DoesNotLockEligibility_MarkNotEligibleSucceedsAfterGrant()
     {
+        // Scenario: Eligible + Pending → Grant → MarkNotEligible.
+        // After Grant, Eligibility must remain reversible: MarkNotEligible
+        // must succeed, and FulfillmentStatus must remain Granted.
         var benefit = NewBenefit();
         var t = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         benefit.MarkEligible(t);
@@ -350,15 +355,18 @@ public class TaskC_FreeMonthsBenefitFoundationTests
 
         var result = benefit.MarkNotEligible();
 
-        Assert.False(result.IsSuccess);
-        Assert.Equal("Contract.FreeMonthsBenefit.CannotRevertFromGranted", result.Errors!.First().Code);
-        // Eligibility must remain Eligible.
-        Assert.Equal(FreeMonthsEligibilityStatus.Eligible, benefit.EligibilityStatus);
+        Assert.True(result.IsSuccess);
+        Assert.Equal(FreeMonthsEligibilityStatus.NotEligible, benefit.EligibilityStatus);
+        Assert.Equal(FreeMonthsFulfillmentStatus.Granted, benefit.FulfillmentStatus);
+        Assert.Equal(t, benefit.GrantedAtUtc); // Fulfillment timestamp preserved
     }
 
     [Fact]
-    public void Test22_OnceApplied_MarkNotEligible_IsRejected()
+    public void Test22_AppliedBenefit_CanBecomeNotEligible_FulfillmentPreserved()
     {
+        // Scenario: Eligible + Pending → Grant → MarkAppliedToSubscription → MarkNotEligible.
+        // After Application, a later eligibility flip to NotEligible is permitted
+        // and FulfillmentStatus stays AppliedToSubscription (terminal).
         var benefit = NewBenefit();
         var t = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         benefit.MarkEligible(t);
@@ -367,12 +375,62 @@ public class TaskC_FreeMonthsBenefitFoundationTests
 
         var result = benefit.MarkNotEligible();
 
-        Assert.False(result.IsSuccess);
-        Assert.Equal("Contract.FreeMonthsBenefit.CannotRevertFromGranted", result.Errors!.First().Code);
+        Assert.True(result.IsSuccess);
+        Assert.Equal(FreeMonthsEligibilityStatus.NotEligible, benefit.EligibilityStatus);
+        Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
+        Assert.Equal(t, benefit.GrantedAtUtc);
+        Assert.Equal(t, benefit.AppliedAtUtc);
+        Assert.True(benefit.IsAppliedToSubscription);
     }
 
     [Fact]
-    public void Test23_OnceApplied_Grant_IsRejectedAsAlreadyApplied()
+    public void Test23_Eligibility_CanBecomeEligibleAgainAfterGrant_FulfillmentUnchanged()
+    {
+        // Scenario: Eligible + Pending → Grant → MarkNotEligible → MarkEligible(t2).
+        // Fulfillment stays Granted. GrantedAtUtc remains the original t1.
+        var benefit = NewBenefit();
+        var t1 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var t2 = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+        benefit.MarkEligible(t1);
+        benefit.Grant(t1);
+        benefit.MarkNotEligible();
+
+        var result = benefit.MarkEligible(t2);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(FreeMonthsEligibilityStatus.Eligible, benefit.EligibilityStatus);
+        Assert.Equal(FreeMonthsFulfillmentStatus.Granted, benefit.FulfillmentStatus);
+        Assert.Equal(t1, benefit.GrantedAtUtc); // original grant timestamp preserved
+        Assert.Equal(t2, benefit.EligibleAtUtc); // latest EligibleAtUtc tracks the current state
+    }
+
+    [Fact]
+    public void Test24_Eligibility_CanBecomeEligibleAgainAfterApplication_FulfillmentAndTimestampsUnchanged()
+    {
+        // Scenario: Eligible + Pending → Grant → MarkAppliedToSubscription
+        //           → MarkNotEligible → MarkEligible(t2).
+        // Fulfillment stays AppliedToSubscription. GrantedAtUtc and AppliedAtUtc
+        // remain the original t1 (no fulfillment state changes).
+        var benefit = NewBenefit();
+        var t1 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var t2 = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+        benefit.MarkEligible(t1);
+        benefit.Grant(t1);
+        benefit.MarkAppliedToSubscription(t1);
+        benefit.MarkNotEligible();
+
+        var result = benefit.MarkEligible(t2);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(FreeMonthsEligibilityStatus.Eligible, benefit.EligibilityStatus);
+        Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
+        Assert.Equal(t1, benefit.GrantedAtUtc);
+        Assert.Equal(t1, benefit.AppliedAtUtc);
+        Assert.Equal(t2, benefit.EligibleAtUtc);
+    }
+
+    [Fact]
+    public void Test25_OnceApplied_Grant_IsNoOp_FulfillmentUnchanged()
     {
         var benefit = NewBenefit();
         var t = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -382,7 +440,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
 
         var result = benefit.Grant(t);
 
-        Assert.True(result.IsSuccess); // idempotent on already-Granted/Applied path
+        Assert.True(result.IsSuccess); // idempotent on already-Applied path
         // No state change.
         Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
     }
@@ -392,7 +450,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Test24_EligibilityRule_StoredVerbatimOnConstruction()
+    public void Test26_EligibilityRule_StoredVerbatimOnConstruction()
     {
         var rule = EligibilityRule.AllOf(
             EligibilityRule.ContractActive(),
@@ -418,7 +476,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Test25_FulfillmentStatus_StartsPending_EvenWhenEligibilityFlipsToEligibleThenBack()
+    public void Test27_FulfillmentStatus_StartsPending_EvenWhenEligibilityFlipsToEligibleThenBack()
     {
         var benefit = NewBenefit();
         var t = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -437,7 +495,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Test26_FreeMonthsBenefit_UsesSeparateEnumsFromContractBenefit_BenefitEligibilityStatus()
+    public void Test28_FreeMonthsBenefit_UsesSeparateEnumsFromContractBenefit_BenefitEligibilityStatus()
     {
         // Verify FreeMonthsEligibilityStatus does NOT have a Delivered value
         // (that's PhysicalGift-only) and FreeMonthsFulfillmentStatus does NOT
@@ -447,7 +505,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
     }
 
     [Fact]
-    public void Test27_FreeMonthsFulfillmentStatus_UnderlyingNumericValues_ArePinned()
+    public void Test29_FreeMonthsFulfillmentStatus_UnderlyingNumericValues_ArePinned()
     {
         // Pinned so persisted columns and tests remain stable across refactors.
         Assert.Equal(0, (byte)FreeMonthsFulfillmentStatus.Pending);
@@ -456,7 +514,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
     }
 
     [Fact]
-    public void Test28_FreeMonthsEligibilityStatus_UnderlyingNumericValues_ArePinned()
+    public void Test30_FreeMonthsEligibilityStatus_UnderlyingNumericValues_ArePinned()
     {
         Assert.Equal(0, (byte)FreeMonthsEligibilityStatus.NotEligible);
         Assert.Equal(1, (byte)FreeMonthsEligibilityStatus.Eligible);
@@ -467,7 +525,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Test29_ScenarioA_FullLifecycle_FromConstructionToAppliedToSubscription()
+    public void Test31_ScenarioA_FullLifecycle_FromConstructionToAppliedToSubscription()
     {
         // Scenario A: 6 months for the price of 5, upfront.
         // The commercial entitlement is 1 free month; rule requires upfront
@@ -504,7 +562,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Test30_OfferFreeMonthsBenefit_Create_PreservesEntitlementAndRule()
+    public void Test32_OfferFreeMonthsBenefit_Create_PreservesEntitlementAndRule()
     {
         var offerId = Guid.NewGuid();
         var rule = DefaultUpfrontBonusRule(7500m);
@@ -525,7 +583,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
     }
 
     [Fact]
-    public void Test31_OfferFreeMonthsBenefit_Create_WithNonPositiveEntitlementMonths_Fails()
+    public void Test33_OfferFreeMonthsBenefit_Create_WithNonPositiveEntitlementMonths_Fails()
     {
         var result = OfferFreeMonthsBenefit.Create(
             id: Guid.NewGuid(),
@@ -538,7 +596,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
     }
 
     [Fact]
-    public void Test32_OfferFreeMonthsBenefit_SerialisedJson_MatchesContractBenefitPattern_NoClrMetadata()
+    public void Test34_OfferFreeMonthsBenefit_SerialisedJson_MatchesContractBenefitPattern_NoClrMetadata()
     {
         var rule = DefaultUpfrontBonusRule(5000m);
         var offerBenefit = OfferFreeMonthsBenefit.Create(
