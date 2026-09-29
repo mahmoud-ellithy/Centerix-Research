@@ -1,6 +1,7 @@
 namespace Centerix.Infrastructure.Data.Configurations;
 
 using Centerix.Domain.Platform.Contracts;
+using Centerix.Domain.Platform.Contracts.EligibilityRules;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -51,6 +52,13 @@ public class ContractBenefitConfiguration : IEntityTypeConfiguration<ContractBen
 
         builder.Property(b => b.DeliveredBy)
             .HasMaxLength(450);
+
+        builder.Property(b => b.EligibilityRule)
+            .HasConversion(
+                rule => rule != null ? EligibilityRuleSerializer.Serialize(rule) : null,
+                json => !string.IsNullOrEmpty(json) ? EligibilityRuleSerializer.Deserialize(json) : null)
+            .HasMaxLength(4000)
+            .IsRequired(false);
 
         builder.HasIndex(b => b.ContractId)
             .HasDatabaseName("IX_ContractBenefits_ContractId");

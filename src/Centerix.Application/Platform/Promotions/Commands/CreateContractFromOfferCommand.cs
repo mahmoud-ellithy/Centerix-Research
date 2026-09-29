@@ -187,7 +187,8 @@ public class CreateContractFromOfferHandler(
                     name: offerBenefit.Name,
                     description: offerBenefit.Description,
                     contractualValue: offerBenefit.ContractualValue,
-                    currencyCode: offerBenefit.CurrencyCode);
+                    currencyCode: offerBenefit.CurrencyCode,
+                    eligibilityRule: offerBenefit.EligibilityRule);
 
                 if (!benefitResult.IsSuccess)
                     return benefitResult.Errors!;

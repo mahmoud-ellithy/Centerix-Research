@@ -3,6 +3,7 @@ namespace Centerix.Domain.Platform.Promotions;
 using Centerix.Domain.Common;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Contracts.Enums;
+using Centerix.Domain.Platform.Contracts.EligibilityRules;
 
 /// <summary>
 /// Immutable snapshot of a feature entitlement attached to an Offer.
@@ -129,6 +130,15 @@ public class OfferBenefit : Entity
     /// <summary>Currency code (ISO-4217, e.g., EGP, USD).</summary>
     public string CurrencyCode { get; private set; } = default!;
 
+    /// <summary>
+    /// The immutable commercial eligibility rule snapshot attached to this offer benefit.
+    /// Describes WHAT conditions must hold for the benefit to become eligible.
+    /// When a Contract is created from an Accepted Offer, this value is copied into
+    /// <see cref="Centerix.Domain.Platform.Contracts.ContractBenefit.EligibilityRule"/>.
+    /// Nullable: existing offer benefits that predate per-benefit rules carry null.
+    /// </summary>
+    public EligibilityRule? EligibilityRule { get; private set; }
+
     private OfferBenefit() { }
 
     private OfferBenefit(
@@ -138,7 +148,8 @@ public class OfferBenefit : Entity
         string name,
         string? description,
         decimal contractualValue,
-        string currencyCode)
+        string currencyCode,
+        EligibilityRule? eligibilityRule)
     {
         Id = id;
         OfferId = offerId;
@@ -147,11 +158,17 @@ public class OfferBenefit : Entity
         Description = description;
         ContractualValue = contractualValue;
         CurrencyCode = currencyCode;
+        EligibilityRule = eligibilityRule;
     }
 
     /// <summary>
     /// Creates an OfferBenefit with validated parameters.
     /// </summary>
+    /// <param name="eligibilityRule">
+    /// Optional commercial eligibility rule snapshot. When provided, this rule will be
+    /// copied verbatim into <see cref="Centerix.Domain.Platform.Contracts.ContractBenefit.EligibilityRule"/>
+    /// when a Contract is created from this Offer.
+    /// </param>
     public static Result<OfferBenefit> Create(
         Guid id,
         Guid offerId,
@@ -159,7 +176,8 @@ public class OfferBenefit : Entity
         string name,
         string? description,
         decimal contractualValue,
-        string currencyCode)
+        string currencyCode,
+        EligibilityRule? eligibilityRule = null)
     {
         if (id == Guid.Empty)
             return Error.Validation("OfferBenefit.Id_Required", "Offer benefit ID is required");
@@ -183,6 +201,7 @@ public class OfferBenefit : Entity
             name.Trim(),
             description?.Trim(),
             contractualValue,
-            currencyCode.Trim().ToUpperInvariant());
+            currencyCode.Trim().ToUpperInvariant(),
+            eligibilityRule);
     }
 }

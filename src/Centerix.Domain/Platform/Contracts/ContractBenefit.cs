@@ -3,6 +3,7 @@ namespace Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Common;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Contracts.Enums;
+using Centerix.Domain.Platform.Contracts.EligibilityRules;
 using Centerix.Domain.Platform.Contracts.Events;
 
 /// <summary>
@@ -64,6 +65,15 @@ public class ContractBenefit : Entity
     /// <summary>The Contract this benefit belongs to.</summary>
     public Contract Contract { get; private set; } = default!;
 
+    /// <summary>
+    /// The immutable commercial eligibility rule snapshot attached to this benefit.
+    /// Describes WHAT conditions must hold for the benefit to become eligible.
+    /// Nullable: existing benefits created before per-benefit rules were introduced
+    /// carry a null rule; the global legacy rule continues to apply for those rows
+    /// via the existing <see cref="Centerix.Infrastructure.Platform.Services.BenefitEligibilityService"/>.
+    /// </summary>
+    public EligibilityRule? EligibilityRule { get; private set; }
+
     private ContractBenefit() { }
 
     private ContractBenefit(
@@ -73,7 +83,8 @@ public class ContractBenefit : Entity
         string name,
         string? description,
         decimal contractualValue,
-        string currencyCode)
+        string currencyCode,
+        EligibilityRule? eligibilityRule)
     {
         Id = id;
         ContractId = contractId;
@@ -83,11 +94,16 @@ public class ContractBenefit : Entity
         ContractualValue = contractualValue;
         CurrencyCode = currencyCode;
         EligibilityStatus = BenefitEligibilityStatus.NotEligible;
+        EligibilityRule = eligibilityRule;
     }
 
     /// <summary>
     /// Creates a ContractBenefit with validated parameters.
     /// </summary>
+    /// <param name="eligibilityRule">
+    /// Optional commercial eligibility rule snapshot. When null, the legacy global rule
+    /// continues to apply via <see cref="Centerix.Infrastructure.Platform.Services.BenefitEligibilityService"/>.
+    /// </param>
     public static Result<ContractBenefit> Create(
         Guid id,
         Guid contractId,
@@ -95,7 +111,8 @@ public class ContractBenefit : Entity
         string name,
         string? description,
         decimal contractualValue,
-        string currencyCode)
+        string currencyCode,
+        EligibilityRule? eligibilityRule = null)
     {
         if (id == Guid.Empty)
             return ContractErrors.Benefit.IdRequired;
@@ -119,7 +136,8 @@ public class ContractBenefit : Entity
             name.Trim(),
             description?.Trim(),
             contractualValue,
-            currencyCode.Trim().ToUpperInvariant());
+            currencyCode.Trim().ToUpperInvariant(),
+            eligibilityRule);
     }
 
     /// <summary>

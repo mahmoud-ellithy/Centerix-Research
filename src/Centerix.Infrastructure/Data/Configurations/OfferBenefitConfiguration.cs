@@ -1,5 +1,6 @@
 namespace Centerix.Infrastructure.Data.Configurations;
 
+using Centerix.Domain.Platform.Contracts.EligibilityRules;
 using Centerix.Domain.Platform.Promotions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -38,6 +39,13 @@ public class OfferBenefitConfiguration : IEntityTypeConfiguration<OfferBenefit>
         builder.Property(b => b.CurrencyCode)
             .HasMaxLength(3)
             .IsRequired();
+
+        builder.Property(b => b.EligibilityRule)
+            .HasConversion(
+                rule => rule != null ? EligibilityRuleSerializer.Serialize(rule) : null,
+                json => !string.IsNullOrEmpty(json) ? EligibilityRuleSerializer.Deserialize(json) : null)
+            .HasMaxLength(4000)
+            .IsRequired(false);
 
         builder.HasIndex(b => b.OfferId)
             .HasDatabaseName("IX_OfferBenefits_OfferId");
