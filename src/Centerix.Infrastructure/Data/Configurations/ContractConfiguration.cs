@@ -155,6 +155,16 @@ public class ContractConfiguration : IEntityTypeConfiguration<Contract>
         builder.Navigation(c => c.Benefits)
             .UsePropertyAccessMode(PropertyAccessMode.Field);
 
+        // Navigation: FreeMonthsBenefits (cascade delete). Separate aggregate
+        // from ContractBenefit per design §D.2.
+        builder.HasMany(c => c.FreeMonthsBenefits)
+            .WithOne(b => b.Contract)
+            .HasForeignKey(b => b.ContractId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Navigation(c => c.FreeMonthsBenefits)
+            .UsePropertyAccessMode(PropertyAccessMode.Field);
+
         // Navigation: ContractFeatures (cascade delete)
         builder.HasMany(c => c.ContractFeatures)
             .WithOne(cf => cf.Contract)

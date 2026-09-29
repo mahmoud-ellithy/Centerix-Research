@@ -121,12 +121,21 @@ public class AppDbContext : IdentityDbContext, IAppDbContext
     public DbSet<ContractBenefit> ContractBenefits { get; set; } = default!;
     public DbSet<ContractFeature> ContractFeatures { get; set; } = default!;
 
+    // Free months benefits (Task C): separate persistence aggregate from
+    // ContractBenefit — their fulfillment lifecycles differ (subscription
+    // extension vs. physical handover).
+    public DbSet<FreeMonthsBenefit> FreeMonthsBenefits { get; set; } = default!;
+
     // Promotion / Offer Engine
     public DbSet<Promotion> Promotions { get; set; } = default!;
     public DbSet<Offer> Offers { get; set; } = default!;
     public DbSet<OfferBenefit> OfferBenefits { get; set; } = default!;
     public DbSet<OfferFeature> OfferFeatures { get; set; } = default!;
     public DbSet<OfferPricingTier> OfferPricingTiers { get; set; } = default!;
+
+    // Free months benefits snapshot on the Offer side. Snapshotted verbatim
+    // into FreeMonthsBenefit when a Contract is created from an Accepted Offer.
+    public DbSet<OfferFreeMonthsBenefit> OfferFreeMonthsBenefits { get; set; } = default!;
 
     // Subscription policy (platform-level centrally controlled configuration)
     public DbSet<SubscriptionPolicy> SubscriptionPolicies { get; set; } = default!;

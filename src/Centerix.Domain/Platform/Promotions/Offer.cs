@@ -140,6 +140,20 @@ public class Offer : AuditableEntity<Guid>
     private readonly List<OfferBenefit> _benefits = [];
     public IReadOnlyList<OfferBenefit> Benefits => _benefits.AsReadOnly();
 
+    /// <summary>
+    /// Free months benefits snapshot attached to this offer. Mirrors
+    /// <see cref="Benefits"/> but for the FreeMonths aggregate type; the
+    /// <c>OfferFreeMonthsBenefit</c> row carries
+    /// <see cref="OfferFreeMonthsBenefit.EntitlementMonths"/> and an
+    /// <see cref="OfferFreeMonthsBenefit.EligibilityRule"/> snapshot that
+    /// becomes the source of truth for the resulting
+    /// <see cref="Centerix.Domain.Platform.Contracts.FreeMonthsBenefit"/> on the
+    /// Contract. Authoritative for Contract creation; the current Plan catalog
+    /// is never consulted.
+    /// </summary>
+    private readonly List<OfferFreeMonthsBenefit> _freeMonthsBenefits = [];
+    public IReadOnlyList<OfferFreeMonthsBenefit> FreeMonthsBenefits => _freeMonthsBenefits.AsReadOnly();
+
     // ---- Feature entitlement snapshot ----
 
     /// <summary>Feature codes captured from the Plan at calculation time. Authoritative for Contract creation.</summary>
@@ -384,6 +398,22 @@ public class Offer : AuditableEntity<Guid>
     }
 
     /// <summary>
+    /// Adds a free months benefit snapshot to this offer. Mirrors
+    /// <see cref="AddBenefit"/> for the FreeMonths aggregate type. Only
+    /// allowed while the Offer is in <see cref="OfferStatus.Calculated"/>.
+    /// </summary>
+    public Result<Updated> AddFreeMonthsBenefit(OfferFreeMonthsBenefit benefit)
+    {
+        if (benefit == null) throw new ArgumentNullException(nameof(benefit));
+
+        if (Status != OfferStatus.Calculated)
+            return OfferErrors.InvalidStateTransition(Status, "add free months benefit snapshot to");
+
+        _freeMonthsBenefits.Add(benefit);
+        return Result.Updated;
+    }
+
+    /// <summary>
     /// Adds a feature entitlement snapshot to this offer. Features stored here
     /// are the authoritative source when creating a Contract from this Offer.
     /// Only allowed while the Offer has not been accepted (snapshot freeze).
@@ -418,6 +448,10 @@ public class Offer : AuditableEntity<Guid>
     /// <summary>EF navigation mutator for rehydration of benefits.</summary>
     internal void LoadBenefits(IEnumerable<OfferBenefit> benefits)
         => _benefits.AddRange(benefits);
+
+    /// <summary>EF navigation mutator for rehydration of free months benefits.</summary>
+    internal void LoadFreeMonthsBenefits(IEnumerable<OfferFreeMonthsBenefit> benefits)
+        => _freeMonthsBenefits.AddRange(benefits);
 
     /// <summary>EF navigation mutator for rehydration of feature snapshots.</summary>
     internal void LoadFeatures(IEnumerable<OfferFeature> features)

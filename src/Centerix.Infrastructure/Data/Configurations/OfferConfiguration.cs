@@ -124,6 +124,16 @@ public class OfferConfiguration : IEntityTypeConfiguration<Offer>
 
         builder.Property(o => o.ContractId);
 
+        // Navigation: FreeMonthsBenefits (cascade delete). Mirror of the
+        // Contract-side FreeMonthsBenefits navigation.
+        builder.HasMany(o => o.FreeMonthsBenefits)
+            .WithOne()
+            .HasForeignKey(b => b.OfferId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Navigation(o => o.FreeMonthsBenefits)
+            .UsePropertyAccessMode(PropertyAccessMode.Field);
+
         // Indexes
         builder.HasIndex(o => new { o.TenantId, o.Status })
             .HasDatabaseName("IX_Offers_TenantId_Status");

@@ -205,3 +205,97 @@ public class OfferBenefit : Entity
             eligibilityRule);
     }
 }
+
+/// <summary>
+/// Immutable snapshot of a free months benefit attached to an Offer.
+///
+/// Mirrors <see cref="OfferBenefit"/> but for the FreeMonths aggregate type:
+/// instead of carrying a monetary value, it carries
+/// <see cref="EntitlementMonths"/> (the number of free months the contract
+/// grants) and the commercial <see cref="EligibilityRule"/> that the
+/// <see cref="Centerix.Domain.Platform.Contracts.FreeMonthsBenefit"/> on the
+/// Contract must inherit verbatim. See
+/// <c>docs/COMMERCIAL-BENEFIT-DESIGN-VALIDATION.md</c> §C and §D.
+///
+/// When a Contract is created from an Accepted Offer, each
+/// <c>OfferFreeMonthsBenefit</c> is snapshotted into a
+/// <see cref="Centerix.Domain.Platform.Contracts.FreeMonthsBenefit"/> on the
+/// resulting Contract — the Offer snapshot is authoritative; the current Plan
+/// catalog is never consulted.
+/// </summary>
+public class OfferFreeMonthsBenefit : Entity
+{
+    public Guid Id { get; private set; }
+    public Guid OfferId { get; private set; }
+
+    /// <summary>
+    /// Number of free months the contract grants as a commercial entitlement.
+    /// Snapshotted verbatim from the Offer to the resulting FreeMonthsBenefit.
+    /// </summary>
+    public int EntitlementMonths { get; private set; }
+
+    /// <summary>ISO-4217 currency code (e.g., EGP, USD). Snapshotted from the offer.</summary>
+    public string CurrencyCode { get; private set; } = default!;
+
+    /// <summary>
+    /// The commercial eligibility rule attached to this free months benefit.
+    /// Required: every FreeMonthsBenefit MUST carry exactly one EligibilityRule
+    /// (design invariant 26). When a Contract is created from an Accepted Offer,
+    /// this rule is copied verbatim into
+    /// <see cref="Centerix.Domain.Platform.Contracts.FreeMonthsBenefit.EligibilityRule"/>.
+    /// </summary>
+    public EligibilityRule? EligibilityRule { get; private set; }
+
+    private OfferFreeMonthsBenefit() { }
+
+    private OfferFreeMonthsBenefit(
+        Guid id,
+        Guid offerId,
+        int entitlementMonths,
+        string currencyCode,
+        EligibilityRule? eligibilityRule)
+    {
+        Id = id;
+        OfferId = offerId;
+        EntitlementMonths = entitlementMonths;
+        CurrencyCode = currencyCode;
+        EligibilityRule = eligibilityRule;
+    }
+
+    /// <summary>
+    /// Creates an OfferFreeMonthsBenefit with validated parameters.
+    /// </summary>
+    /// <param name="eligibilityRule">
+    /// Required for production-snapshot paths: the Offer-side mirror of the
+    /// eventual FreeMonthsBenefit rule. Nullable is permitted only to support
+    /// legacy / pre-rule fixtures; new offer rows MUST supply a rule.
+    /// </param>
+    public static Result<OfferFreeMonthsBenefit> Create(
+        Guid id,
+        Guid offerId,
+        int entitlementMonths,
+        string currencyCode,
+        EligibilityRule? eligibilityRule = null)
+    {
+        if (id == Guid.Empty)
+            return Error.Validation("OfferFreeMonthsBenefit.Id_Required", "Offer free months benefit ID is required");
+
+        if (offerId == Guid.Empty)
+            return Error.Validation("OfferFreeMonthsBenefit.OfferId_Required", "Offer ID is required");
+
+        if (entitlementMonths <= 0)
+            return Error.Validation("OfferFreeMonthsBenefit.EntitlementMonths_Invalid",
+                "EntitlementMonths must be a positive integer");
+
+        if (string.IsNullOrWhiteSpace(currencyCode) || currencyCode.Trim().Length != 3)
+            return Error.Validation("OfferFreeMonthsBenefit.InvalidCurrency",
+                "Currency must be a 3-letter ISO-4217 code");
+
+        return new OfferFreeMonthsBenefit(
+            id,
+            offerId,
+            entitlementMonths,
+            currencyCode.Trim().ToUpperInvariant(),
+            eligibilityRule);
+    }
+}

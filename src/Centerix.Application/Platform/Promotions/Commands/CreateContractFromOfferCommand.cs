@@ -43,10 +43,12 @@ public class CreateContractFromOfferHandler(
         if (string.IsNullOrWhiteSpace(tenantId))
             return ContractErrors.TenantNotResolved;
 
-        // Load the offer with ALL its snapshot children — benefits, features, pricing tiers.
-        // These are the ONLY commercial/entitlement sources; the current Plan is never read.
+        // Load the offer with ALL its snapshot children — benefits, free months
+        // benefits, features, pricing tiers. These are the ONLY commercial /
+        // entitlement sources; the current Plan is never read.
         var offer = await dbContext.Offers
             .Include(o => o.Benefits)
+            .Include(o => o.FreeMonthsBenefits)
             .Include(o => o.Features)
             .Include(o => o.PricingTiers)
             .FirstOrDefaultAsync(o => o.Id == request.OfferId, cancellationToken);
@@ -194,6 +196,40 @@ public class CreateContractFromOfferHandler(
                     return benefitResult.Errors!;
 
                 var addBenefitResult = contract.AddBenefit(benefitResult.Value);
+                if (!addBenefitResult.IsSuccess)
+                    return addBenefitResult.Errors!;
+            }
+        }
+
+        // Snapshot free months benefits from the Offer snapshot (authoritative source).
+        // OfferFreeMonthsBenefit.EligibilityRule is snapshotted verbatim into
+        // FreeMonthsBenefit.EligibilityRule — the rule carries the commercial
+        // definition of when the bonus may be granted (per design invariant 26
+        // and the scenario-A rule pattern: AllOf(ContractActive,
+        // PaymentTermsEq(FullUpfront), AmountPaidAtLeast(ContractedAmount))).
+        if (offer.FreeMonthsBenefits is { Count: > 0 })
+        {
+            foreach (var offerFreeMonths in offer.FreeMonthsBenefits)
+            {
+                // FreeMonthsBenefit requires a non-null rule at creation
+                // (design invariant 26). Skip any legacy rows that predate
+                // per-benefit rules; the migration does not backfill rules
+                // onto FreeMonthsBenefit rows so the production flow must
+                // defend against null.
+                if (offerFreeMonths.EligibilityRule is null)
+                    continue;
+
+                var benefitResult = FreeMonthsBenefit.Create(
+                    id: Guid.NewGuid(),
+                    contractId: contract.Id,
+                    entitlementMonths: offerFreeMonths.EntitlementMonths,
+                    currencyCode: offerFreeMonths.CurrencyCode,
+                    eligibilityRule: offerFreeMonths.EligibilityRule);
+
+                if (!benefitResult.IsSuccess)
+                    return benefitResult.Errors!;
+
+                var addBenefitResult = contract.AddFreeMonthsBenefit(benefitResult.Value);
                 if (!addBenefitResult.IsSuccess)
                     return addBenefitResult.Errors!;
             }

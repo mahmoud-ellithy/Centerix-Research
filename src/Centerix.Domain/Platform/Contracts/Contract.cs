@@ -146,6 +146,15 @@ public class Contract : AuditableEntity<Guid>
     private readonly List<ContractBenefit> _benefits = [];
     public IReadOnlyList<ContractBenefit> Benefits => _benefits.AsReadOnly();
 
+    /// <summary>
+    /// Free months benefits granted as part of this contract. A separate aggregate
+    /// from <see cref="ContractBenefit"/> because their fulfillment lifecycles
+    /// differ (subscription extension vs. physical handover). See
+    /// <c>docs/COMMERCIAL-BENEFIT-DESIGN-VALIDATION.md</c> §D.2 for the rationale.
+    /// </summary>
+    private readonly List<FreeMonthsBenefit> _freeMonthsBenefits = [];
+    public IReadOnlyList<FreeMonthsBenefit> FreeMonthsBenefits => _freeMonthsBenefits.AsReadOnly();
+
     /// <summary>Snapshot of feature entitlements copied from Plan at contract creation.</summary>
     private readonly List<ContractFeature> _contractFeatures = [];
     public IReadOnlyList<ContractFeature> ContractFeatures => _contractFeatures.AsReadOnly();
@@ -447,6 +456,27 @@ public class Contract : AuditableEntity<Guid>
     }
 
     /// <summary>
+    /// Adds a free months benefit to this contract. Validates the currency
+    /// matches the contract currency and that the benefit's EligibilityRule
+    /// is non-null (FreeMonthsBenefit requires a rule on creation).
+    /// </summary>
+    /// <remarks>
+    /// No aggregate value cap is enforced on FreeMonthsBenefit rows because
+    /// they are not monetary recoveries — the billable <see cref="ContractedAmount"/>
+    /// is independent of <c>EntitlementMonths</c> (per design invariant 32).
+    /// </remarks>
+    public Result<Updated> AddFreeMonthsBenefit(FreeMonthsBenefit benefit)
+    {
+        if (benefit == null) throw new ArgumentNullException(nameof(benefit));
+
+        if (!string.Equals(benefit.CurrencyCode, CurrencyCode, StringComparison.OrdinalIgnoreCase))
+            return FreeMonthsBenefitErrors.CurrencyMismatch(CurrencyCode);
+
+        _freeMonthsBenefits.Add(benefit);
+        return Result.Updated;
+    }
+
+    /// <summary>
     /// Calculates the number of elapsed months since the effective date.
     /// </summary>
     public int GetElapsedMonths(DateTime utcNow)
@@ -669,4 +699,8 @@ public class Contract : AuditableEntity<Guid>
     /// <summary>EF navigation mutator for rehydration of benefits.</summary>
     internal void LoadBenefits(IEnumerable<ContractBenefit> benefits)
         => _benefits.AddRange(benefits);
+
+    /// <summary>EF navigation mutator for rehydration of free months benefits.</summary>
+    internal void LoadFreeMonthsBenefits(IEnumerable<FreeMonthsBenefit> benefits)
+        => _freeMonthsBenefits.AddRange(benefits);
 }
