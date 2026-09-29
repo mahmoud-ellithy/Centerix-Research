@@ -12,10 +12,10 @@ eligibility evaluator, `GrantBenefitCommand`, `ApplyFreeMonthsToSubscriptionComm
 
 **Posture:** Documentation only for this commit; the implementation commit is
 `2530af1` (Task C foundation). A follow-up correctness fix is captured in
-commit `<correction-commit-sha>` (see §12 — Eligibility/Fulfillment Independence).
+commit `bdac0b1` (see §12 — Eligibility/Fulfillment Independence).
 
-**Repository state at audit time:** HEAD `<head-sha>`. Implementation commit
-`2530af1`. Correction commit `<correction-commit-sha>`. Previous commits: `8e52171`
+**Repository state at audit time:** HEAD `bdac0b1`. Implementation commit
+`2530af1`. Correction commit `bdac0b1`. Previous commits: `8e52171`
 (Task B.2 SQL Server verification report), `4e34087` (Task B production flow fix),
 `fc6cfea` (Task B.2 SQL tests), `5516e60` (Task B.1 PaymentMethod canonicalisation),
 `6b44648` (Task B EligibilityRule foundation), `e744009` (Task A PaymentTerms
@@ -358,7 +358,7 @@ by a dedicated domain test. None were skipped.
 
 The earlier Task C implementation incorrectly locked `EligibilityStatus` after
 `FulfillmentStatus` reached `Granted`. The correction (commit
-`<correction-commit-sha>`) removes the `if (FulfillmentStatus is Granted or
+`bdac0b1`) removes the `if (FulfillmentStatus is Granted or
 AppliedToSubscription) return CannotRevertFromGranted;` guard from
 `MarkEligible` and `MarkNotEligible`. The XML documentation on
 `FreeMonthsBenefit.MarkEligible` / `MarkNotEligible` / `Grant` was rewritten to
@@ -483,7 +483,7 @@ matches, and it is non-executable.
 | `dotnet ef migrations has-pending-model-changes` | "No changes have been made to the model since the last migration." |
 | Hidden-inference audit | Clean (no derivation, no fabrication, no inference) |
 | Implementation commit | `2530af1` (`feat(billing): add free months benefit foundation`) |
-| Correction commit | `<correction-commit-sha>` (`fix(billing): decouple free months eligibility from fulfillment`) |
+| Correction commit | `bdac0b1` (`fix(billing): decouple free months eligibility from fulfillment`) |
 
 ---
 
