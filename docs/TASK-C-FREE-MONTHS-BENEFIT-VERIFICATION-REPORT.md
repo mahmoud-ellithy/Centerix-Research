@@ -645,7 +645,7 @@ No Task C test is skipped.
 
 ## 12. Stop Condition
 
-Task C is closed (post-Correction 1 and Correction 2).
+Task C is VERIFIED AND CLOSED (post-Corrections 1–4).
 
 * Domain aggregate + state machine + Offer → Contract snapshot + EF Core
   configuration + schema migration are implemented and tested.
@@ -665,8 +665,9 @@ Task C is closed (post-Correction 1 and Correction 2).
   validation error instead of silently dropping the commercial entitlement.
 * All relevant design invariants (§L.26, §L.28, §L.29, §L.31, §L.32, §L.34,
   §L.35) are enforced by the domain boundary and verified by tests.
-* 59 Task C tests pass, and the full suite passes with zero regressions
-  (1 pre-existing skip, named in §10.1).
+* 60 Task C tests pass (41 pure-domain + 10 InMemory snapshot + 9 Local SQL Server),
+  with 0 failed and 0 skipped. Full regression: 1744 total, 1743 passed,
+  0 failed, 1 skipped (pre-existing skip, named in §10.1).
 * EF pending-model-changes is clean.
 * The next task (Task D) can implement `GrantBenefitCommand` and
   `ApplyFreeMonthsToSubscriptionCommand` against the state-machine exposed
