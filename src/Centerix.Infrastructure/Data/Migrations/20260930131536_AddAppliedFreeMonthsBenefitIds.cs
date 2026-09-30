@@ -16,7 +16,7 @@ namespace Centerix.Infrastructure.Data.Migrations
                 table: "TenantPlans",
                 type: "nvarchar(max)",
                 nullable: false,
-                defaultValue: "");
+                defaultValue: "[]");
         }
 
         /// <inheritdoc />

@@ -65,4 +65,8 @@ public static class FreeMonthsBenefitErrors
     public static Error CrossTenantFreeMonthsBenefit =>
         Error.Forbidden("Contract.FreeMonthsBenefit.CrossTenant",
             "Cannot access a FreeMonthsBenefit belonging to a different tenant");
+
+    public static Error ActiveSubscriptionNotFound(Guid benefitId) =>
+        Error.NotFound("FreeMonthsBenefit.ActiveSubscriptionNotFound",
+            $"No active, unexpired subscription found for applying FreeMonthsBenefit '{benefitId}'");
 }

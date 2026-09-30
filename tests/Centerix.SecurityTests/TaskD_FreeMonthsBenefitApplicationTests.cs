@@ -410,4 +410,200 @@ public class TaskD_FreeMonthsBenefitApplicationTests : IClassFixture<TaskCFakeTe
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.FreeMonthsBenefit.NotFound", result.Errors!.First().Code);
     }
+
+    // ─────────────────────────────────────────────────────────────────
+    // TestD-InMem09: Apply — Expired subscription → rejected
+    // ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task TestD_InMem09_Apply_ExpiredSubscription_IsRejected()
+    {
+        var contract = Contract.Create(
+            id: Guid.NewGuid(),
+            tenantId: TenantId,
+            contractNumber: $"CNT-D-INMEM09-{Guid.NewGuid():N}"[..16],
+            planId: 1,
+            effectiveAtUtc: DateTime.UtcNow,
+            endsAtUtc: DateTime.UtcNow.AddYears(1),
+            durationMonths: 12,
+            monthlyListPrice: 1000m,
+            contractualMonthlyValue: 1000m,
+            currencyCode: "EGP",
+            grossAmount: 12000m,
+            contractedAmount: 12000m,
+            entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.FullUpfront,
+            discountAmount: 0m).Value;
+
+        var benefit = FreeMonthsBenefit.Create(
+            Guid.NewGuid(), contract.Id, 2, "EGP", DefaultUpfrontBonusRule()).Value;
+        benefit.MarkEligible(DateTime.UtcNow);
+        benefit.Grant(DateTime.UtcNow);
+        contract.AddFreeMonthsBenefit(benefit);
+
+        // Subscription with Expired status
+        var startsAt = DateTime.UtcNow.AddMonths(-14);
+        var subscription = TenantPlan.Create(
+            id: Guid.NewGuid(),
+            tenantId: TenantId,
+            planId: 1,
+            snapshotPrice: 1000m,
+            snapshotMonthlyCharge: 1000m,
+            snapshotCurrency: "EGP",
+            durationMonths: 12,
+            bonusMonths: 0,
+            startsAtUtc: startsAt,
+            autoRenew: false,
+            status: SubscriptionStatus.Expired).Value;
+        subscription.LinkToContract(contract.Id);
+
+        _db.Contracts.Add(contract);
+        _db.TenantPlans.Add(subscription);
+        _db.StampAddedTenantIds(TenantId);
+        await _db.SaveChangesAsync();
+
+        var result = await _mediator.Send(new ApplyFreeMonthsBenefitToSubscriptionCommand(benefit.Id));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("FreeMonthsBenefit.ActiveSubscriptionNotFound", result.Errors!.First().Code);
+
+        // Verify no mutation: benefit still Granted, subscription unchanged
+        var db2 = _scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        var reloadedBenefit = await db2.FreeMonthsBenefits
+            .IgnoreQueryFilters()
+            .FirstAsync(b => b.Id == benefit.Id);
+        Assert.Equal(FreeMonthsFulfillmentStatus.Granted, reloadedBenefit.FulfillmentStatus);
+
+        var reloadedSub = await db2.TenantPlans
+            .IgnoreQueryFilters()
+            .FirstAsync(tp => tp.Id == subscription.Id);
+        Assert.Empty(reloadedSub.AppliedFreeMonthsBenefitIds);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // TestD-InMem10: Apply — Pending subscription → rejected
+    // ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task TestD_InMem10_Apply_PendingSubscription_IsRejected()
+    {
+        var contract = Contract.Create(
+            id: Guid.NewGuid(),
+            tenantId: TenantId,
+            contractNumber: $"CNT-D-INMEM10-{Guid.NewGuid():N}"[..16],
+            planId: 1,
+            effectiveAtUtc: DateTime.UtcNow,
+            endsAtUtc: DateTime.UtcNow.AddYears(1),
+            durationMonths: 12,
+            monthlyListPrice: 1000m,
+            contractualMonthlyValue: 1000m,
+            currencyCode: "EGP",
+            grossAmount: 12000m,
+            contractedAmount: 12000m,
+            entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.FullUpfront,
+            discountAmount: 0m).Value;
+
+        var benefit = FreeMonthsBenefit.Create(
+            Guid.NewGuid(), contract.Id, 2, "EGP", DefaultUpfrontBonusRule()).Value;
+        benefit.MarkEligible(DateTime.UtcNow);
+        benefit.Grant(DateTime.UtcNow);
+        contract.AddFreeMonthsBenefit(benefit);
+
+        // Subscription with Pending status
+        var startsAt = DateTime.UtcNow;
+        var subscription = TenantPlan.Create(
+            id: Guid.NewGuid(),
+            tenantId: TenantId,
+            planId: 1,
+            snapshotPrice: 1000m,
+            snapshotMonthlyCharge: 1000m,
+            snapshotCurrency: "EGP",
+            durationMonths: 12,
+            bonusMonths: 0,
+            startsAtUtc: startsAt,
+            autoRenew: false,
+            status: SubscriptionStatus.Pending).Value;
+        subscription.LinkToContract(contract.Id);
+
+        _db.Contracts.Add(contract);
+        _db.TenantPlans.Add(subscription);
+        _db.StampAddedTenantIds(TenantId);
+        await _db.SaveChangesAsync();
+
+        var result = await _mediator.Send(new ApplyFreeMonthsBenefitToSubscriptionCommand(benefit.Id));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("FreeMonthsBenefit.ActiveSubscriptionNotFound", result.Errors!.First().Code);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // TestD-InMem11: Apply — Active status but EffectiveEndsAtUtc in past → rejected
+    // ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task TestD_InMem11_Apply_ActiveStatus_ExpiredEffectiveEnd_IsRejected()
+    {
+        var contract = Contract.Create(
+            id: Guid.NewGuid(),
+            tenantId: TenantId,
+            contractNumber: $"CNT-D-INMEM11-{Guid.NewGuid():N}"[..16],
+            planId: 1,
+            effectiveAtUtc: DateTime.UtcNow,
+            endsAtUtc: DateTime.UtcNow.AddYears(1),
+            durationMonths: 12,
+            monthlyListPrice: 1000m,
+            contractualMonthlyValue: 1000m,
+            currencyCode: "EGP",
+            grossAmount: 12000m,
+            contractedAmount: 12000m,
+            entitlementSnapshotVersion: Contract.CompleteEntitlementSnapshotVersion,
+            paymentTerms: PaymentTerms.FullUpfront,
+            discountAmount: 0m).Value;
+
+        var benefit = FreeMonthsBenefit.Create(
+            Guid.NewGuid(), contract.Id, 2, "EGP", DefaultUpfrontBonusRule()).Value;
+        benefit.MarkEligible(DateTime.UtcNow);
+        benefit.Grant(DateTime.UtcNow);
+        contract.AddFreeMonthsBenefit(benefit);
+
+        // Status = Active but EffectiveEndsAtUtc is in the past
+        // (simulates an active subscription whose entitlement has naturally expired)
+        var startsAt = DateTime.UtcNow.AddMonths(-14);
+        var subscription = TenantPlan.Create(
+            id: Guid.NewGuid(),
+            tenantId: TenantId,
+            planId: 1,
+            snapshotPrice: 1000m,
+            snapshotMonthlyCharge: 1000m,
+            snapshotCurrency: "EGP",
+            durationMonths: 12,
+            bonusMonths: 0,
+            startsAtUtc: startsAt,
+            autoRenew: false,
+            status: SubscriptionStatus.Active).Value;
+        subscription.LinkToContract(contract.Id);
+
+        _db.Contracts.Add(contract);
+        _db.TenantPlans.Add(subscription);
+        _db.StampAddedTenantIds(TenantId);
+        await _db.SaveChangesAsync();
+
+        var result = await _mediator.Send(new ApplyFreeMonthsBenefitToSubscriptionCommand(benefit.Id));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("FreeMonthsBenefit.ActiveSubscriptionNotFound", result.Errors!.First().Code);
+
+        // Verify no mutation: benefit still Granted, subscription unchanged
+        var db2 = _scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        var reloadedBenefit = await db2.FreeMonthsBenefits
+            .IgnoreQueryFilters()
+            .FirstAsync(b => b.Id == benefit.Id);
+        Assert.Equal(FreeMonthsFulfillmentStatus.Granted, reloadedBenefit.FulfillmentStatus);
+
+        var reloadedSub = await db2.TenantPlans
+            .IgnoreQueryFilters()
+            .FirstAsync(tp => tp.Id == subscription.Id);
+        Assert.Empty(reloadedSub.AppliedFreeMonthsBenefitIds);
+    }
 }

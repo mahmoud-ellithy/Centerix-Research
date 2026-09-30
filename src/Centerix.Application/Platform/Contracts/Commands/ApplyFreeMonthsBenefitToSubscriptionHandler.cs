@@ -89,11 +89,15 @@ public class ApplyFreeMonthsBenefitToSubscriptionHandler(
         // 2. Idempotent: already Applied
         if (benefit.FulfillmentStatus == FreeMonthsFulfillmentStatus.AppliedToSubscription)
         {
-            // Find the subscription to return current state
+            // Find the currently-active subscription for this tenant+contract to return accurate metadata.
+            // An expired/cancelled subscription must not be reported as the applied-to target.
             var existingSubscription = await dbContext.TenantPlans
                 .IgnoreQueryFilters()
                 .FirstOrDefaultAsync(
-                    tp => tp.ContractId == benefit.ContractId && tp.TenantId == tenantId,
+                    tp => tp.ContractId == benefit.ContractId
+                       && tp.TenantId == tenantId
+                       && tp.Status == SubscriptionStatus.Active
+                       && tp.EffectiveEndsAtUtc > DateTime.UtcNow,
                     cancellationToken);
 
             return new ApplyFreeMonthsBenefitResult
@@ -110,17 +114,21 @@ public class ApplyFreeMonthsBenefitToSubscriptionHandler(
         if (benefit.FulfillmentStatus != FreeMonthsFulfillmentStatus.Granted)
             return FreeMonthsBenefitErrors.NotGranted;
 
-        // 4. Load the active subscription for this tenant+contract
+        // 4. Load the currently-active, unexpired subscription for this tenant+contract.
+        // Only Active subscriptions with EffectiveEndsAtUtc in the future qualify.
+        // Expired, Cancelled, Suspended, PastDue, or Pending subscriptions are not eligible targets.
+        var now = DateTime.UtcNow;
         var subscription = await dbContext.TenantPlans
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(
-                tp => tp.ContractId == benefit.ContractId && tp.TenantId == tenantId,
+                tp => tp.ContractId == benefit.ContractId
+                   && tp.TenantId == tenantId
+                   && tp.Status == SubscriptionStatus.Active
+                   && tp.EffectiveEndsAtUtc > now,
                 cancellationToken);
 
         if (subscription is null)
-            return Error.NotFound(
-                "FreeMonthsBenefit.SubscriptionNotFound",
-                $"No active subscription found for tenant '{tenantId}' on contract '{benefit.ContractId}'");
+            return FreeMonthsBenefitErrors.ActiveSubscriptionNotFound(benefit.Id);
 
         // 5. Apply free months to the subscription (idempotent internally via AppliedFreeMonthsBenefitIds)
         var applyResult = subscription.ApplyFreeMonthsBenefit(benefit.Id, benefit.EntitlementMonths, DateTime.UtcNow);
@@ -128,8 +136,7 @@ public class ApplyFreeMonthsBenefitToSubscriptionHandler(
             return applyResult.Errors!;
 
         // 6. Mark the benefit as AppliedToSubscription
-        var now = DateTime.UtcNow;
-        var benefitApplyResult = benefit.MarkAppliedToSubscription(now);
+        var benefitApplyResult = benefit.MarkAppliedToSubscription(DateTime.UtcNow);
         if (!benefitApplyResult.IsSuccess)
             return benefitApplyResult.Errors!;
 

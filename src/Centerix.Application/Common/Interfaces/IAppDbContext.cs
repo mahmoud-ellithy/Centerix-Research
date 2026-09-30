@@ -90,7 +90,6 @@ public interface IAppDbContext
 
     // Free Months Benefit (per Task D — fulfillment lifecycle: Pending → Granted → AppliedToSubscription)
     DbSet<FreeMonthsBenefit> FreeMonthsBenefits { get; }
-    DbSet<OfferFreeMonthsBenefit> OfferFreeMonthsBenefits { get; }
 
     /// <summary>
     /// The AUTHORIZED tenant ID for this request, set from ICurrentTenant.
