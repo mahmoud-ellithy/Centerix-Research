@@ -92,6 +92,14 @@ public class TenantPlan : AuditableEntity<Guid>
     public int SnapshotStorageGb { get; private set; }
     public int SnapshotSmsQuota { get; private set; }
 
+    /// <summary>
+    /// IDs of FreeMonthsBenefits that have already been applied to this subscription.
+    /// Used as an idempotency guard: a benefit ID can appear here at most once,
+    /// preventing double-application of the same entitlement.
+    /// </summary>
+    private List<Guid> _appliedFreeMonthsBenefitIds = [];
+    public IReadOnlyList<Guid> AppliedFreeMonthsBenefitIds => _appliedFreeMonthsBenefitIds.AsReadOnly();
+
     /// <summary>Snapshotted feature entitlement codes for THIS grant (TenantPlanFeature rows).</summary>
     private readonly List<TenantPlanFeature> _features = [];
     public IReadOnlyList<TenantPlanFeature> Features => _features.AsReadOnly();
@@ -397,9 +405,54 @@ public class TenantPlan : AuditableEntity<Guid>
         return Result.Updated;
     }
 
+    /// <summary>
+    /// Extends this subscription's entitlement by <paramref name="additionalMonths"/> free months
+    /// and records the applied benefit ID for idempotency. This is the authoritative
+    /// "apply free months to subscription" operation.
+    /// </summary>
+    /// <param name="benefitId">The FreeMonthsBenefit being applied.</param>
+    /// <param name="additionalMonths">The number of calendar months to add to the entitlement.</param>
+    /// <param name="utcNow">Timestamp of the application.</param>
+    /// <remarks>
+    /// This method extends <see cref="EffectiveEndsAtUtc"/> (the authoritative access-expiration
+    /// date) but does NOT modify <see cref="BonusMonths"/> — free months are commercial
+    /// entitlements that do not alter the billable bonus-month scalar. This preserves
+    /// <c>Contract.BonusMonths</c> semantics (per design invariant: free months are NOT
+    /// billable bonus months).
+    /// </remarks>
+    internal Result<Updated> ApplyFreeMonthsBenefit(Guid benefitId, int additionalMonths, DateTime utcNow)
+    {
+        if (benefitId == Guid.Empty)
+            return TenantPlanErrors.PlanIdRequired; // reuse — no specific "benefit id required" exists
+
+        if (additionalMonths <= 0)
+            return TenantPlanErrors.DurationInvalid;
+
+        if (_appliedFreeMonthsBenefitIds.Contains(benefitId))
+            return Result.Updated; // idempotent: already applied
+
+        // Replace the list with a new copy so EF Core's change tracker detects a reference
+        // change (instead of an in-place mutation which preserves the same list reference
+        // and is invisible to EF's snapshot-based change detection).
+        _appliedFreeMonthsBenefitIds = [.. _appliedFreeMonthsBenefitIds, benefitId];
+
+        // Extend the authoritative access-expiration date by free months.
+        // BaseEndsAtUtc is NOT changed — bonus months (billable) and free months
+        // (commercial entitlement) are separate additions on top of the base term.
+        // EffectiveEndsAtUtc = BaseEndsAtUtc + BonusMonths [+ free months].
+        // After Apply: EffectiveEndsAtUtc += additionalMonths
+        EffectiveEndsAtUtc = AddCalendarMonths(EffectiveEndsAtUtc, additionalMonths);
+
+        return Result.Updated;
+    }
+
     /// <summary>EF navigation mutator for rehydration of the entitlement snapshot.</summary>
     internal void LoadFeatures(IEnumerable<TenantPlanFeature> features)
         => _features.AddRange(features);
+
+    /// <summary>EF navigation mutator for rehydration of applied FreeMonthsBenefit IDs.</summary>
+    internal void LoadAppliedFreeMonthsBenefitIds(IEnumerable<Guid> ids)
+        => _appliedFreeMonthsBenefitIds.AddRange(ids);
 
     /// <summary>Calendar-month addition delegating to DateTime.AddMonths (clamping semantics).</summary>
     public static DateTime AddCalendarMonths(DateTime utcDate, int months) => utcDate.AddMonths(months);

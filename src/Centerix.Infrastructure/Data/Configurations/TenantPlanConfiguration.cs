@@ -85,5 +85,18 @@ public class TenantPlanConfiguration : IEntityTypeConfiguration<TenantPlan>
             .HasDatabaseName("IX_TenantPlans_EffectiveEndsAtUtc");
 
         builder.Navigation(tp => tp.Features).UsePropertyAccessMode(PropertyAccessMode.Field);
+
+        // AppliedFreeMonthsBenefitIds: idempotency guard stored as a JSON array of GUIDs.
+        // Each entry is the ID of a FreeMonthsBenefit already applied to this subscription.
+        // Stored as nvarchar(max) of canonical JSON so SQL Server can index/filter if needed.
+        builder.Property(tp => tp.AppliedFreeMonthsBenefitIds)
+            .HasConversion(
+                ids => ids.Count > 0
+                    ? System.Text.Json.JsonSerializer.Serialize(ids.Select(id => id).ToList(), (System.Text.Json.JsonSerializerOptions?)null)
+                    : "[]",
+                json => !string.IsNullOrEmpty(json)
+                    ? System.Text.Json.JsonSerializer.Deserialize<List<Guid>>(json) ?? new List<Guid>()
+                    : new List<Guid>())
+            .HasColumnType("nvarchar(max)");
     }
 }

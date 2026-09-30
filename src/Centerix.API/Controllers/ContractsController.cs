@@ -56,6 +56,44 @@ public class ContractsController(ILocalizer localizer, IMediator mediator) : Api
             contractId => CreatedAtAction(nameof(GetContract), new { id = contractId }, contractId),
             Problem);
     }
+
+    /// <summary>
+    /// Grants a FreeMonthsBenefit (Pending → Granted). Idempotent: returns success
+    /// without mutation if the benefit is already Granted.
+    /// Requires: benefit exists, belongs to the caller's tenant, is Eligible and Pending.
+    /// </summary>
+    [HttpPost("free-months/{benefitId}/grant")]
+    [HasPermission(Permissions.Benefits.Manage)]
+    public async Task<IActionResult> GrantFreeMonthsBenefit(
+        Guid benefitId,
+        CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(new GrantFreeMonthsBenefitCommand(benefitId), cancellationToken);
+
+        return result.Match(
+            r => Ok(r),
+            Problem);
+    }
+
+    /// <summary>
+    /// Applies a Granted FreeMonthsBenefit to the tenant's active subscription,
+    /// extending the subscription entitlement by the benefit's EntitlementMonths.
+    /// Idempotent: returns success without re-extending if the benefit is already Applied.
+    /// Requires: benefit exists, belongs to the caller's tenant, is Granted.
+    /// The subscription is extended atomically with the benefit state transition.
+    /// </summary>
+    [HttpPost("free-months/{benefitId}/apply")]
+    [HasPermission(Permissions.Benefits.Manage)]
+    public async Task<IActionResult> ApplyFreeMonthsBenefit(
+        Guid benefitId,
+        CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(new ApplyFreeMonthsBenefitToSubscriptionCommand(benefitId), cancellationToken);
+
+        return result.Match(
+            r => Ok(r),
+            Problem);
+    }
 }
 
 public class CreateContractFromOfferRequest

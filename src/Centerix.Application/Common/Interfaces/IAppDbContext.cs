@@ -88,6 +88,10 @@ public interface IAppDbContext
     DbSet<Centerix.Domain.Platform.Promotions.Offer> Offers { get; }
     DbSet<Centerix.Domain.Platform.Promotions.OfferBenefit> OfferBenefits { get; }
 
+    // Free Months Benefit (per Task D — fulfillment lifecycle: Pending → Granted → AppliedToSubscription)
+    DbSet<FreeMonthsBenefit> FreeMonthsBenefits { get; }
+    DbSet<OfferFreeMonthsBenefit> OfferFreeMonthsBenefits { get; }
+
     /// <summary>
     /// The AUTHORIZED tenant ID for this request, set from ICurrentTenant.
     /// Handlers that need the tenant for entity creation read this value.

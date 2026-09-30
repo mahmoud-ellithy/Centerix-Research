@@ -1,3 +1,4 @@
+using Centerix.Application.Common.Interfaces;
 using Centerix.Infrastructure.Data;
 using Centerix.Infrastructure.Tenancy;
 using Finbuckle.MultiTenant;
@@ -145,6 +146,22 @@ public sealed class SqlServerWebApplicationFactory(string masterConnectionString
     // DbContextOptions<AppDbContext> is a singleton constructed ON DEMAND while the container
     // is already mid-resolution of that very call site; re-entering the container here creates
     // a circular dependency that deadlocks the resolver (verified via dotnet-stack).
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        base.ConfigureWebHost(builder);
+        builder.ConfigureServices(services =>
+        {
+            // Replace the production CurrentTenant with the AsyncLocal-backed fake so that
+            // per-test SetTenantId() calls are visible to all handler/scoped-service resolutions
+            // within the same async flow (ICurrentTenant is resolved as a singleton-scoped service
+            // by the handler's DI scope, but it reads from AsyncLocal which flows with the
+            // ExecutionContext — the same flow that SetTenantId() writes to).
+            var existing = services.FirstOrDefault(d => d.ServiceType == typeof(ICurrentTenant));
+            if (existing is not null) services.Remove(existing);
+            services.AddSingleton<ICurrentTenant>(new TaskCFakeCurrentTenant());
+        });
+    }
+
     protected override void ConfigureAppDatabase(IServiceProvider services, DbContextOptionsBuilder options)
         => options.UseSqlServer(_connectionString);
 
@@ -235,4 +252,29 @@ public sealed class SqlServerIntegrationFactory : IAsyncLifetime
         Factory.Dispose();
         await _database.DisposeAsync();
     }
+}
+
+/// <summary>
+/// Per-async-flow fake tenant using AsyncLocal so each test can set its own tenant context
+/// without affecting sibling tests sharing the same singleton instance.
+/// Defaults to <c>tenant-freemonths-c</c> for backward compatibility with existing tests.
+/// </summary>
+internal class TaskCFakeCurrentTenant : ICurrentTenant
+{
+    private static readonly AsyncLocal<string?> _asyncLocalTenantId = new();
+    private const string DefaultTenantId = "tenant-freemonths-c";
+
+    public string TenantId => _asyncLocalTenantId.Value ?? DefaultTenantId;
+    public string ResolvedTenantId => _asyncLocalTenantId.Value ?? DefaultTenantId;
+    public bool IsAuthorized => true;
+    public bool IsResolved => true;
+    public bool IsActive => true;
+    public DateTime? ValidUpTo => null;
+    public void AuthorizeTenant() { }
+
+    /// <summary>Sets the per-async-flow tenant ID. Intended for test setup only.</summary>
+    public static void SetTenantId(string tenantId) => _asyncLocalTenantId.Value = tenantId;
+
+    /// <summary>Resets to the default tenant. Intended for test cleanup.</summary>
+    public static void ResetTenantId() => _asyncLocalTenantId.Value = null;
 }

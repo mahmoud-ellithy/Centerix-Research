@@ -460,14 +460,3 @@ public class TaskCFakeTenantTestFactory : TestWebApplicationFactory
         });
     }
 }
-
-internal class TaskCFakeCurrentTenant : ICurrentTenant
-{
-    public string TenantId => "tenant-freemonths-c";
-    public string ResolvedTenantId => "tenant-freemonths-c";
-    public bool IsAuthorized => true;
-    public bool IsResolved => true;
-    public bool IsActive => true;
-    public DateTime? ValidUpTo => null;
-    public void AuthorizeTenant() { }
-}
