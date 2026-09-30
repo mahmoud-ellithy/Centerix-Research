@@ -504,9 +504,9 @@ matches, and it is non-executable.
 | Solution build | 0 errors |
 | Task C unit tests (pure domain) | 41 passed, 0 failed |
 | Task C snapshot/EF tests (InMemory) | 10 passed, 0 failed |
-| Task C SQL Server tests | 8 passed, 0 failed |
-| Total Task C tests | 59 passed, 0 failed |
-| Full regression | 1743 total, 1742 passed, 0 failed, 1 skipped (pre-existing; exact test named in §10.1) |
+| Task C SQL Server tests | 9 passed, 0 failed (Correction 3 added SqlC09) |
+| Total Task C tests | 60 passed, 0 failed |
+| Full regression | 1744 total, 1743 passed, 0 failed, 1 skipped (pre-existing; exact test named in §10.1) |
 | EF Core migrations | `20260929174030_AddFreeMonthsBenefits` and `20260929193144_RequireEligibilityRuleOnOfferFreeMonths` both applied successfully against Local SQL Server |
 | `dotnet ef migrations has-pending-model-changes` | "No changes have been made to the model since the last migration." |
 | Hidden-inference audit | Clean (no derivation, no fabrication, no inference) |
@@ -623,6 +623,24 @@ No Task C test is skipped.
   `defaultValue` (EF's generated `defaultValue: ""` was removed to honour
   design invariant 35).
 
+### Correction 3 (subsequent — SQL Server malformed-row verification)
+
+* **Modified (1 file):**
+  * `tests/Centerix.SecurityTests/TaskC_FreeMonthsBenefitSqlServerTests.cs`
+    — added `SqlC09_OfferToContract_WithMalformedFreeMonthsBenefit_FailsExplicitly_AndCreatesNoContract`.
+    No production code, no configuration, no migration, no model snapshot
+    changes — purely a test addition that closes the acceptance gap from
+    §6 / §8 of the previous correction's brief.
+* **Documentation updated:** this report (§6.2, §6.3.1, §10, §13.3, §13.6).
+* **No migration required.** `dotnet ef migrations has-pending-model-changes`
+  returned "No changes have been made to the model since the last migration."
+  on both `AppDbContext` and `TenantDbContext`. `SqlC09` is a pure
+  behavioural test against the existing schema; it does not touch any model
+  type, configuration, or migration.
+* **Local SQL Server used.** Docker / Testcontainers were NOT used; the
+  fixture's probe confirmed local SQL Server reachability and the test ran
+  against that instance.
+
 ---
 
 ## 12. Stop Condition
@@ -695,6 +713,7 @@ Offer -> Contract copies EligibilityRule exactly
 | `TestC06_OfferToContract_SnapshotsFreeMonthsBenefitThroughProductionFlow` | Same | **Existing production-snapshot fidelity**: the real `AcceptOfferHandler` + `CreateContractFromOfferHandler` copy the rule verbatim (structural equality and byte-identical canonical JSON) with `EntitlementMonths` preserved. |
 | `TestC10_OfferToContract_WithNullRuleRow_FailsExplicitly_AndCreatesNoContract` | Same | **Defensive production conversion**: after persisting a valid Offer, the tracked row's rule is nulled out (the only way to reach the branch — EF rejects a null rule at write time on both InMemory and SQL Server). The real handler then fails with `Offer.IncompleteFreeMonthsBenefit` and **no Contract row is persisted**. |
 | `SqlC08_OfferFreeMonthsBenefits_EligibilityRule_IsNotNull_InSchema` | [TaskC_FreeMonthsBenefitSqlServerTests.cs](file:///d:/New%20folder/Center%20Managements%20V1/Centerix/tests/Centerix.SecurityTests/TaskC_FreeMonthsBenefitSqlServerTests.cs) | `INFORMATION_SCHEMA.COLUMNS` confirms `EligibilityRule` is `nvarchar(4000) NOT NULL` **and has no `COLUMN_DEFAULT`** on both `Platform.OfferFreeMonthsBenefits` and `Platform.FreeMonthsBenefits`. |
+| `SqlC09_OfferToContract_WithMalformedFreeMonthsBenefit_FailsExplicitly_AndCreatesNoContract` | Same | **Production-handler defense on Local SQL Server** (Correction 3): a valid Offer + valid `OfferFreeMonthsBenefit` are written to SQL Server and accepted via the real `AcceptOfferHandler`. A fresh `DbContext` then materializes the Offer from SQL Server, the rule is nulled on the materialized entity via the same controlled test-only reflection technique used by `TestC10`, and the **real** `CreateContractFromOfferHandler` is invoked against that SQL-backed DbContext. Asserts: handler returns `Offer.IncompleteFreeMonthsBenefit`; no Contract row exists in SQL Server (fresh `DbContext`); Offer `Status != ConvertedToContract`, `ContractId == null`, `ConvertedAtUtc == null`; the FreeMonthsBenefit is still present on the Offer in SQL Server with a non-null rule. |
 
 ### 13.4 Verification evidence
 
@@ -724,6 +743,75 @@ invariant holds on the committed baseline:
 **No skipped tests.** No Task C test was filtered out. The single pre-existing
 full-suite skip named in §10.1 remains the only skipped test in the suite and
 is unrelated to Task C.
+
+### 13.6 Correction 3 — SQL Server malformed-row production-flow verification
+
+Correction 2 added `TestC10_OfferToContract_WithNullRuleRow_FailsExplicitly_AndCreatesNoContract`
+on the InMemory provider and `SqlC08` (schema `NOT NULL`) on Local SQL Server.
+The remaining acceptance gap was that the **same production-handler defense
+scenario was not executed against real SQL Server** — only the schema
+constraint was verified there. Correction 3 closes that gap.
+
+#### Why a separate test rather than re-running `TestC10` against SQL Server
+
+`TestC10` runs against the InMemory provider, where the EF change tracker is
+the source of truth. On real SQL Server, the source of truth is the database;
+the reflection trick (nulling the rule after persistence) must be applied to
+the entity **materialized from SQL Server** to prove the production handler
+remains defensive against malformed state that could (theoretically) reach it
+after database round-trip.
+
+#### Database invariant vs. application defensive invariant
+
+The two defenses are distinct and both must be verified:
+
+```text
+Database invariant:
+  Platform.OfferFreeMonthsBenefits.EligibilityRule  NOT NULL
+  Platform.FreeMonthsBenefits.EligibilityRule       NOT NULL
+  → confirmed by SqlC08 (INFORMATION_SCHEMA.COLUMNS)
+
+Application defensive invariant:
+  If a null rule reaches the production conversion handler
+  (via an already-materialized entity, a test-only corruption,
+  or a future pre-invariant legacy database row),
+  the handler MUST return Offer.IncompleteFreeMonthsBenefit
+  and MUST NOT create the Contract / mark the Offer converted.
+  → confirmed by SqlC09 against Local SQL Server
+```
+
+The schema constraint prevents a `NULL` from ever being persisted in the first
+place, so `SqlC09` cannot and does NOT attempt to insert a `NULL` rule
+directly. The corruption is simulated **after SQL Server materialization** on
+the materialized/tracked entity, using the same controlled test-only
+technique already proven in `TestC10`. `SaveChangesAsync` is never called on
+the corrupted entity, so the in-memory corruption does NOT propagate to SQL
+Server; the persisted FreeMonthsBenefit row is verified to retain its
+non-null rule on reload.
+
+#### SqlC09 verification evidence (Local SQL Server)
+
+* **Connection:** `Server=.;Trusted_Connection=True;TrustServerCertificate=True;Encrypt=False;Connect Timeout=5`
+* **Database:** a per-run isolated `CenterixSec_*` database created by the fixture and dropped on disposal
+* **Test:** `SqlC09_OfferToContract_WithMalformedFreeMonthsBenefit_FailsExplicitly_AndCreatesNoContract` — passed in 720 ms
+* **Assertions proven against SQL Server:**
+  * A. Handler returned `IsSuccess == false`
+  * B. `contractResult.Errors!.First().Code == "Offer.IncompleteFreeMonthsBenefit"`
+  * C. No `Contracts` row with the attempted `ContractNumber` exists in SQL Server (verified via fresh `DbContext`)
+  * D. Reloaded Offer `Status != ConvertedToContract`, `ContractId == null`, `ConvertedAtUtc == null`
+  * E. Reloaded Offer still contains the `OfferFreeMonthsBenefit` row with `EligibilityRule != null`, `EntitlementMonths == 1`, `CurrencyCode == "EGP"`
+* **Docker / Testcontainers:** NOT used. The fixture's probe confirmed local SQL Server is reachable and the run used the local instance. Docker daemon is unavailable on this machine (`docker ps` fails) so a silent fallback to Testcontainers is impossible.
+
+#### §13.5 update — full Task C test totals after Correction 3
+
+After Correction 3 the Task C test surface is:
+
+| Suite | Total | Passed | Failed | Skipped |
+|---|---|---|---|---|
+| TaskC_FreeMonthsBenefitFoundationTests (pure domain) | 41 | 41 | 0 | 0 |
+| TaskC_FreeMonthsBenefitSnapshotTests (InMemory) | 10 | 10 | 0 | 0 |
+| TaskC_FreeMonthsBenefitSqlServerTests (Local SQL Server) | **9** (was 8) | **9** | 0 | 0 |
+| **Task C combined** | **60** | **60** | 0 | 0 |
 
 ---
 

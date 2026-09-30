@@ -606,4 +606,143 @@ public class TaskC_FreeMonthsBenefitSqlServerTests
         Assert.Contains(columns, c => c.StartsWith("OfferFreeMonthsBenefits|"));
         Assert.Contains(columns, c => c.StartsWith("FreeMonthsBenefits|"));
     }
+
+    // ====================================================================
+    // 9 — Production-handler defense against malformed persisted Offer row
+    //     (Correction 3 — verify on Local SQL Server, not InMemory)
+    //
+    // The database schema already correctly enforces EligibilityRule NOT NULL,
+    // so we CANNOT insert a NULL rule directly. The corruption is therefore
+    // simulated AFTER SQL Server materialization on the materialized/tracked
+    // entity, using the same controlled test-only technique already proven in
+    // TestC10 (InMemory). This proves the production application's defense
+    // against malformed in-memory state — the application remains defensive
+    // even if the DB invariant is somehow bypassed.
+    // ====================================================================
+
+    [Fact]
+    public async Task SqlC09_OfferToContract_WithMalformedFreeMonthsBenefit_FailsExplicitly_AndCreatesNoContract()
+    {
+        var tenantId = $"C-9-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantId);
+        var planId = await EnsurePlanAsync(tenantId);
+
+        var sourceRule = DefaultUpfrontBonusRule(5000m);
+        Guid offerId;
+        string contractNumber;
+
+        // ─── Step 1: Persist a valid Offer + OfferFreeMonthsBenefit to SQL Server
+        // ─── Step 2: Accept the Offer via the REAL production handler
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            AuthorizeTenant(scope.ServiceProvider, tenantId);
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var tenant = scope.ServiceProvider.GetRequiredService<ICurrentTenant>();
+
+            var offer = NewOffer(tenantId, planId);
+            var offerFreeMonths = OfferFreeMonthsBenefit.Create(
+                id: Guid.NewGuid(),
+                offerId: offer.Id,
+                entitlementMonths: 1,
+                currencyCode: "EGP",
+                eligibilityRule: sourceRule).Value;
+            offer.AddFreeMonthsBenefit(offerFreeMonths);
+
+            db.Offers.Add(offer);
+            db.StampAddedTenantIds(tenantId);
+            await db.SaveChangesAsync();
+            offerId = offer.Id;
+
+            var acceptHandler = new AcceptOfferHandler(db, tenant);
+            var acceptResult = await acceptHandler.Handle(
+                new AcceptOfferCommand(offer.Id), CancellationToken.None);
+            Assert.True(acceptResult.IsSuccess);
+
+            contractNumber = $"CTR-C-{Guid.NewGuid():N}"[..16];
+        }
+
+        // ─── Step 3: Load the Offer from SQL Server into a FRESH DbContext
+        // ─── Step 4: Corrupt the materialized entity via reflection
+        // ─── Step 5: Invoke the REAL production handler
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            AuthorizeTenant(scope.ServiceProvider, tenantId);
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var tenant = scope.ServiceProvider.GetRequiredService<ICurrentTenant>();
+
+            // Materialize the Offer with ALL navigation data the production handler
+            // requires. Tracked load — the same tracked instance will be returned by
+            // the handler's Include query, so the in-memory corruption is visible.
+            var loadedOffer = await db.Offers
+                .IgnoreQueryFilters()
+                .Include(o => o.FreeMonthsBenefits)
+                .Include(o => o.Benefits)
+                .Include(o => o.Features)
+                .Include(o => o.PricingTiers)
+                .FirstAsync(o => o.Id == offerId);
+
+            Assert.Single(loadedOffer.FreeMonthsBenefits);
+            var loadedBenefit = loadedOffer.FreeMonthsBenefits[0];
+            Assert.NotNull(loadedBenefit.EligibilityRule);
+
+            // Simulate malformed/corrupted in-memory state by nulling the rule.
+            // EF and the SQL schema both reject this at write time — the only way
+            // to reach the defensive branch in the production handler is via this
+            // controlled test-only reflection on the materialized entity.
+            typeof(OfferFreeMonthsBenefit)
+                .GetProperty(nameof(OfferFreeMonthsBenefit.EligibilityRule))!
+                .SetValue(loadedBenefit, null);
+
+            // Invoke the REAL production handler (do NOT reproduce its logic).
+            var contractHandler = new CreateContractFromOfferHandler(db, tenant);
+            var contractResult = await contractHandler.Handle(
+                new CreateContractFromOfferCommand(offerId, contractNumber),
+                CancellationToken.None);
+
+            // A. Handler fails
+            Assert.False(contractResult.IsSuccess);
+
+            // B. Exact error — Offer.IncompleteFreeMonthsBenefit
+            Assert.NotNull(contractResult.Errors);
+            Assert.Equal("Offer.IncompleteFreeMonthsBenefit", contractResult.Errors!.First().Code);
+        }
+
+        // ─── Assertion C: No Contract was persisted (fresh DbContext against SQL)
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            AuthorizeTenant(scope.ServiceProvider, tenantId);
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            Assert.False(await db.Contracts
+                .IgnoreQueryFilters()
+                .AnyAsync(c => c.ContractNumber == contractNumber));
+        }
+
+        // ─── Assertion D + E: Offer was NOT marked ConvertedToContract, AND
+        // the FreeMonthsBenefit is still present on the Offer (no silent drop).
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            AuthorizeTenant(scope.ServiceProvider, tenantId);
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            var offerFromDb = await db.Offers
+                .IgnoreQueryFilters()
+                .Include(o => o.FreeMonthsBenefits)
+                .FirstAsync(o => o.Id == offerId);
+
+            // D. Offer remains unconverted
+            Assert.NotEqual(OfferStatus.ConvertedToContract, offerFromDb.Status);
+            Assert.Null(offerFromDb.ContractId);
+            Assert.Null(offerFromDb.ConvertedAtUtc);
+
+            // E. The FreeMonthsBenefit is still present — it was NOT silently
+            // dropped from the persisted Offer. The DB row for EligibilityRule
+            // also remains non-null because SaveChangesAsync was never called
+            // by the failing handler.
+            Assert.Single(offerFromDb.FreeMonthsBenefits);
+            Assert.NotNull(offerFromDb.FreeMonthsBenefits[0].EligibilityRule);
+            Assert.Equal(1, offerFromDb.FreeMonthsBenefits[0].EntitlementMonths);
+            Assert.Equal("EGP", offerFromDb.FreeMonthsBenefits[0].CurrencyCode);
+        }
+    }
 }
