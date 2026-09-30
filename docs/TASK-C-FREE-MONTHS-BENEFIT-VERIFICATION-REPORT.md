@@ -54,10 +54,10 @@ Tests:
 * **41 pure-domain tests** (`TaskC_FreeMonthsBenefitFoundationTests`) — pass.
 * **10 InMemory EF / snapshot tests** (`TaskC_FreeMonthsBenefitSnapshotTests`) —
   pass.
-* **8 SQL Server integration tests** (`TaskC_FreeMonthsBenefitSqlServerTests`)
+* **9 SQL Server integration tests** (`TaskC_FreeMonthsBenefitSqlServerTests`)
   against the local SQL Server — pass.
 
-**59 Task C tests**, all passing. Full regression: **1742 total, 1741 passed,
+**60 Task C tests**, all passing. Full regression: **1744 total, 1743 passed,
 0 failed, 1 skipped** (1 pre-existing skip unrelated to Task C — see §10).
 
 ---
@@ -715,26 +715,27 @@ Offer -> Contract copies EligibilityRule exactly
 | `SqlC08_OfferFreeMonthsBenefits_EligibilityRule_IsNotNull_InSchema` | [TaskC_FreeMonthsBenefitSqlServerTests.cs](file:///d:/New%20folder/Center%20Managements%20V1/Centerix/tests/Centerix.SecurityTests/TaskC_FreeMonthsBenefitSqlServerTests.cs) | `INFORMATION_SCHEMA.COLUMNS` confirms `EligibilityRule` is `nvarchar(4000) NOT NULL` **and has no `COLUMN_DEFAULT`** on both `Platform.OfferFreeMonthsBenefits` and `Platform.FreeMonthsBenefits`. |
 | `SqlC09_OfferToContract_WithMalformedFreeMonthsBenefit_FailsExplicitly_AndCreatesNoContract` | Same | **Production-handler defense on Local SQL Server** (Correction 3): a valid Offer + valid `OfferFreeMonthsBenefit` are written to SQL Server and accepted via the real `AcceptOfferHandler`. A fresh `DbContext` then materializes the Offer from SQL Server, the rule is nulled on the materialized entity via the same controlled test-only reflection technique used by `TestC10`, and the **real** `CreateContractFromOfferHandler` is invoked against that SQL-backed DbContext. Asserts: handler returns `Offer.IncompleteFreeMonthsBenefit`; no Contract row exists in SQL Server (fresh `DbContext`); Offer `Status != ConvertedToContract`, `ContractId == null`, `ConvertedAtUtc == null`; the FreeMonthsBenefit is still present on the Offer in SQL Server with a non-null rule. |
 
-### 13.4 Verification evidence
+### 13.4 Verification evidence (historical — Correction 2 baseline)
 
 * **Build:** `dotnet build Centerix.slnx --no-restore` — 0 errors.
-* **Task C tests:** 59 passed, 0 failed (41 pure-domain + 10 InMemory snapshot + 8 Local SQL Server).
+* **Task C tests:** 59 passed, 0 failed (41 pure-domain + 10 InMemory snapshot + 8 Local SQL Server) (historical — pre-Correction-3; current total is **60**, **9 SQL Server**). [Superseded by §13.6.]
 * **Full regression:** see §10.1 for the exact totals and the exact skipped test.
 * **EF Core migrations:** `dotnet ef migrations has-pending-model-changes` returns "No changes have been made to the model since the last migration."
 * **No unrelated diff:** Only `OfferBenefit.cs`, `CreateContractFromOfferCommand.cs`, `FreeMonthsBenefitConfiguration.cs`, the three Task C test files, this report, and the new migration (plus its designer and the regenerated model snapshot) were modified.
 
-### 13.5 Re-verification evidence (post-correction-2 SHA backfill)
+### 13.5 Re-verification evidence (historical — post-correction-2 SHA backfill, pre-Correction-3)
 
-Re-ran the full Task C verification surface at HEAD `c0055e1` to confirm the
-invariant holds on the committed baseline:
+**[Superseded by §13.6]** — This section records the verification run at HEAD
+`c0055e1` (Correction 2). Current state is 60 Task C tests, 9 SQL Server tests
+(§13.6).
 
 | Command | Result |
 |---|---|
 | `dotnet build Centerix.slnx --no-restore` | 0 errors |
 | `dotnet test … --filter "FullyQualifiedName~TaskC_FreeMonthsBenefitFoundationTests"` | 41 passed, 0 failed, 0 skipped |
 | `dotnet test … --filter "FullyQualifiedName~TaskC_FreeMonthsBenefitSnapshotTests"` | 10 passed, 0 failed, 0 skipped |
-| `dotnet test … --filter "FullyQualifiedName~TaskC_FreeMonthsBenefitSqlServerTests"` (Local SQL Server: `Server=.`) | 8 passed, 0 failed, 0 skipped |
-| `dotnet test … --filter "FullyQualifiedName~TaskC"` (combined) | **59 passed, 0 failed, 0 skipped** (Duration 14 s) |
+| `dotnet test … --filter "FullyQualifiedName~TaskC_FreeMonthsBenefitSqlServerTests"` (Local SQL Server: `Server=.`) | 8 passed, 0 failed, 0 skipped (historical — pre-Correction-3; current is 9) |
+| `dotnet test … --filter "FullyQualifiedName~TaskC"` (combined) | **59 passed, 0 failed, 0 skipped** (historical — pre-Correction-3; current is 60) (Duration 14 s) |
 | `dotnet ef migrations has-pending-model-changes --context AppDbContext` | "No changes have been made to the model since the last migration." |
 | `dotnet ef migrations has-pending-model-changes --context TenantDbContext` | "No changes have been made to the model since the last migration." |
 | Local SQL Server probe (`sqlcmd -S . -Q "SELECT @@VERSION"`) | Microsoft SQL Server 2022 RTM (16.0.1000.6) Developer Edition, reachable |
@@ -838,11 +839,12 @@ CreateContractFromOfferHandler
     → no partial Contract row is persisted
 
 Malformed persisted OfferFreeMonthsBenefit row
-    causes explicit conversion failure                    (TestC10 + SqlC08)
+    causes explicit conversion failure                    (TestC10 + SqlC08 + SqlC09)
     → schema is NOT NULL on both OfferFreeMonthsBenefits and FreeMonthsBenefits
     → EF rejects a null rule at write time on both InMemory and SQL Server
     → the production handler additionally fails explicitly if a row somehow
-      reaches it with a null rule (defense in depth)
+      reaches it with a null rule (defense in depth; TestC10 on InMemory,
+      SqlC09 on real SQL Server after materialization)
 
 No partial Contract is persisted                         (TestC10)
     → SaveChangesAsync only runs after the entire snapshot copy succeeds
@@ -853,16 +855,17 @@ Offer → Contract copies EligibilityRule exactly           (TestC06 + SqlC03)
     → byte-identical canonical JSON before and after the SQL round-trip
 ```
 
-### 14.2 Why three layers of defense
+### 14.2 Why four verification points across three layers of defense
 
-| Layer | Defense | Test |
+| Layer | Defense | Tests |
 |---|---|---|
 | Domain factory | `OfferFreeMonthsBenefit.Create` rejects null at construction | `Test35` |
-| EF Core | `IsRequired()` on `EligibilityRule` prevents null persistence | `SqlC08` |
-| Production handler | Explicit failure on the (otherwise impossible) in-memory null | `TestC10` |
+| EF Core | `IsRequired()` on `EligibilityRule` prevents null persistence at the schema level | `SqlC08` |
+| Production handler (InMemory) | Explicit failure on the materialized entity with a null rule | `TestC10` |
+| Production handler (SQL Server) | Same defense confirmed against a real SQL Server DbContext | `SqlC09` |
 
 Each layer blocks a different escape route. A regression in any single layer is
-caught by the test on a different layer.
+caught by a test on a different layer.
 
 ### 14.3 Search audit — no silent drops remain
 
