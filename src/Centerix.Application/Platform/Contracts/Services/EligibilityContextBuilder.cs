@@ -13,6 +13,10 @@ namespace Centerix.Application.Platform.Contracts.Services;
 /// <para>
 /// The builder is stateless and thread-safe; it is therefore registered as a singleton.
 /// </para>
+/// <para>
+/// All fact queries are issued once, then the rule tree is evaluated in memory. We never
+/// issue per-rule database queries.
+/// </para>
 /// </remarks>
 public sealed class EligibilityContextBuilder
 {
@@ -31,48 +35,31 @@ public sealed class EligibilityContextBuilder
         DateTime utcNow,
         CancellationToken cancellationToken = default)
     {
-        // Commercial header facts (status, payment terms)
-        var commercial = await _facts.GetContractCommercialFactsAsync(tenantId, contractId, cancellationToken)
+        // Commercial + lifecycle header facts (status, payment terms, effective, duration, currency).
+        var contract = await _facts.GetContractFactsAsync(tenantId, contractId, cancellationToken)
             ?? throw new ContractBenefitFreezingError(
                     "ContractFreezing.NoContract",
                     $"Contract '{contractId}' was not found for tenant '{tenantId}'.");
 
-        // Snapshot facts (effective date, contracted amount, duration)
-        var snapshot = await _facts.GetContractSnapshotFactsAsync(tenantId, contractId, cancellationToken)
-            ?? throw new ContractBenefitFreezingError(
-                    "ContractFreezing.NoContract",
-                    $"Contract '{contractId}' was not found for tenant '{tenantId}'.");
+        // Authoritative completed-payment facts. Single query — the evaluator iterates in memory.
+        var completedPayments = await _facts.GetCompletedPaymentsAsync(tenantId, contractId, cancellationToken);
 
-        // Settlement totals
-        var amountPaid = await _facts.GetAmountPaidAsync(tenantId, contractId, cancellationToken);
-        var paymentMethod = await _facts.GetCurrentPaymentMethodAsync(tenantId, contractId, cancellationToken);
+        // Overdue-installment flag (single boolean query).
         var hasOverdue = await _facts.HasOverdueInstallmentAsync(tenantId, contractId, utcNow, cancellationToken);
-
-        // Days from contract start: floor((utcNow - effectiveAt) by day boundary).
-        var daysFromContractStart = ComputeDaysFromContractStart(snapshot.EffectiveAtUtc, utcNow);
 
         return EligibilityContext.Create(
             tenantId: tenantId,
             contractId: contractId,
             benefitId: benefitId,
-            contractStatus: commercial.Status,
-            paymentTerms: commercial.PaymentTerms,
-            paymentMethod: paymentMethod,
+            contractStatus: contract.Status,
+            paymentTerms: contract.PaymentTerms,
             utcNow: utcNow,
-            amountPaid: amountPaid,
-            contractedAmount: snapshot.ContractedAmount,
-            daysFromContractStart: daysFromContractStart,
-            contractDurationMonths: snapshot.DurationMonths,
-            hasOverdueInstallment: hasOverdue);
-    }
-
-    private static int ComputeDaysFromContractStart(DateTime effectiveAtUtc, DateTime utcNow)
-    {
-        // Treat effective as midnight UTC for stable day arithmetic.
-        var from = effectiveAtUtc.Date;
-        var to = utcNow.Date;
-        var diff = to - from;
-        return diff.TotalDays >= 0 ? (int)diff.TotalDays : 0;
+            contractStartUtc: contract.EffectiveAtUtc,
+            contractCurrencyCode: contract.CurrencyCode,
+            contractedAmount: contract.ContractedAmount,
+            contractDurationMonths: contract.DurationMonths,
+            hasOverdueInstallment: hasOverdue,
+            completedPayments: completedPayments);
     }
 }
 

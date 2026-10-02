@@ -38,24 +38,23 @@ public sealed class EligibilityContext
     /// <summary>Contract payment terms (snapshot at evaluation time).</summary>
     public PaymentTerms PaymentTerms { get; }
 
-    /// <summary>
-    /// Most recent payment method observed on a completed payment allocation for this contract,
-    /// or <c>null</c> when no completed payment allocation exists yet. Canonicalised at the
-    /// builder to <c>Trim().ToUpperInvariant()</c>.
-    /// </summary>
-    public string? PaymentMethod { get; }
-
-    /// <summary>Current UTC instant (used by <c>CompletedByUtc</c> and <c>DaysFromContractStart</c> rules).</summary>
+    /// <summary>Current UTC instant (used by <c>CompletedByUtc</c> and <c>DaysFromContractStartGte</c> rules).</summary>
     public DateTime UtcNow { get; }
 
-    /// <summary>Total amount paid (sum of completed-payment amounts) on the current contract.</summary>
-    public decimal AmountPaid { get; }
+    /// <summary>
+    /// Authoritative contract-start (effective) instant. Used by <c>DaysFromContractStartGte</c>:
+    /// elapsed duration is computed as <c>UtcNow - ContractStartUtc</c>, never by date-range day-counting.
+    /// </summary>
+    public DateTime ContractStartUtc { get; }
 
-    /// <summary>The contract's contracted amount (snapshot). Used by <c>AmountPaidAtLeast</c>.</summary>
+    /// <summary>
+    /// Authoritative contract currency. Used by <c>AmountPaidAtLeast</c> to scope the sum to payments
+    /// whose currency matches the contract. Payments in other currencies MUST NOT contribute.
+    /// </summary>
+    public string ContractCurrencyCode { get; }
+
+    /// <summary>The contract's contracted amount (snapshot).</summary>
     public decimal ContractedAmount { get; }
-
-    /// <summary>Whole days elapsed since the contract's effective date at <see cref="UtcNow"/>.</summary>
-    public int DaysFromContractStart { get; }
 
     /// <summary>The contract's duration in months (snapshot). Used by <c>DurationMonthsGte</c>.</summary>
     public int ContractDurationMonths { get; }
@@ -64,10 +63,17 @@ public sealed class EligibilityContext
     public bool HasOverdueInstallment { get; }
 
     /// <summary>
-    /// Optional deadline for the <c>CompletedByUtc</c> rule. When <c>null</c>, the deadline is not
-    /// observed (rule has not been set up for this benefit).
+    /// Authoritative completion facts. One entry per <c>Payment</c> row with
+    /// <c>Status = Completed</c> whose allocations reference an invoice belonging to
+    /// <see cref="ContractId"/>. Empty when no qualifying payments exist.
     /// </summary>
-    public DateTime? CompletedByUtc { get; }
+    /// <remarks>
+    /// <para>
+    /// Rules that need "any payment matching X" iterate this list. Rules that need a single
+    /// aggregate (e.g. <c>AmountPaidAtLeast</c>) reduce over it.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<CompletedPaymentFact> CompletedPayments { get; }
 
     /// <summary>
     /// Extension property bag reserved for future rule types. The bag is fully immutable: any
@@ -81,14 +87,13 @@ public sealed class EligibilityContext
         Guid benefitId,
         ContractStatus contractStatus,
         PaymentTerms paymentTerms,
-        string? paymentMethod,
         DateTime utcNow,
-        decimal amountPaid,
+        DateTime contractStartUtc,
+        string contractCurrencyCode,
         decimal contractedAmount,
-        int daysFromContractStart,
         int contractDurationMonths,
         bool hasOverdueInstallment,
-        DateTime? completedByUtc,
+        IReadOnlyList<CompletedPaymentFact> completedPayments,
         IReadOnlyDictionary<string, object> properties)
     {
         TenantId = tenantId;
@@ -96,14 +101,13 @@ public sealed class EligibilityContext
         BenefitId = benefitId;
         ContractStatus = contractStatus;
         PaymentTerms = paymentTerms;
-        PaymentMethod = paymentMethod;
         UtcNow = utcNow;
-        AmountPaid = amountPaid;
+        ContractStartUtc = contractStartUtc;
+        ContractCurrencyCode = contractCurrencyCode;
         ContractedAmount = contractedAmount;
-        DaysFromContractStart = daysFromContractStart;
         ContractDurationMonths = contractDurationMonths;
         HasOverdueInstallment = hasOverdueInstallment;
-        CompletedByUtc = completedByUtc;
+        CompletedPayments = completedPayments;
         Properties = properties;
     }
 
@@ -117,14 +121,13 @@ public sealed class EligibilityContext
         Guid benefitId,
         ContractStatus contractStatus,
         PaymentTerms paymentTerms,
-        string? paymentMethod,
         DateTime utcNow,
-        decimal amountPaid,
+        DateTime contractStartUtc,
+        string contractCurrencyCode,
         decimal contractedAmount,
-        int daysFromContractStart,
         int contractDurationMonths,
         bool hasOverdueInstallment,
-        DateTime? completedByUtc = null,
+        IReadOnlyList<CompletedPaymentFact>? completedPayments = null,
         IReadOnlyDictionary<string, object>? properties = null)
     {
         if (string.IsNullOrWhiteSpace(tenantId))
@@ -142,48 +145,73 @@ public sealed class EligibilityContext
                 "Do not silently reinterpret local or unspecified time.",
                 nameof(utcNow));
 
-        if (amountPaid < 0)
-            throw new ArgumentOutOfRangeException(nameof(amountPaid), amountPaid,
-                "AmountPaid cannot be negative.");
+        if (contractStartUtc.Kind != DateTimeKind.Utc)
+            throw new ArgumentException(
+                "ContractStartUtc must be a UTC DateTime (Kind == DateTimeKind.Utc).",
+                nameof(contractStartUtc));
+
+        if (string.IsNullOrWhiteSpace(contractCurrencyCode) || contractCurrencyCode.Trim().Length != 3)
+            throw new ArgumentException(
+                "ContractCurrencyCode must be a 3-letter ISO currency code.",
+                nameof(contractCurrencyCode));
 
         if (contractedAmount < 0)
             throw new ArgumentOutOfRangeException(nameof(contractedAmount), contractedAmount,
                 "ContractedAmount cannot be negative.");
 
-        if (daysFromContractStart < 0)
-            throw new ArgumentOutOfRangeException(nameof(daysFromContractStart), daysFromContractStart,
-                "DaysFromContractStart cannot be negative.");
-
         if (contractDurationMonths < 0)
             throw new ArgumentOutOfRangeException(nameof(contractDurationMonths), contractDurationMonths,
                 "ContractDurationMonths cannot be negative.");
 
-        if (completedByUtc is { } deadline && deadline.Kind != DateTimeKind.Utc)
-            throw new ArgumentException(
-                "CompletedByUtc must be a UTC DateTime (Kind == DateTimeKind.Utc).",
-                nameof(completedByUtc));
+        var facts = completedPayments is null
+            ? (IReadOnlyList<CompletedPaymentFact>)Array.Empty<CompletedPaymentFact>()
+            : completedPayments.ToArray();
 
         var propertyBag = properties is null
             ? (IReadOnlyDictionary<string, object>)new Dictionary<string, object>()
             : new Dictionary<string, object>(properties);
 
         return new EligibilityContext(
-            tenantId,
+            tenantId.Trim(),
             contractId,
             benefitId,
             contractStatus,
             paymentTerms,
-            paymentMethod,
             utcNow,
-            amountPaid,
+            contractStartUtc,
+            contractCurrencyCode.Trim().ToUpperInvariant(),
             contractedAmount,
-            daysFromContractStart,
             contractDurationMonths,
             hasOverdueInstallment,
-            completedByUtc,
+            facts,
             new ReadOnlyPropertyBag(propertyBag));
     }
 }
+
+/// <summary>
+/// Authoritative fact describing a single completed payment row that counts toward settlement.
+/// One fact per <c>Payment</c> row with <c>PaymentStatus.Completed</c> whose allocation chain
+/// links back to a contract invoice.
+/// </summary>
+/// <param name="PaymentId">The payment row id (audit / debugging).</param>
+/// <param name="CompletedAtUtc">
+/// The authoritative <c>Payment.CompletedAtUtc</c>. NEVER derived from contract creation,
+/// invoice, or current time — see the "important" clause of the correction spec.
+/// </param>
+/// <param name="Amount">The payment amount.</param>
+/// <param name="CurrencyCode">
+/// The payment's ISO currency code, canonicalised to <c>Trim().ToUpperInvariant()</c>.
+/// </param>
+/// <param name="MethodCanonical">
+/// The payment method canonicalised to <c>Trim().ToUpperInvariant()</c>. May be <c>null</c>
+/// when no method is recorded.
+/// </param>
+public sealed record CompletedPaymentFact(
+    Guid PaymentId,
+    DateTime CompletedAtUtc,
+    decimal Amount,
+    string CurrencyCode,
+    string? MethodCanonical);
 
 /// <summary>
 /// Read-only wrapper that throws when a caller attempts to mutate the underlying dictionary.

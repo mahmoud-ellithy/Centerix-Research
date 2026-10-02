@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore;
 /// <summary>
 /// Default implementation of <see cref="IFreezeEligibilityService"/>. The service uses
 /// <c>EligibilityContextBuilder</c> to fetch tenant-scoped facts, runs the closed rule
-/// evaluator, and transitions the benefit to <c>Eligible</c> only when the rule passes.
+/// evaluator, and synchronises the benefit's <c>EligibilityStatus</c> with the result.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -22,6 +22,14 @@ using Microsoft.EntityFrameworkCore;
 /// Cross-tenant access is blocked at two layers: the <c>IOwnerOnlyFactQuery</c> fact-query
 /// seam (which throws <see cref="TenantScopeException"/> on cross-tenant rows), and the
 /// post-load tenant guard on the benefit itself.
+/// </para>
+/// <para>
+/// <b>Reversibility invariant:</b> the eligibility axis is <c>NotEligible ⇄ Eligible</c>.
+/// Every freeze MUST converge <c>EligibilityStatus</c> with the evaluation outcome. The
+/// evaluator's <c>IsEligible = true</c> result triggers <c>MarkEligible</c>; the <c>false</c>
+/// result triggers <c>MarkNotEligible</c>. Neither path may mutate <c>FulfillmentStatus</c>,
+/// <c>GrantedAtUtc</c>, <c>GrantedBy</c>, <c>DeliveredAtUtc</c>, <c>DeliveredBy</c>, or any
+/// applied-to-subscription state.
 /// </para>
 /// </remarks>
 public sealed class FreezeEligibilityService : IFreezeEligibilityService
@@ -60,7 +68,6 @@ public sealed class FreezeEligibilityService : IFreezeEligibilityService
 
         var now = DateTime.UtcNow;
 
-        // Build the immutable fact aggregate through the owner-only fact query seam.
         EligibilityContext context;
         try
         {
@@ -73,14 +80,14 @@ public sealed class FreezeEligibilityService : IFreezeEligibilityService
         }
         catch (TenantScopeException)
         {
-            // Surface as the existing typed error so callers see consistent error codes.
             return ContractErrors.Benefit.CrossTenantBenefit;
         }
 
         var rule = benefit.EligibilityRule;
 
-        // No rule snapshot: nothing to evaluate. The benefit stays NotEligible. Do NOT
-        // mutate FulfillmentStatus / GrantedAtUtc / GrantedBy.
+        // No rule snapshot: there is nothing to evaluate. The benefit stays in its existing
+        // EligibilityStatus (we do not mutate). No FulfillmentStatus / GrantedAtUtc / GrantedBy
+        // mutation either.
         if (rule is null)
         {
             return new FreezeEligibilityResponse(
@@ -95,9 +102,50 @@ public sealed class FreezeEligibilityService : IFreezeEligibilityService
 
         var evaluation = _evaluator.Evaluate(rule, context);
 
-        if (!evaluation.IsEligible)
+        // Reversibility: converge EligibilityStatus with the evaluation outcome. The two
+        // branches below touch ONLY that one field via the existing domain methods. They MUST
+        // NOT touch FulfillmentStatus / GrantedAtUtc / GrantedBy / DeliveredAtUtc / DeliveredBy.
+        if (evaluation.IsEligible)
         {
-            // Ineligible: no MarkEligible, no fulfillment mutations.
+            var statusChanged = benefit.EligibilityStatus
+                != Domain.Platform.Contracts.Enums.BenefitEligibilityStatus.Eligible;
+
+            if (statusChanged)
+            {
+                var markResult = benefit.MarkEligible(now, tenantId);
+                if (!markResult.IsSuccess)
+                    return markResult.Errors!;
+
+                _db.StampAddedTenantIds(tenantId);
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+
+            return new FreezeEligibilityResponse(
+                Success: true,
+                BenefitId: benefit.Id,
+                IsEligible: true,
+                ReasonCode: null,
+                ReasonPath: null,
+                EvaluatedAt: now,
+                StatusChanged: statusChanged);
+        }
+        else
+        {
+            // Ineligible: synchronise the status back to NotEligible. Fulfillment fields stay
+            // untouched — a Granted/Delivered benefit remains granted/delivered.
+            var statusChanged = benefit.EligibilityStatus
+                != Domain.Platform.Contracts.Enums.BenefitEligibilityStatus.NotEligible;
+
+            if (statusChanged)
+            {
+                var markResult = benefit.MarkNotEligible();
+                if (!markResult.IsSuccess)
+                    return markResult.Errors!;
+
+                _db.StampAddedTenantIds(tenantId);
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+
             return new FreezeEligibilityResponse(
                 Success: true,
                 BenefitId: benefit.Id,
@@ -105,29 +153,7 @@ public sealed class FreezeEligibilityService : IFreezeEligibilityService
                 ReasonCode: evaluation.Reason.ToString(),
                 ReasonPath: evaluation.ReasonPath,
                 EvaluatedAt: now,
-                StatusChanged: false);
+                StatusChanged: statusChanged);
         }
-
-        // Eligible: only transition if not already eligible.
-        var statusChanged = false;
-        if (benefit.EligibilityStatus == Domain.Platform.Contracts.Enums.BenefitEligibilityStatus.NotEligible)
-        {
-            var markResult = benefit.MarkEligible(now, tenantId);
-            if (!markResult.IsSuccess)
-                return markResult.Errors!;
-
-            _db.StampAddedTenantIds(tenantId);
-            await _db.SaveChangesAsync(cancellationToken);
-            statusChanged = true;
-        }
-
-        return new FreezeEligibilityResponse(
-            Success: true,
-            BenefitId: benefit.Id,
-            IsEligible: true,
-            ReasonCode: null,
-            ReasonPath: null,
-            EvaluatedAt: now,
-            StatusChanged: statusChanged);
     }
 }

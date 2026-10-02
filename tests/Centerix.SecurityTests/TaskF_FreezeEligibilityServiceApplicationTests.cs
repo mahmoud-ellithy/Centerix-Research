@@ -2,6 +2,7 @@ namespace Centerix.SecurityTests;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform.Contracts.Commands;
+using Centerix.Application.Platform.Contracts.Services;
 using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Contracts.EligibilityRules;
 using Centerix.Domain.Platform.Contracts.Enums;
@@ -22,7 +23,9 @@ using Xunit;
 /// Coverage:
 ///   - FreezeBenefitEligibilityCommand dispatches through the production pipeline
 ///   - IsEligible=true ⇒ MarkEligible + EligibleAtUtc stamped, FulfillmentStatus untouched
-///   - IsEligible=false ⇒ no mutation, reason code surfaced
+///   - IsEligible=false ⇒ MarkNotEligible, FulfillmentStatus preserved
+///   - EligibilityStatus reversibility (5 cases): NotEligible→Eligible, Eligible→NotEligible
+///     under Pending, Granted, Delivered, AppliedToSubscription.
 ///   - Idempotency: re-freeze is a no-op
 ///   - Cross-tenant guard returns CrossTenantBenefit
 ///   - Missing rule snapshot is reported as "ContractFreezing.NoRule"
@@ -61,9 +64,6 @@ public class TaskF_FreezeEligibilityServiceApplicationTests : IClassFixture<Task
             paymentTerms: terms,
             discountAmount: 0m).Value;
 
-        // Drive the contract to the desired status. The handler only freezes when the
-        // status reported by the fact query is at least PendingApproval; for the active path
-        // we go Draft → PendingApproval → Active.
         if (finalStatus == ContractStatus.PendingApproval || finalStatus == ContractStatus.Active)
         {
             contract.SubmitForApproval();
@@ -98,7 +98,7 @@ public class TaskF_FreezeEligibilityServiceApplicationTests : IClassFixture<Task
         return (contract, benefit);
     }
 
-    // ──────────────── IsEligible == true → MarkEligible called ────────────────
+    // ──────────────── Eligible path ────────────────
 
     [Fact]
     public async Task TestF_App01_Eligible_TransitionsToEligible_StampsEligibleAtUtc()
@@ -108,10 +108,6 @@ public class TaskF_FreezeEligibilityServiceApplicationTests : IClassFixture<Task
         var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
 
-        // ContractActive + AmountPaidAtLeast(1000) ⇒ all pass against an Active contract with
-        // contractedAmount=1000 (paid=1000 reported by fact query because there are no payments,
-        // which makes the fact query return 0 — so we deliberately choose a rule that does NOT
-        // require a paid amount threshold).
         var rule = EligibilityRule.AllOf(
             EligibilityRule.ContractActive(),
             EligibilityRule.NoOverdueInstallment(),
@@ -121,11 +117,9 @@ public class TaskF_FreezeEligibilityServiceApplicationTests : IClassFixture<Task
         var (contract, benefit) = await SeedContractAndBenefitAsync(
             db, rule, finalStatus: ContractStatus.Active, terms: PaymentTerms.FullUpfront);
 
-        // Act
         var result = await mediator.Send(new FreezeBenefitEligibilityCommand(benefit.Id));
 
-        // Assert
-        Assert.True(result.IsSuccess, result.Errors?[0].Description ?? "Error");
+        Assert.True(result.IsSuccess, result.Errors?[0].Description ?? "no error");
         var response = result.Value;
         Assert.True(response.IsEligible);
         Assert.True(response.StatusChanged);
@@ -145,7 +139,7 @@ public class TaskF_FreezeEligibilityServiceApplicationTests : IClassFixture<Task
     }
 
     [Fact]
-    public async Task TestF_App02_Ineligible_ContractNotActive_DoesNotMutate()
+    public async Task TestF_App02_Ineligible_ContractNotActive_SyncsBackToNotEligible()
     {
         AuthorizeTenant(TenantId);
         using var scope = _factory.Services.CreateScope();
@@ -167,7 +161,6 @@ public class TaskF_FreezeEligibilityServiceApplicationTests : IClassFixture<Task
         Assert.Equal(nameof(WhyIneligible.ContractNotActive), response.ReasonCode);
         Assert.False(response.StatusChanged);
 
-        // Benefit must remain NotEligible
         var db2 = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
         var reloaded = await db2.ContractBenefits.IgnoreQueryFilters()
             .FirstAsync(b => b.Id == benefit.Id);
@@ -183,7 +176,7 @@ public class TaskF_FreezeEligibilityServiceApplicationTests : IClassFixture<Task
         var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
 
-        // AmountPaidAtLeast(100000) will fail because no payments exist ⇒ paid=0
+        // No payments seeded ⇒ paidAmount=false
         var rule = EligibilityRule.AllOf(
             EligibilityRule.ContractActive(),
             EligibilityRule.AmountPaidAtLeast(100000m),
@@ -197,7 +190,7 @@ public class TaskF_FreezeEligibilityServiceApplicationTests : IClassFixture<Task
         var response = result.Value;
         Assert.False(response.IsEligible);
         Assert.Equal(nameof(WhyIneligible.AmountBelowMinimum), response.ReasonCode);
-        Assert.Contains("AmountPaidAtLeast", response.ReasonPath);
+        Assert.Contains("AmountPaidAtLeast", response.ReasonPath!);
         Assert.False(response.StatusChanged);
     }
 
@@ -209,7 +202,6 @@ public class TaskF_FreezeEligibilityServiceApplicationTests : IClassFixture<Task
         var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
 
-        // No rule snapshot on the benefit.
         var (contract, benefit) = await SeedContractAndBenefitAsync(db, rule: null);
 
         var result = await mediator.Send(new FreezeBenefitEligibilityCommand(benefit.Id));
@@ -237,7 +229,6 @@ public class TaskF_FreezeEligibilityServiceApplicationTests : IClassFixture<Task
 
         var (contract, benefit) = await SeedContractAndBenefitAsync(db, rule);
 
-        // First freeze: transitions the benefit.
         var first = await mediator.Send(new FreezeBenefitEligibilityCommand(benefit.Id));
         Assert.True(first.Value.IsEligible);
         Assert.True(first.Value.StatusChanged);
@@ -245,7 +236,6 @@ public class TaskF_FreezeEligibilityServiceApplicationTests : IClassFixture<Task
         var firstStamp = (await db.ContractBenefits.IgnoreQueryFilters()
             .FirstAsync(b => b.Id == benefit.Id)).EligibleAtUtc;
 
-        // Second freeze: should be a no-op (StatusChanged == false) — but IsEligible stays true.
         var second = await mediator.Send(new FreezeBenefitEligibilityCommand(benefit.Id));
         Assert.True(second.Value.IsEligible);
         Assert.False(second.Value.StatusChanged);
@@ -253,14 +243,12 @@ public class TaskF_FreezeEligibilityServiceApplicationTests : IClassFixture<Task
         var secondStamp = (await db.ContractBenefits.IgnoreQueryFilters()
             .FirstAsync(b => b.Id == benefit.Id)).EligibleAtUtc;
 
-        // EligibleAtUtc was NOT re-stamped on the second call.
         Assert.Equal(firstStamp, secondStamp);
     }
 
     [Fact]
     public async Task TestF_App06_CrossTenant_ReturnsCrossTenantBenefit()
     {
-        // Authorized as one tenant, but the benefit belongs to another.
         TaskCFakeCurrentTenant.SetTenantId("tenant-attacker");
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
@@ -272,7 +260,7 @@ public class TaskF_FreezeEligibilityServiceApplicationTests : IClassFixture<Task
             db,
             EligibilityRule.ContractActive());
 
-        // Switch tenant context to the attacker.
+        // Switch tenant context.
         TaskCFakeCurrentTenant.SetTenantId("tenant-attacker");
 
         var result = await mediator.Send(new FreezeBenefitEligibilityCommand(benefit.Id));
@@ -296,8 +284,10 @@ public class TaskF_FreezeEligibilityServiceApplicationTests : IClassFixture<Task
         Assert.Contains(result.Errors!, e => e.Code == "Contract.Benefit.NotFound");
     }
 
+    // ──────────────── EligibilityStatus reversibility ────────────────
+
     [Fact]
-    public async Task TestF_App08_Freeze_DoesNotMutateFulfillmentFields()
+    public async Task TestF_App10_EligibilityReversibility_Case1_NotEligiblePending_RuleTrue_EligiblePending()
     {
         AuthorizeTenant(TenantId);
         using var scope = _factory.Services.CreateScope();
@@ -312,33 +302,166 @@ public class TaskF_FreezeEligibilityServiceApplicationTests : IClassFixture<Task
 
         var (contract, benefit) = await SeedContractAndBenefitAsync(db, rule);
 
-        // Ineligible path: amount-paid rule fails.
-        var failingRule = EligibilityRule.AllOf(
+        // Pre-state: NotEligible + Pending.
+        var pre = await db.ContractBenefits.IgnoreQueryFilters().FirstAsync(b => b.Id == benefit.Id);
+        Assert.Equal(BenefitEligibilityStatus.NotEligible, pre.EligibilityStatus);
+        Assert.Equal(FulfillmentStatus.Pending, pre.FulfillmentStatus);
+
+        var result = await mediator.Send(new FreezeBenefitEligibilityCommand(benefit.Id));
+        Assert.True(result.Value.IsEligible);
+        Assert.True(result.Value.StatusChanged);
+
+        var post = await db.ContractBenefits.IgnoreQueryFilters().FirstAsync(b => b.Id == benefit.Id);
+        Assert.Equal(BenefitEligibilityStatus.Eligible, post.EligibilityStatus);
+        Assert.Equal(FulfillmentStatus.Pending, post.FulfillmentStatus); // preserved
+    }
+
+    [Fact]
+    public async Task TestF_App11_EligibilityReversibility_Case2_EligiblePending_RuleFalse_NotEligiblePending()
+    {
+        AuthorizeTenant(TenantId);
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+
+        var rule = EligibilityRule.AllOf(
             EligibilityRule.ContractActive(),
-            EligibilityRule.AmountPaidAtLeast(100000m),
-            EligibilityRule.NoOverdueInstallment());
+            EligibilityRule.NoOverdueInstallment(),
+            EligibilityRule.PaymentTermsEquals(PaymentTerms.FullUpfront),
+            EligibilityRule.DurationMonthsGte(1));
 
-        // Override the rule with one that fails
-        var reloaded = await db.ContractBenefits.IgnoreQueryFilters()
+        var (contract, benefit) = await SeedContractAndBenefitAsync(db, rule);
+
+        // First freeze: becomes Eligible + Pending.
+        var first = await mediator.Send(new FreezeBenefitEligibilityCommand(benefit.Id));
+        Assert.True(first.Value.IsEligible);
+
+        // Suspend the contract so the rule no longer evaluates true.
+        var freshContract = await db.Contracts.IgnoreQueryFilters()
+            .FirstAsync(c => c.Id == contract.Id);
+        freshContract.Suspend();
+        await db.SaveChangesAsync();
+
+        var second = await mediator.Send(new FreezeBenefitEligibilityCommand(benefit.Id));
+        Assert.False(second.Value.IsEligible);
+        Assert.Equal(nameof(WhyIneligible.ContractNotActive), second.Value.ReasonCode);
+
+        var post = await db.ContractBenefits.IgnoreQueryFilters().FirstAsync(b => b.Id == benefit.Id);
+        Assert.Equal(BenefitEligibilityStatus.NotEligible, post.EligibilityStatus);
+        Assert.Equal(FulfillmentStatus.Pending, post.FulfillmentStatus);
+        Assert.Null(post.GrantedAtUtc);
+        Assert.Null(post.GrantedBy);
+    }
+
+    [Fact]
+    public async Task TestF_App12_EligibilityReversibility_Case3_EligibleGranted_RuleFalse_NotEligibleGranted_Preserved()
+    {
+        AuthorizeTenant(TenantId);
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+
+        var rule = EligibilityRule.AllOf(
+            EligibilityRule.ContractActive(),
+            EligibilityRule.NoOverdueInstallment(),
+            EligibilityRule.PaymentTermsEquals(PaymentTerms.FullUpfront),
+            EligibilityRule.DurationMonthsGte(1));
+
+        var (contract, benefit) = await SeedContractAndBenefitAsync(db, rule);
+
+        // First freeze: Eligible + Pending.
+        var first = await mediator.Send(new FreezeBenefitEligibilityCommand(benefit.Id));
+        Assert.True(first.Value.IsEligible);
+
+        // Grant the benefit so FulfillmentStatus → Granted.
+        var benefitForGrant = await db.ContractBenefits.IgnoreQueryFilters()
             .FirstAsync(b => b.Id == benefit.Id);
+        benefitForGrant.Grant(DateTime.UtcNow, "test-user", TenantId);
+        await db.SaveChangesAsync();
 
-        // The test asserts that even on the failing path, no FulfillmentStatus / GrantedAtUtc / GrantedBy fields are touched.
-        // We snapshot these fields, then run a freeze that returns IsEligible=false.
-        var reloadedAfterSeeding = reloaded;
-        var fulfillmentBefore = reloadedAfterSeeding.FulfillmentStatus;
-        var grantedAtBefore = reloadedAfterSeeding.GrantedAtUtc;
-        var grantedByBefore = reloadedAfterSeeding.GrantedBy;
+        // Suspend the contract so the rule no longer evaluates true.
+        var freshContract = await db.Contracts.IgnoreQueryFilters()
+            .FirstAsync(c => c.Id == contract.Id);
+        freshContract.Suspend();
+        await db.SaveChangesAsync();
 
-        // Re-freeze with the original rule (eligible)
+        // Re-freeze: eligibility flips back, but FulfillmentStatus must remain Granted.
+        var second = await mediator.Send(new FreezeBenefitEligibilityCommand(benefit.Id));
+        Assert.False(second.Value.IsEligible);
+
+        var post = await db.ContractBenefits.IgnoreQueryFilters().FirstAsync(b => b.Id == benefit.Id);
+        Assert.Equal(BenefitEligibilityStatus.NotEligible, post.EligibilityStatus);
+        Assert.Equal(FulfillmentStatus.Granted, post.FulfillmentStatus); // preserved
+        Assert.NotNull(post.GrantedAtUtc);
+        Assert.Equal("test-user", post.GrantedBy);
+    }
+
+    [Fact]
+    public async Task TestF_App13_EligibilityReversibility_Case4_EligibleDelivered_RuleFalse_NotEligibleDelivered_Preserved()
+    {
+        AuthorizeTenant(TenantId);
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+
+        var rule = EligibilityRule.AllOf(
+            EligibilityRule.ContractActive(),
+            EligibilityRule.NoOverdueInstallment(),
+            EligibilityRule.PaymentTermsEquals(PaymentTerms.FullUpfront),
+            EligibilityRule.DurationMonthsGte(1));
+
+        var (contract, benefit) = await SeedContractAndBenefitAsync(db, rule);
+
+        var first = await mediator.Send(new FreezeBenefitEligibilityCommand(benefit.Id));
+        Assert.True(first.Value.IsEligible);
+
+        // Grant + Deliver.
+        var fresh = await db.ContractBenefits.IgnoreQueryFilters()
+            .FirstAsync(b => b.Id == benefit.Id);
+        fresh.Grant(DateTime.UtcNow, "test-user", TenantId);
+        fresh.Deliver(DateTime.UtcNow, "delivery-user", TenantId);
+        await db.SaveChangesAsync();
+
+        // Suspend the contract so the rule no longer evaluates true.
+        var freshContract = await db.Contracts.IgnoreQueryFilters()
+            .FirstAsync(c => c.Id == contract.Id);
+        freshContract.Suspend();
+        await db.SaveChangesAsync();
+
+        var second = await mediator.Send(new FreezeBenefitEligibilityCommand(benefit.Id));
+        Assert.False(second.Value.IsEligible);
+
+        var post = await db.ContractBenefits.IgnoreQueryFilters().FirstAsync(b => b.Id == benefit.Id);
+        Assert.Equal(BenefitEligibilityStatus.NotEligible, post.EligibilityStatus);
+        Assert.Equal(FulfillmentStatus.Delivered, post.FulfillmentStatus); // preserved
+        Assert.NotNull(post.DeliveredAtUtc);
+        Assert.Equal("delivery-user", post.DeliveredBy);
+    }
+
+    [Fact]
+    public async Task TestF_App14_Freeze_DoesNotMutateFulfillmentFields_OnEligiblePath()
+    {
+        AuthorizeTenant(TenantId);
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+
+        var rule = EligibilityRule.AllOf(
+            EligibilityRule.ContractActive(),
+            EligibilityRule.NoOverdueInstallment(),
+            EligibilityRule.PaymentTermsEquals(PaymentTerms.FullUpfront),
+            EligibilityRule.DurationMonthsGte(1));
+
+        var (contract, benefit) = await SeedContractAndBenefitAsync(db, rule);
+
         var result = await mediator.Send(new FreezeBenefitEligibilityCommand(benefit.Id));
         Assert.True(result.Value.IsEligible);
 
-        // After successful freeze, the only thing that should have changed is EligibilityStatus
-        var postFreeze = await db.ContractBenefits.IgnoreQueryFilters()
-            .FirstAsync(b => b.Id == benefit.Id);
-
-        Assert.Equal(fulfillmentBefore, postFreeze.FulfillmentStatus);
-        Assert.Equal(grantedAtBefore, postFreeze.GrantedAtUtc);
-        Assert.Equal(grantedByBefore, postFreeze.GrantedBy);
+        var post = await db.ContractBenefits.IgnoreQueryFilters().FirstAsync(b => b.Id == benefit.Id);
+        Assert.Equal(FulfillmentStatus.Pending, post.FulfillmentStatus);
+        Assert.Null(post.GrantedAtUtc);
+        Assert.Null(post.GrantedBy);
+        Assert.Null(post.DeliveredAtUtc);
+        Assert.Null(post.DeliveredBy);
     }
 }

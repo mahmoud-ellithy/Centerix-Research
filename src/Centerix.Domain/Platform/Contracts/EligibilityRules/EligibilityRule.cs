@@ -127,19 +127,8 @@ public abstract class EligibilityRule : IEquatable<EligibilityRule>
     /// <inheritdoc />
     public override abstract int GetHashCode();
 
-    // ─── Evaluation surface (Task F) ──────────────────────────────────────────
-
-    /// <summary>
-    /// Evaluates this rule tree against the supplied <see cref="EligibilityContext"/>. Delegates
-    /// to <see cref="EligibilityRuleEvaluator"/> which walks the tree recursively and emits a
-    /// reason code on failure.
-    /// </summary>
-    /// <remarks>
-    /// The evaluator is held as a static singleton to keep this method allocation-free for the
-    /// common case. It is stateless and thread-safe by construction.
-    /// </remarks>
-    /// <param name="context">The immutable fact aggregate.</param>
-    /// <returns><c>true</c> iff the rule passes against the context.</returns>
-    public bool IsEligible(EligibilityContext context)
-            => new EligibilityRuleEvaluator().Evaluate(this, context).IsEligible;
+    // NOTE (Task F correction): there is intentionally NO IsEligible(context) method on the
+    // abstract rule base. Evaluation is performed exclusively through the DI-registered
+    // EligibilityRuleEvaluator singleton. Maintaining a second evaluation path on the base
+    // class would duplicate code and risk divergence between the two paths.
 }

@@ -1,6 +1,6 @@
 namespace Centerix.Application.Common.Interfaces;
 
-using Centerix.Domain.Platform.Billing.Installments;
+using Centerix.Domain.Platform.Contracts.EligibilityRules;
 using Centerix.Domain.Platform.Contracts.Enums;
 using Centerix.Domain.Platform.Promotions.Enums;
 
@@ -18,53 +18,30 @@ using Centerix.Domain.Platform.Promotions.Enums;
 /// but does not belong to the supplied tenant.
 /// </para>
 /// <para>
-/// The interface returns nullable/optional results for the cases where the rule algebra tolerates
-/// absence (e.g. <see cref="GetCurrentPaymentMethodAsync"/> returns <c>null</c> when no completed
-/// payment allocation exists yet). <c>Contract.NotFound</c> is signalled via <c>TenantScopeException</c>
-/// only when the row exists under another tenant; a true miss returns <c>null</c> from the relevant
-/// fact methods because the application command already verified ownership.
+/// The fact queries return immutable aggregates so the rule engine can derive <c>AmountPaid</c>,
+/// <c>PaymentMethod</c>, and <c>CompletedBy</c> from a single, atomic snapshot — avoiding N+1
+/// database queries for composite rules.
 /// </para>
 /// </remarks>
 public interface IOwnerOnlyFactQuery
 {
     /// <summary>
-    /// Returns the contract's current status and payment terms for the supplied tenant, or
+    /// Returns the commercial + lifecycle facts for the supplied tenant/contract pair, or
     /// <c>null</c> when no contract exists with that id under <paramref name="tenantId"/>.
     /// Throws <see cref="TenantScopeException"/> if the contract exists under a different tenant.
     /// </summary>
-    Task<ContractCommercialFacts?> GetContractCommercialFactsAsync(
+    Task<ContractFacts?> GetContractFactsAsync(
         string tenantId,
         Guid contractId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Returns the contract's effective-at instant and contracted amount, or <c>null</c> when no
-    /// contract exists with that id under <paramref name="tenantId"/>. Throws
+    /// Returns the authoritative list of completed-payment facts for the supplied tenant/contract
+    /// pair. Empty when no qualifying payments exist. The list is currency-tagged so the rule
+    /// algebra can reject mismatched currencies without re-querying. Throws
     /// <see cref="TenantScopeException"/> if the contract exists under a different tenant.
     /// </summary>
-    Task<ContractSnapshotFacts?> GetContractSnapshotFactsAsync(
-        string tenantId,
-        Guid contractId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Returns the total amount paid against this contract (sum of completed-payment amounts on
-    /// active allocations scoped to the contract's invoices). Returns <c>0</c> when no completed
-    /// payments exist. Throws <see cref="TenantScopeException"/> if the contract exists under a
-    /// different tenant.
-    /// </summary>
-    Task<decimal> GetAmountPaidAsync(
-        string tenantId,
-        Guid contractId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Returns the canonical (trimmed, upper-invariant) payment method observed on the most recent
-    /// completed payment allocation for this contract, or <c>null</c> when no completed payment
-    /// allocation exists yet. Throws <see cref="TenantScopeException"/> if the contract exists
-    /// under a different tenant.
-    /// </summary>
-    Task<string?> GetCurrentPaymentMethodAsync(
+    Task<IReadOnlyList<CompletedPaymentFact>> GetCompletedPaymentsAsync(
         string tenantId,
         Guid contractId,
         CancellationToken cancellationToken = default);
@@ -80,18 +57,18 @@ public interface IOwnerOnlyFactQuery
         CancellationToken cancellationToken = default);
 }
 
-/// <summary>Commercial header facts required by the rule algebra.</summary>
-public sealed record ContractCommercialFacts(
+/// <summary>
+/// Authoritative commercial + lifecycle facts for a single contract. Returned as one immutable
+/// aggregate so <c>EligibilityContextBuilder</c> needs only one query for the contract header.
+/// </summary>
+public sealed record ContractFacts(
     Guid ContractId,
     ContractStatus Status,
-    PaymentTerms PaymentTerms);
-
-/// <summary>Snapshot facts required by the rule algebra.</summary>
-public sealed record ContractSnapshotFacts(
-    Guid ContractId,
+    PaymentTerms PaymentTerms,
     DateTime EffectiveAtUtc,
+    int DurationMonths,
     decimal ContractedAmount,
-    int DurationMonths);
+    string CurrencyCode);
 
 /// <summary>
 /// Raised when a fact query resolves a row that does not belong to the supplied

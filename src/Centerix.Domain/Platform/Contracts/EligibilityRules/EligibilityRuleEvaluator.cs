@@ -52,7 +52,6 @@ public sealed class EligibilityRuleEvaluator
     private EligibilityRuleEvaluationResult EvaluateAllOf(AllOfRule rule, EligibilityContext context)
     {
         var children = rule.Rules;
-        // The constructor of AllOfRule guarantees a non-empty set, but we defend defensively.
         if (children.Count == 0)
             return EligibilityRuleEvaluationResult.Eligible();
 
@@ -124,14 +123,22 @@ public sealed class EligibilityRuleEvaluator
     private static EligibilityRuleEvaluationResult EvaluatePaymentMethodEquals(
         PaymentMethodEqualsRule rule, EligibilityContext context)
     {
-        // Canonicalise the context's payment method to match how the rule stores its value.
-        var observed = context.PaymentMethod is null
-            ? null
-            : context.PaymentMethod.Trim().ToUpperInvariant();
-
+        // The rule is satisfied if at least one authoritative completed payment carries the
+        // matching method. We do NOT silently pick "the latest payment" — the existence of any
+        // qualifying completion fact suffices. Whitespace + casing follow Task B canonicalisation.
         var expected = rule.PaymentMethod;
+        var anyMatch = false;
+        for (int i = 0; i < context.CompletedPayments.Count; i++)
+        {
+            var observed = context.CompletedPayments[i].MethodCanonical;
+            if (string.Equals(observed, expected, StringComparison.Ordinal))
+            {
+                anyMatch = true;
+                break;
+            }
+        }
 
-        return string.Equals(observed, expected, StringComparison.Ordinal)
+        return anyMatch
             ? EligibilityRuleEvaluationResult.Eligible()
             : EligibilityRuleEvaluationResult.Ineligible(
                 WhyIneligible.PaymentMethodMismatch,
@@ -141,18 +148,44 @@ public sealed class EligibilityRuleEvaluator
     private static EligibilityRuleEvaluationResult EvaluateCompletedByUtc(
         CompletedByUtcRule rule, EligibilityContext context)
     {
-        var deadline = context.CompletedByUtc ?? rule.CompletedBy;
-        return context.UtcNow <= deadline
-            ? EligibilityRuleEvaluationResult.Eligible()
-            : EligibilityRuleEvaluationResult.Ineligible(
-                WhyIneligible.DeadlinePassed,
-                $"CompletedByUtc({deadline:O})");
+        // FIX F1: A deadline is satisfied iff at least one authoritative completion fact has
+        // CompletedAtUtc <= deadline. The deadline passing alone is NOT enough — there must be
+        // a qualifying completed payment. We never fabricate a completion timestamp from the
+        // contract creation date, invoice date, allocation date, current time, or installments.
+        var deadline = rule.CompletedBy;
+        for (int i = 0; i < context.CompletedPayments.Count; i++)
+        {
+            var completedAt = context.CompletedPayments[i].CompletedAtUtc;
+            if (completedAt.Kind != DateTimeKind.Utc)
+            {
+                // Defensive: any non-UTC timestamp is a model bug; treat as never qualifying.
+                continue;
+            }
+            if (completedAt <= deadline)
+                return EligibilityRuleEvaluationResult.Eligible();
+        }
+
+        return EligibilityRuleEvaluationResult.Ineligible(
+            WhyIneligible.DeadlinePassed,
+            $"CompletedByUtc({deadline:O})");
     }
 
     private static EligibilityRuleEvaluationResult EvaluateAmountPaidAtLeast(
         AmountPaidAtLeastRule rule, EligibilityContext context)
     {
-        return context.AmountPaid >= rule.Amount
+        // Currency-consistent sum: only payments whose canonicalised currency matches the
+        // contract's currency contribute. Payments in other currencies MUST NOT silently
+        // contribute — that would corrupt fee/tax thresholds. EGP is not a hardcoded fallback.
+        var contractCurrency = context.ContractCurrencyCode;
+        decimal total = 0m;
+        for (int i = 0; i < context.CompletedPayments.Count; i++)
+        {
+            var fact = context.CompletedPayments[i];
+            if (string.Equals(fact.CurrencyCode, contractCurrency, StringComparison.Ordinal))
+                total += fact.Amount;
+        }
+
+        return total >= rule.Amount
             ? EligibilityRuleEvaluationResult.Eligible()
             : EligibilityRuleEvaluationResult.Ineligible(
                 WhyIneligible.AmountBelowMinimum,
@@ -162,7 +195,14 @@ public sealed class EligibilityRuleEvaluator
     private static EligibilityRuleEvaluationResult EvaluateDaysFromContractStartGte(
         DaysFromContractStartGteRule rule, EligibilityContext context)
     {
-        return context.DaysFromContractStart >= rule.Days
+        // FIX F3: Elapsed is computed as a TimeSpan from the authoritative contract start instant
+        // to UtcNow. We do NOT slice the calendar into .Date boundaries — that approach counts
+        // midnight crossings rather than elapsed duration and silently breaks the 1-hour
+        // 23:00→00:00 boundary test below.
+        var elapsed = context.UtcNow - context.ContractStartUtc;
+        var required = TimeSpan.FromDays(rule.Days);
+
+        return elapsed >= required
             ? EligibilityRuleEvaluationResult.Eligible()
             : EligibilityRuleEvaluationResult.Ineligible(
                 WhyIneligible.DaysFromContractStartNotMet,
@@ -172,6 +212,9 @@ public sealed class EligibilityRuleEvaluator
     private static EligibilityRuleEvaluationResult EvaluateDurationMonthsGte(
         DurationMonthsGteRule rule, EligibilityContext context)
     {
+        // DurationMonthsGte preserves the repository's existing calendar-month semantics. We do
+        // NOT translate "months" into 30 days. The contract's duration is a snapshot value already
+        // validated at contract creation.
         return context.ContractDurationMonths >= rule.Months
             ? EligibilityRuleEvaluationResult.Eligible()
             : EligibilityRuleEvaluationResult.Ineligible(
