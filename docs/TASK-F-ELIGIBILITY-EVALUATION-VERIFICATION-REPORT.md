@@ -97,7 +97,11 @@ This document supersedes the previous `TASK-F-FREEZE-ELIGIBILITY-SERVICE-VERIFIC
 **1604 / 1604 passed**, **0 failed**, **0 skipped** (41 seconds).
 
 ### SQL Server Regression
-**255 passed**, **1 skipped** (pre-existing `Test15_Task1851_MixedLineageProportionalTransferredOrigin`), **0 failed** (11 m 35 s).
+**Current full regression (post-Task-F correction, post-Task-E correction):**
+1910 total / **1909 passed** / **0 failed** / 1 skipped / duration ≈ 12 m 30 s / exit code 0
+
+The same single pre-existing skip is preserved (`Test15_Task1851_MixedLineageProportionalTransferredOrigin`).
+Task F contributed **87 / 87** passing tests (51 domain + 12 application + 24 SQL Server).
 
 ---
 
@@ -138,10 +142,15 @@ No migrations added. `PendingModelChangesWarning` is not suppressed — no longe
 ## 7. Git
 
 ```
-HEAD: 4b38591df1319622cadde71f0890d937f21597f4
-Commit message: fix(billing): correct eligibility evaluation semantics
+HEAD: 21da5ff (current) — Task E: physical gift fulfillment correction
+Prior Task F commit: 4b38591df1319622cadde71f0890d937f21597f4
+  — fix(billing): correct eligibility evaluation semantics
+Prior Task F docs commit: f3614e4
+  — docs: update Task F verification report with actual test counts
 Working tree: clean
 ```
+
+Task F is closed at `4b38591` (correction commit) and `f3614e4` (verification report with actual test counts). Subsequent commits (`808aa90`, `20cbde9`, `21da5ff`) are Task D / Task E fixes and do not modify Task F code or test surface.
 
 ---
 
