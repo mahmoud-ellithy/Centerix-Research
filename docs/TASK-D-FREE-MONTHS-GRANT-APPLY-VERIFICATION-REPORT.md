@@ -1,8 +1,9 @@
 # TASK D — Free Months Benefit: Grant & Apply
 ## Verification Report
 
-> **Current final HEAD**: `246832964e37b60e08a85e90fe8b05a4a3c7bf9a`
-> **Previous base commit**: `78e38e23bf8518800cfd44ac6d053ee9d68a8f42`
+> **Current final HEAD**: `d8dd131e6b3c1741416d45bf71732e252594aa84` — `test(infrastructure): stabilize sql server integration regression`
+> **Implementation correction SHA (historical)**: `3bf610f33dcea0ef286033be48465baee8a6c576` — `fix(billing): enforce active subscription for free months`
+> **Original implementation SHA (historical)**: `78e38e23bf8518800cfd44ac6d053ee9d68a8f42` — `feat(billing): grant and apply free months benefit`
 
 ---
 
@@ -150,22 +151,27 @@ Skipped: 0
 
 ### Full Solution Regression
 
+**FULL SOLUTION REGRESSION — current final, post-infrastructure-fix result**
+
 Command: `dotnet test Centerix.slnx --no-build --verbosity normal`
 
 | Result | Count |
 |--------|-------|
 | Total | 1779 |
-| Passed | 1619 |
-| Failed | 159 |
+| Passed | 1778 |
+| Failed | **0** |
 | Skipped | 1 |
-| Duration | 00:05:39.61 |
-| Exit code | 1 |
-
-**All 159 failures are pre-existing `*SqlServerTests` infrastructure tests** (Phase5, Phase8, Phase9, Phase10, Phase11, Phase12, Phase13, Task18, Task201, Task21, TaskB_2, TaskC) that fail due to transient Local SQL Server deadlocks under full-suite concurrency. Zero Task D tests fail.
-
-Proof of pre-existence: the base commit `78e38e2` (before the Task D correction) produces **1775 total, 1616 passed, 158 failed, 1 skipped** — the same 158 `*SqlServerTests` classes failing with identical deadlock errors. The +4 total / +3 passed / +1 failed delta is the Task D test additions plus transient variance in the same pre-existing SQL infrastructure tests.
+| Duration | 11.9043 Minutes |
+| Exit code | **0** |
 
 Docker/Testcontainers: Not used for this phase.
+
+> **Historical pre-infrastructure-fix result (no longer the current state).**
+> Before the SQL Server test-infrastructure fix at `d8dd131`, the same command produced
+> `1779 total / 1619 passed / 159 failed / 1 skipped / exit code 1`. All 159 failures were
+> caused by the test fake-tenant infrastructure (see §15.5 below), NOT by Task D production
+> behavior. Zero Task D tests failed in that run either; every Task D test (35/35) has
+> been green throughout.
 
 ---
 
@@ -191,14 +197,78 @@ Migration `AddAppliedFreeMonthsBenefitIds` (applied at `20260930131536`) creates
 
 ---
 
+## 9.5 SQL Regression Infrastructure Fix (Historical Context)
+
+The original `1619 passed / 159 failed` line-item above is **historical** and is no longer
+the current state. The 159 failures were caused by the SQL Server **test-infrastructure
+fake tenant** (`TaskCFakeCurrentTenant` in `tests/Centerix.SecurityTests/SqlServerIntegrationFactory.cs`),
+not by any Task D production code.
+
+### Root cause (historical)
+
+`TaskCFakeCurrentTenant` did not expose the production-shaped `_authorizedTenantId` /
+`_isAuthorized` instance fields that the existing reflection-based SQL integration test
+helpers expected. Twenty-four `*SqlServerTests` classes configure the tenant via:
+
+```csharp
+type.GetField("_authorizedTenantId", BindingFlags.NonPublic | BindingFlags.Instance)!
+    .SetValue(currentTenant, tenantId);
+type.GetField("_isAuthorized", BindingFlags.NonPublic | BindingFlags.Instance)!
+    .SetValue(currentTenant, true);
+```
+
+`GetField(...)` returned `null` on the fake's runtime type and `.SetValue(null, …)` threw
+`NullReferenceException` at every call. **All 159 failures traced to that single NRE**.
+
+### After fixing the NRE — 9 remaining (related second issue)
+
+Once the instance fields were added, 9 HTTP-driven tests (`SqlServerInvitationFlowTests`
++ `Phase5TeachersConcurrencySqlServerTests.SalaryPayment_ConcurrentMarkPaid_…`) began
+failing with HTTP 403. The fake did not read the Finbuckle-resolved tenant from the
+HTTP `tenant` request header — `TenantGuardMiddleware` therefore queried
+`TenantMemberships` filtered on the AsyncLocal/default tenant and found no match.
+
+### Fix commit
+
+`d8dd131e6b3c1741416d45bf71732e252594aa84` — `test(infrastructure): stabilize sql server integration regression`
+
+Two precise edits, both inside `SqlServerIntegrationFactory.cs`, no test code touched:
+
+1. Added `_authorizedTenantId` / `_isAuthorized` instance fields to the fake; routed
+   `TenantId` / `ResolvedTenantId` / `IsAuthorized` / `IsResolved` / `IsActive` /
+   `ValidUpTo` through them, falling back to AsyncLocal then default.
+2. Wired `IMultiTenantContextAccessor<CenterixTenantInfo>` into the fake after host
+   construction so HTTP-driven tests see the same resolved tenant production
+   `CurrentTenant` does.
+
+### Post-fix regression result
+
+```
+Total:     1779
+Passed:    1778
+Failed:    0
+Skipped:   1
+Exit code: 0
+Duration:  11.9043 Minutes
+```
+
+Zero tests disabled, zero assertions weakened, zero new skips, zero SQL tests converted
+to InMemory / SQLite. Production business behavior was not modified. Full evidence:
+`docs/TASK-D-SQL-REGRESSION-INFRASTRUCTURE-VERIFICATION-REPORT.md`.
+
+---
+
 ## 10. Git Verification
 
-- **Current final HEAD**: `246832964e37b60e08a85e90fe8b05a4a3c7bf9a`
-- **Previous base commit**: `78e38e23bf8518800cfd44ac6d053ee9d68a8f42`
-- **Implementation correction SHA**: `3bf610f33dcea0ef286033be48465baee8a6c576`
-- **Working tree**: Clean after documentation correction commit
-- **Correction commit**: `fix(billing): enforce active subscription for free months`
-- **Documentation commit**: `docs(billing): finalize Task D verification evidence`
+- **Current final HEAD**: `d8dd131e6b3c1741416d45bf71732e252594aa84`
+- **Previous base commit (historical)**: `78e38e23bf8518800cfd44ac6d053ee9d68a8f42`
+- **Implementation correction SHA (historical)**: `3bf610f33dcea0ef286033be48465baee8a6c576`
+- **Working tree**: Clean after infrastructure-fix commit
+- **Implementation commit (historical)**: `feat(billing): grant and apply free months benefit` (`78e38e2`)
+- **Correction commit (historical)**: `fix(billing): enforce active subscription for free months` (`3bf610f`)
+- **Documentation commit (historical)**: `docs(billing): finalize Task D verification evidence` (`ffcf023`)
+- **Report update commit (historical)**: `docs(billing): update Task D verification report with current session evidence` (`b76d8ad`)
+- **Infrastructure-fix commit (current HEAD)**: `test(infrastructure): stabilize sql server integration regression` (`d8dd131`)
 - **Changed files** (6 files, +320 −11):
   - `src/Centerix.Application/Common/Interfaces/IAppDbContext.cs` — removed unnecessary `DbSet<OfferFreeMonthsBenefit>` (was added in original Task D but never used in application code)
   - `src/Centerix.Application/Platform/Contracts/Commands/ApplyFreeMonthsBenefitToSubscriptionHandler.cs` — added `Status == Active && EffectiveEndsAtUtc > DateTime.UtcNow` guard; updated idempotency path to also check Active+unexpired; added `ActiveSubscriptionNotFound` error
@@ -247,7 +317,7 @@ Only `TenantPlan.EffectiveEndsAtUtc` and `TenantPlan.AppliedFreeMonthsBenefitIds
 | Local SQL Server integration tests pass | ✅ 7/7 |
 | Full solution regression actually executed | ✅ 1779 total |
 | Task D tests in full regression | ✅ 0 failures (all 35 pass) |
-| Pre-existing SQL infrastructure failures | ⚠️ 159 failures — all `*SqlServerTests` classes, identical to base commit `78e38e2` (158 failures), transient deadlocks under concurrency |
+| Pre-existing SQL infrastructure failures | ✅ **Resolved** by commit `d8dd131` — see §9.5; current regression has 0 failures |
 | No unexplained skips | ✅ 1 skip (pre-existing, see below) |
 | EF AppDbContext has no pending model changes | ✅ |
 | EF TenantDbContext has no pending model changes | ✅ |
@@ -260,9 +330,10 @@ Only `TenantPlan.EffectiveEndsAtUtc` and `TenantPlan.AppliedFreeMonthsBenefitIds
 ## 13. Build
 
 ```
-Errors: 0
-Warnings: 12476 (all pre-existing SA StyleCop warnings)
-Exit code: 0
+Command:    dotnet build Centerix.slnx --no-restore
+Errors:     0
+Warnings:   6112 (all pre-existing SA StyleCop warnings; non-blocking)
+Exit code:  0
 ```
 
 ---
@@ -299,11 +370,11 @@ Docker/Testcontainers: Not used for this phase.
 
 ---
 
-## 16. Final Verification Evidence (Current Session — 2026-09-30)
+## 16. Final Verification Evidence (Current Session — post `d8dd131`)
 
 ### Build
 - **Command**: `dotnet build Centerix.slnx --no-restore`
-- **Result**: ✅ Exit code 0, 0 errors, StyleCop warnings only
+- **Result**: ✅ Exit code 0, 0 errors, 6112 pre-existing StyleCop warnings
 
 ### Task D Domain Tests
 - **Command**: `dotnet test Centerix.slnx --no-build --filter "FullyQualifiedName~TaskD_FreeMonthsBenefitGrantApplyTests"`
@@ -317,22 +388,68 @@ Docker/Testcontainers: Not used for this phase.
 - **Command**: `dotnet test Centerix.slnx --no-build --filter "FullyQualifiedName~TaskD_FreeMonthsBenefitSqlServerTests"` (Local SQL Server: `Server=.`)
 - **Result**: 7 passed, 0 failed, 0 skipped (SQL-D01 through SQL-D07)
 
-### Full Solution Regression
+### FULL SOLUTION REGRESSION
 - **Command**: `dotnet test Centerix.slnx --no-build --verbosity normal`
-- **Result**: Exit code 1 (159 pre-existing infrastructure failures in unrelated `*SqlServerTests` classes due to `AuthorizeTenant` NullReferenceException; 0 failures in any Task D test)
-- **Task D contribution**: All 35 Task D tests passed (17 domain + 11 InMemory + 7 SQL Server)
-- **Pre-existing failures**: All failures are in pre-existing unrelated test classes (Task18_4_2FinancialPolicy, Task18_5CreditEconomicOrigin, Task18_4_1_CreditHold, TaskB_2, TaskC, etc.) — same pattern as prior regression runs
+- **Total**: 1779
+- **Passed**: 1778
+- **Failed**: **0**
+- **Skipped**: 1 (pre-existing, see §14)
+- **Duration**: 11.9043 Minutes
+- **Exit code**: **0** (Test Run Successful, Build succeeded)
 
 ### EF Migrations
-- `dotnet ef migrations has-pending-model-changes --context AppDbContext`: No changes
-- `dotnet ef migrations has-pending-model-changes --context TenantDbContext`: No changes
+- `dotnet ef migrations has-pending-model-changes --context AppDbContext`: `No changes have been made to the model since the last migration.`
+- `dotnet ef migrations has-pending-model-changes --context TenantDbContext`: `No changes have been made to the model since the last migration.`
 
 ### Git
-- **HEAD**: `246832964e37b60e08a85e90fe8b05a4a3c7bf9a` (docs commit: "finalize Task D verification evidence")
+- **Current HEAD**: `d8dd131e6b3c1741416d45bf71732e252594aa84` — `test(infrastructure): stabilize sql server integration regression`
 - **Working tree**: Clean
 
 ### SQL Server
 - Local SQL Server (`Server=.`) — no Docker / Testcontainers
+
+### Task D Functional Verification (Re-confirmed at `d8dd131`)
+
+#### Grant
+
+`Pending + Eligible → Granted`
+
+Grant does NOT modify:
+- `EligibilityStatus`
+- `EntitlementMonths`
+- `EligibilityRule`
+- `Contract.BonusMonths`
+
+#### Apply
+
+`Granted → AppliedToSubscription`
+
+Target subscription must satisfy ALL:
+- `TenantId` == authorized tenant
+- `ContractId` == benefit.ContractId
+- `Status == Active`
+- `EffectiveEndsAtUtc > DateTime.UtcNow`
+
+The handler rejects (with `FreeMonthsBenefitErrors.ActiveSubscriptionNotFound`):
+- Pending
+- Expired
+- Cancelled
+- Suspended
+- PastDue
+- Active-but-`EffectiveEndsAtUtc` already expired
+
+Application behavior:
+- Extends `EffectiveEndsAtUtc` by `entitlementMonths` calendar months
+- Does NOT modify `BaseEndsAtUtc`
+- Does NOT modify `ContractualMonthlyValue`
+- Does NOT modify `Contract.BonusMonths`
+- Records benefit ID exactly once in `AppliedFreeMonthsBenefitIds`
+- Duplicate Apply is a no-op (idempotent)
+- Concurrent Apply produces exactly one effective application
+- Tenant isolation enforced (`IgnoreQueryFilters` + explicit check)
+- Authorization enforced (`Permissions.Benefits.Manage`)
+
+No refund behavior, evaluator redesign, PaymentObligation, PhysicalGift behavior, or Referral behavior was introduced.
 
 ---
 
@@ -340,15 +457,36 @@ Docker/Testcontainers: Not used for this phase.
 
 **TASK D — VERIFIED AND CLOSED**
 
-All acceptance criteria met:
-- ✅ Build passes (0 errors)
-- ✅ 17/17 domain tests pass
-- ✅ 11/11 InMemory tests pass
-- ✅ 7/7 SQL Server tests pass (real Local SQL Server, no Docker)
-- ✅ Full `dotnet test Centerix.slnx --no-build --verbosity normal` executed
-- ✅ 0 Task D failures in full regression
-- ⚠️ 159 pre-existing infrastructure failures in unrelated test classes (AuthorizeTenant NRE, pre-existing, not caused by Task D)
-- ✅ EF no pending model changes
-- ✅ Local SQL Server used (no Docker/Testcontainers)
-- ✅ Working tree clean
-- ✅ Report accurately reflects actual HEAD and executed results
+Acceptance checklist:
+
+- [x] Grant lifecycle verified
+- [x] Apply lifecycle verified
+- [x] Active + unexpired subscription guard verified
+- [x] Idempotency verified
+- [x] Concurrency verified
+- [x] Tenant isolation verified
+- [x] Local SQL Server verification passed
+- [x] Full solution regression passed (1778 / 0 / 1)
+- [x] Failed = 0
+- [x] Existing single skip explicitly documented
+- [x] EF AppDbContext clean
+- [x] EF TenantDbContext clean
+- [x] No production behavior changed by regression fix
+- [x] Working tree clean after commit
+
+Task D feature verification:
+- 17 domain tests passed
+- 11 InMemory tests passed
+- 7 SQL Server tests passed (Local SQL Server, no Docker / Testcontainers)
+- **35 / 35 Task D tests green**
+
+Full solution regression (post-infrastructure-fix `d8dd131`):
+- Total: 1779
+- Passed: 1778
+- Failed: 0
+- Skipped: 1 (pre-existing `Test15_Task1851_MixedLineageProportionalTransferredOrigin`)
+- Exit code: 0
+- Duration: 11.9043 Minutes
+
+Current HEAD: `d8dd131e6b3c1741416d45bf71732e252594aa84`
+Working tree: clean
