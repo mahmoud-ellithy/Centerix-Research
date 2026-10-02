@@ -26,9 +26,9 @@ Both branches leave `FulfillmentStatus`, `GrantedAtUtc`, `GrantedBy`, `Delivered
 **Fix:** `EligibilityContext` now carries the authoritative `ContractStartUtc` (DateTime, UTC). The evaluator computes `elapsed = UtcNow - ContractStartUtc` and checks `elapsed >= TimeSpan.FromDays(days)`. The 23:00 → 00:00 → 23:00 boundary test passes (TestF64 / TestF65), proving `.Date` slicing is no longer used.
 
 ### Test Coverage
-- Domain tests now cover **30 cases**: invariant guards (F01-F06), every primitive pass/fail boundary, the canonical 23:00 → 24h elapsed window, currency mismatch in `AmountPaidAtLeast`, payment-method "any match among multiple" (not just the latest), and the 5 reversibility states.
-- Application tests cover 12 cases: idempotency, reversibility, cross-tenant guard, missing benefit, missing payment, no-rule snapshot.
-- SQL Server tests cover 24 cases (F01-F15): every primitive on real SQL Server, currency isolation, cross-tenant payment isolation, cross-tenant installment isolation, completed-payment boundary equality, multiple-payment "any qualifying" semantics.
+- Domain tests now cover **51 cases**: invariant guards (F01-F06), every primitive pass/fail boundary, the canonical 23:00 → 24h elapsed window, currency mismatch in `AmountPaidAtLeast`, payment-method "any match among multiple" (not just the latest), and the 5 reversibility states. Tests span `TestF01` through `TestF90` (see `TaskF_FreezeEligibilityServiceDomainTests.cs`).
+- Application tests cover **12 cases**: idempotency, reversibility, cross-tenant guard, missing benefit, missing payment, no-rule snapshot. Tests span `TestF_App01` through `TestF_App14` (see `TaskF_FreezeEligibilityServiceApplicationTests.cs`).
+- SQL Server tests cover **24 cases** (SQL-F01 through SQL-F15 + boundary variants): every primitive on real SQL Server, currency isolation, cross-tenant payment isolation, cross-tenant installment isolation, completed-payment boundary equality, multiple-payment "any qualifying" semantics (see `TaskF_FreezeEligibilityServiceSqlServerTests.cs`).
 
 ### Verification Report
 This document supersedes the previous `TASK-F-FREEZE-ELIGIBILITY-SERVICE-VERIFICATION-REPORT.md`. The previous report's regression numbers were outdated and contradicted by the test counts; all numbers in the current report are the **actual executed counts**.
@@ -47,7 +47,7 @@ This document supersedes the previous `TASK-F-FREEZE-ELIGIBILITY-SERVICE-VERIFIC
 | `src/Centerix.Application/Platform/Contracts/Services/EligibilityContextBuilder.cs` | Uses new fact-query shape; one batch of fact queries per freeze. |
 | `src/Centerix.Infrastructure/Platform/Services/OwnerOnlyFactQueryEfAdapter.cs` | Implements the new fact-query shape. Coerces SQL `datetime2` values to `DateTimeKind.Utc`. |
 | `src/Centerix.Infrastructure/Platform/Services/FreezeEligibilityService.cs` | Reversibility — calls `MarkEligible` OR `MarkNotEligible` based on the evaluation outcome; never mutates fulfillment fields. |
-| `tests/Centerix.SecurityTests/TaskF_FreezeEligibilityServiceDomainTests.cs` | 30 domain tests covering invariant guards, primitive boundaries, and elapsed-time semantics. |
+| `tests/Centerix.SecurityTests/TaskF_FreezeEligibilityServiceDomainTests.cs` | 51 domain tests covering invariant guards, primitive boundaries, and elapsed-time semantics. |
 | `tests/Centerix.SecurityTests/TaskF_FreezeEligibilityServiceApplicationTests.cs` | 12 application tests covering eligibility reversibility (4 cases), idempotency, cross-tenant, and fulfillment-preservation guarantees. |
 | `tests/Centerix.SecurityTests/TaskF_FreezeEligibilityServiceSqlServerTests.cs` | 24 SQL Server integration tests (SQL-F01 through SQL-F15 + boundary variants). |
 
@@ -60,15 +60,15 @@ This document supersedes the previous `TASK-F-FREEZE-ELIGIBILITY-SERVICE-VERIFIC
 6. `NoOverdueInstallment` — uses the existing `Installment` lifecycle. Cross-tenant isolation enforced.
 
 ### No Schema Changes
-- No new migrations.
-- AppDbContext and TenantDbContext remain clean (`has-pending-model-changes` returns "No changes").
+- No new migrations added by this correction.
+- AppDbContext and TenantDbContext models match their snapshots — `migrations list` shows all migrations in the snapshot, no pending model changes. `PendingModelChangesWarning` was never suppressed and is not needed.
 
 ---
 
 ## 3. Tests
 
 ### Domain Tests
-**30 / 30 passed** — see `TaskF_FreezeEligibilityServiceDomainTests` (TestF01 through TestF90).
+**51 / 51 passed** — see `TaskF_FreezeEligibilityServiceDomainTests` (TestF01 through TestF90).
 
 ### Application Tests (InMemory)
 **12 / 12 passed** — see `TaskF_FreezeEligibilityServiceApplicationTests` (TestF_App01 through TestF_App14).
@@ -138,9 +138,9 @@ No migrations added. `PendingModelChangesWarning` is not suppressed — no longe
 ## 7. Git
 
 ```
-HEAD: see `git log -1`
-Commit: one focused commit (fix(billing): correct eligibility evaluation semantics)
-Working tree: clean after commit
+HEAD: 4b38591df1319622cadde71f0890d937f21597f4
+Commit message: fix(billing): correct eligibility evaluation semantics
+Working tree: clean
 ```
 
 ---
