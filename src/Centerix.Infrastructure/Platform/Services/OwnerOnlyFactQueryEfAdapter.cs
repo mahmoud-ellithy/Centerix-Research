@@ -87,34 +87,56 @@ public sealed class OwnerOnlyFactQueryEfAdapter : IOwnerOnlyFactQuery
 
         EnsureOwner(contractRow.TenantId!, tenantId, nameof(GetCompletedPaymentsAsync), contractId);
 
-        // Completed payments whose allocation chain links back to this contract.
-        var rows = await _db.Payments
+        // Per-Payment allocation slice for THIS contract.
+        // We project allocation + payment in two stages: first fetch (PaymentId, sum) pairs,
+        // then join back to Payment to fetch the immutable payment attributes. This avoids
+        // GroupBy over a navigation property which is brittle across EF versions.
+        var perPaymentSlice = await _db.PaymentAllocations
+            .Where(a => a.Status == PaymentAllocationStatus.Active
+                && a.Payment != null
+                && a.Invoice != null
+                && a.Invoice.ContractId == contractId
+                && a.Payment.Status == PaymentStatus.Completed
+                && a.Payment.CompletedAtUtc != null
+                && a.Payment.TenantId == tenantId)
+            .GroupBy(a => a.PaymentId)
+            .Select(g => new
+            {
+                PaymentId = g.Key,
+                AllocatedAmountForThisContract = g.Sum(x => x.AllocatedAmount)
+            })
+            .ToListAsync(cancellationToken);
+
+        if (perPaymentSlice.Count == 0)
+            return Array.Empty<CompletedPaymentFact>();
+
+        var paymentIds = perPaymentSlice.Select(x => x.PaymentId).ToHashSet();
+
+        var paymentRows = await _db.Payments
             .Where(p => p.TenantId == tenantId
+                && paymentIds.Contains(p.Id)
                 && p.Status == PaymentStatus.Completed
-                && p.CompletedAtUtc != null
-                && p.Allocations.Any(a =>
-                    a.Status == PaymentAllocationStatus.Active
-                    && a.Invoice != null
-                    && a.Invoice.ContractId == contractId))
+                && p.CompletedAtUtc != null)
             .Select(p => new
             {
                 p.Id,
                 CompletedAt = p.CompletedAtUtc!.Value,
                 p.CurrencyCode,
-                p.Amount,
                 Method = p.Method
             })
             .ToListAsync(cancellationToken);
 
-        var facts = new List<CompletedPaymentFact>(rows.Count);
-        foreach (var r in rows)
+        var facts = new List<CompletedPaymentFact>(perPaymentSlice.Count);
+        var byPayment = perPaymentSlice.ToDictionary(x => x.PaymentId);
+        foreach (var p in paymentRows)
         {
+            if (!byPayment.TryGetValue(p.Id, out var slice)) continue;
             facts.Add(new CompletedPaymentFact(
-                PaymentId: r.Id,
-                CompletedAtUtc: DateTime.SpecifyKind(r.CompletedAt, DateTimeKind.Utc),
-                Amount: r.Amount,
-                CurrencyCode: r.CurrencyCode.Trim().ToUpperInvariant(),
-                MethodCanonical: r.Method.ToString().Trim().ToUpperInvariant()));
+                PaymentId: p.Id,
+                CompletedAtUtc: DateTime.SpecifyKind(p.CompletedAt, DateTimeKind.Utc),
+                AllocatedAmountForThisContract: slice.AllocatedAmountForThisContract,
+                CurrencyCode: p.CurrencyCode.Trim().ToUpperInvariant(),
+                MethodCanonical: p.Method.ToString().Trim().ToUpperInvariant()));
         }
 
         return facts;

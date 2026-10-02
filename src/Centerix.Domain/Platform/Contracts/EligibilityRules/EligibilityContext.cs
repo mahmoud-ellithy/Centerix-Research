@@ -189,16 +189,21 @@ public sealed class EligibilityContext
 }
 
 /// <summary>
-/// Authoritative fact describing a single completed payment row that counts toward settlement.
-/// One fact per <c>Payment</c> row with <c>PaymentStatus.Completed</c> whose allocation chain
-/// links back to a contract invoice.
+/// Authoritative fact describing a single completed payment's contribution to the evaluated
+/// Contract. One fact per <c>Payment</c> row with <c>PaymentStatus.Completed</c> whose
+/// allocation chain links back to an invoice belonging to the evaluated Contract.
 /// </summary>
 /// <param name="PaymentId">The payment row id (audit / debugging).</param>
 /// <param name="CompletedAtUtc">
 /// The authoritative <c>Payment.CompletedAtUtc</c>. NEVER derived from contract creation,
 /// invoice, or current time — see the "important" clause of the correction spec.
 /// </param>
-/// <param name="Amount">The payment amount.</param>
+/// <param name="AllocatedAmountForThisContract">
+/// <c>SUM(PaymentAllocation.AllocatedAmount)</c> over the active allocations of this Payment
+/// that belong to invoices of the evaluated Contract. NEVER <c>Payment.Amount</c> — a Payment
+/// may be allocated across multiple contracts/invoices and only the slice attributable to the
+/// current Contract must contribute to its eligibility sum.
+/// </param>
 /// <param name="CurrencyCode">
 /// The payment's ISO currency code, canonicalised to <c>Trim().ToUpperInvariant()</c>.
 /// </param>
@@ -209,7 +214,7 @@ public sealed class EligibilityContext
 public sealed record CompletedPaymentFact(
     Guid PaymentId,
     DateTime CompletedAtUtc,
-    decimal Amount,
+    decimal AllocatedAmountForThisContract,
     string CurrencyCode,
     string? MethodCanonical);
 

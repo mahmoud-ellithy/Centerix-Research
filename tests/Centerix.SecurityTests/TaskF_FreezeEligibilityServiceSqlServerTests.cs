@@ -149,7 +149,7 @@ public class TaskF_FreezeEligibilityServiceSqlServerTests
             "Barcode Printer",
             null,
             1500m,
-            "EGP",
+            contractCurrencyCode,
             rule).Value;
         contract.AddBenefit(benefit);
 
@@ -847,5 +847,405 @@ public class TaskF_FreezeEligibilityServiceSqlServerTests
 
         var response = await FreezeAsync(tenantId, seeded.BenefitId);
         Assert.True(response.IsEligible);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // SQL-FINAL-01..10: Allocation-based payment amount calculation
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Seeds a Completed payment whose allocation amount is explicitly attributable to the
+    /// supplied invoice/contract. Allows the caller to specify a payment.Amount that differs
+    /// from the allocation amount — to model a multi-contract payment that is split across
+    /// invoices.
+    /// </summary>
+    private async Task SeedCompletedPaymentWithAllocationsAsync(
+        string tenantId,
+        Guid contractId,
+        Guid invoiceId,
+        decimal paymentAmount,
+        decimal allocatedAmount,
+        string currencyCode,
+        DateTime completedAtUtc,
+        PaymentMethod method)
+    {
+        using var scope = _env.Factory.Services.CreateScope();
+        AuthorizeTenant(scope.ServiceProvider, tenantId);
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var payment = Payment.Create(
+            id: Guid.NewGuid(),
+            paymentNumber: $"PAY-{Guid.NewGuid():N}"[..16],
+            amount: paymentAmount,
+            currencyCode: currencyCode,
+            method: method).Value;
+        payment.Complete(completedAtUtc);
+        db.Payments.Add(payment);
+
+        db.PaymentAllocations.Add(PaymentAllocation.Create(
+            id: Guid.NewGuid(),
+            paymentId: payment.Id,
+            invoiceId: invoiceId,
+            allocatedAmount: allocatedAmount,
+            allocatedAtUtc: DateTime.UtcNow).Value);
+
+        db.StampAddedTenantIds(tenantId);
+        await db.SaveChangesAsync();
+    }
+
+    private async Task<Guid> SeedInvoiceAsync(string tenantId, Guid contractId, decimal total = 12000m)
+    {
+        using var scope = _env.Factory.Services.CreateScope();
+        AuthorizeTenant(scope.ServiceProvider, tenantId);
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var invoice = Invoice.Create(
+            id: Guid.NewGuid(),
+            invoiceNumber: $"INV-{Guid.NewGuid():N}"[..16],
+            periodStart: DateOnly.FromDateTime(DateTime.UtcNow.AddMonths(-1)),
+            periodEnd: DateOnly.FromDateTime(DateTime.UtcNow),
+            subtotal: total,
+            discountAmount: 0m,
+            taxAmount: 0m,
+            totalAmount: total,
+            contractId: contractId).Value;
+        invoice.Issue(DateTime.UtcNow);
+        db.Invoices.Add(invoice);
+        db.StampAddedTenantIds(tenantId);
+        await db.SaveChangesAsync();
+        return invoice.Id;
+    }
+
+    [Fact]
+    public async Task SqlFINAL01_OnePayment_AllocatedToOneContract_UsesAllocationAmount()
+    {
+        var tenantId = $"FCT01-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantId);
+        var planId = await EnsurePlanAsync(tenantId);
+
+        var rule = EligibilityRule.AmountPaidAtLeast(1000m);
+        var seeded = await SeedAsync(tenantId, planId, rule);
+
+        var invoiceId = await SeedInvoiceAsync(tenantId, seeded.ContractId);
+        await SeedCompletedPaymentWithAllocationsAsync(
+            tenantId, seeded.ContractId, invoiceId,
+            paymentAmount: 1000m, allocatedAmount: 1000m,
+            currencyCode: "EGP",
+            completedAtUtc: DateTime.UtcNow.AddHours(-2),
+            method: PaymentMethod.Cash);
+
+        var response = await FreezeAsync(tenantId, seeded.BenefitId);
+        Assert.True(response.IsEligible);
+    }
+
+    [Fact]
+    public async Task SqlFINAL02_OnePayment_AllocatedAcross_TwoContracts_SumPerContract()
+    {
+        var tenantId = $"FCT02-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantId);
+        var planId = await EnsurePlanAsync(tenantId);
+
+        var seededA = await SeedAsync(tenantId, planId,
+            EligibilityRule.AmountPaidAtLeast(7000m), contractedAmount: 4000m);
+        var seededB = await SeedAsync(tenantId, planId,
+            EligibilityRule.AmountPaidAtLeast(7000m), contractedAmount: 6000m);
+
+        var invoiceA = await SeedInvoiceAsync(tenantId, seededA.ContractId, total: 4000m);
+        var invoiceB = await SeedInvoiceAsync(tenantId, seededB.ContractId, total: 6000m);
+
+        // Payment.Amount = 10000 split across two contracts: 4000 + 6000.
+        await SeedCompletedPaymentWithAllocationsAsync(
+            tenantId, seededA.ContractId, invoiceA,
+            paymentAmount: 10000m, allocatedAmount: 4000m,
+            currencyCode: "EGP",
+            completedAtUtc: DateTime.UtcNow.AddHours(-2),
+            method: PaymentMethod.Cash);
+        await SeedCompletedPaymentWithAllocationsAsync(
+            tenantId, seededB.ContractId, invoiceB,
+            paymentAmount: 10000m, allocatedAmount: 6000m,
+            currencyCode: "EGP",
+            completedAtUtc: DateTime.UtcNow.AddHours(-2),
+            method: PaymentMethod.Cash);
+
+        // Both contracts ask for AmountPaidAtLeast(7000).
+        // Contract A: 4000 < 7000 => false
+        // Contract B: 6000 < 7000 => false
+        var aResponse = await FreezeAsync(tenantId, seededA.BenefitId);
+        Assert.False(aResponse.IsEligible);
+
+        var bResponse = await FreezeAsync(tenantId, seededB.BenefitId);
+        Assert.False(bResponse.IsEligible);
+    }
+
+    [Fact]
+    public async Task SqlFINAL03_PaymentAmount_GreaterThan_Allocation_OnlyAllocationCounts()
+    {
+        var tenantId = $"FCT03-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantId);
+        var planId = await EnsurePlanAsync(tenantId);
+
+        var rule = EligibilityRule.AmountPaidAtLeast(5000m);
+        var seeded = await SeedAsync(tenantId, planId, rule);
+
+        var invoiceId = await SeedInvoiceAsync(tenantId, seeded.ContractId);
+        // Payment.Amount = 100000, but only 5000 is allocated to this contract.
+        await SeedCompletedPaymentWithAllocationsAsync(
+            tenantId, seeded.ContractId, invoiceId,
+            paymentAmount: 100000m, allocatedAmount: 5000m,
+            currencyCode: "EGP",
+            completedAtUtc: DateTime.UtcNow.AddHours(-2),
+            method: PaymentMethod.Cash);
+
+        var response = await FreezeAsync(tenantId, seeded.BenefitId);
+        // 5000 == 5000 => true (exact boundary). Only the allocation counts; Payment.Amount=100000
+        // does NOT inflate the eligible amount.
+        Assert.True(response.IsEligible);
+    }
+
+    [Fact]
+    public async Task SqlFINAL04_MultiplePayments_SummedAllocationsForOneContract()
+    {
+        var tenantId = $"FCT04-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantId);
+        var planId = await EnsurePlanAsync(tenantId);
+
+        var rule = EligibilityRule.AmountPaidAtLeast(5000m);
+        var seeded = await SeedAsync(tenantId, planId, rule);
+
+        var inv1 = await SeedInvoiceAsync(tenantId, seeded.ContractId, total: 3000m);
+        var inv2 = await SeedInvoiceAsync(tenantId, seeded.ContractId, total: 2500m);
+
+        // Two separate Payments, each with its own allocation.
+        await SeedCompletedPaymentWithAllocationsAsync(
+            tenantId, seeded.ContractId, inv1,
+            paymentAmount: 3000m, allocatedAmount: 3000m,
+            currencyCode: "EGP",
+            completedAtUtc: DateTime.UtcNow.AddHours(-2),
+            method: PaymentMethod.Cash);
+        await SeedCompletedPaymentWithAllocationsAsync(
+            tenantId, seeded.ContractId, inv2,
+            paymentAmount: 2500m, allocatedAmount: 2500m,
+            currencyCode: "EGP",
+            completedAtUtc: DateTime.UtcNow.AddHours(-1),
+            method: PaymentMethod.Card);
+
+        var response = await FreezeAsync(tenantId, seeded.BenefitId);
+        Assert.True(response.IsEligible); // 3000 + 2500 == 5500 >= 5000
+    }
+
+    [Fact]
+    public async Task SqlFINAL05_InactiveAllocation_DoesNotContribute()
+    {
+        var tenantId = $"FCT05-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantId);
+        var planId = await EnsurePlanAsync(tenantId);
+
+        var rule = EligibilityRule.AmountPaidAtLeast(5000m);
+        var seeded = await SeedAsync(tenantId, planId, rule);
+
+        var inv = await SeedInvoiceAsync(tenantId, seeded.ContractId);
+
+        // One active payment of 5000.
+        await SeedCompletedPaymentWithAllocationsAsync(
+            tenantId, seeded.ContractId, inv,
+            paymentAmount: 5000m, allocatedAmount: 5000m,
+            currencyCode: "EGP",
+            completedAtUtc: DateTime.UtcNow.AddHours(-2),
+            method: PaymentMethod.Cash);
+
+        // Add a second allocation to the same invoice but mark it as Reversed.
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            AuthorizeTenant(scope.ServiceProvider, tenantId);
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var payment = await db.Payments.IgnoreQueryFilters()
+                .Where(p => p.TenantId == tenantId && p.Status == PaymentStatus.Completed)
+                .OrderByDescending(p => p.CreatedAtUtc)
+                .FirstAsync();
+
+            var allocation = PaymentAllocation.Create(
+                id: Guid.NewGuid(),
+                paymentId: payment.Id,
+                invoiceId: inv,
+                allocatedAmount: 9000m,
+                allocatedAtUtc: DateTime.UtcNow).Value;
+            // Reverse it so it's no longer Active.
+            allocation.Reverse();
+            db.PaymentAllocations.Add(allocation);
+            db.StampAddedTenantIds(tenantId);
+            await db.SaveChangesAsync();
+        }
+
+        var response = await FreezeAsync(tenantId, seeded.BenefitId);
+        // Only the 5000 active allocation counts; 5000 == 5000 => true.
+        // The reversed 9000 must NOT contribute.
+        Assert.True(response.IsEligible);
+    }
+
+    [Fact]
+    public async Task SqlFINAL06_AllocationToAnotherContract_DoesNotContribute()
+    {
+        var tenantId = $"FCT06-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantId);
+        var planId = await EnsurePlanAsync(tenantId);
+
+        var rule = EligibilityRule.AmountPaidAtLeast(7000m);
+        var seededA = await SeedAsync(tenantId, planId, rule, contractedAmount: 8000m);
+        var seededB = await SeedAsync(tenantId, planId,
+            EligibilityRule.AmountPaidAtLeast(1m), contractedAmount: 2000m);
+
+        var invoiceA = await SeedInvoiceAsync(tenantId, seededA.ContractId);
+        var invoiceB = await SeedInvoiceAsync(tenantId, seededB.ContractId);
+
+        // Payment.Amount = 10000 with allocation 8000 to A and 2000 to B.
+        await SeedCompletedPaymentWithAllocationsAsync(
+            tenantId, seededA.ContractId, invoiceA,
+            paymentAmount: 10000m, allocatedAmount: 8000m,
+            currencyCode: "EGP",
+            completedAtUtc: DateTime.UtcNow.AddHours(-2),
+            method: PaymentMethod.Cash);
+        await SeedCompletedPaymentWithAllocationsAsync(
+            tenantId, seededB.ContractId, invoiceB,
+            paymentAmount: 10000m, allocatedAmount: 2000m,
+            currencyCode: "EGP",
+            completedAtUtc: DateTime.UtcNow.AddHours(-2),
+            method: PaymentMethod.Cash);
+
+        // Contract A: 8000 >= 7000 => true
+        var aResponse = await FreezeAsync(tenantId, seededA.BenefitId);
+        Assert.True(aResponse.IsEligible);
+
+        // Contract B: 2000 (NOT 10000, NOT 10000+2000) >= 1 => true
+        var bResponse = await FreezeAsync(tenantId, seededB.BenefitId);
+        Assert.True(bResponse.IsEligible);
+    }
+
+    [Fact]
+    public async Task SqlFINAL07_DifferentCurrency_DoesNotContribute()
+    {
+        var tenantId = $"FCT07-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantId);
+        var planId = await EnsurePlanAsync(tenantId);
+
+        var rule = EligibilityRule.AmountPaidAtLeast(1m);
+        var seeded = await SeedAsync(tenantId, planId, rule, contractCurrencyCode: "USD");
+
+        var inv = await SeedInvoiceAsync(tenantId, seeded.ContractId);
+
+        // USD contract gets an EGP allocation — must contribute 0.
+        await SeedCompletedPaymentWithAllocationsAsync(
+            tenantId, seeded.ContractId, inv,
+            paymentAmount: 10000m, allocatedAmount: 10000m,
+            currencyCode: "EGP",
+            completedAtUtc: DateTime.UtcNow.AddHours(-2),
+            method: PaymentMethod.Cash);
+
+        var response = await FreezeAsync(tenantId, seeded.BenefitId);
+        Assert.False(response.IsEligible);
+    }
+
+    [Fact]
+    public async Task SqlFINAL08_CrossTenantAllocation_DoesNotContribute()
+    {
+        var tenantA = $"FCTA-{Guid.NewGuid():N}"[..16];
+        var tenantB = $"FCTB-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantA);
+        await SeedTenantAsync(tenantB);
+        var planA = await EnsurePlanAsync(tenantA);
+
+        var rule = EligibilityRule.AmountPaidAtLeast(1m);
+        var seededA = await SeedAsync(tenantA, planA, rule);
+        var invA = await SeedInvoiceAsync(tenantA, seededA.ContractId);
+
+        // Tenant B pays its own payment. Authorised as tenantB so the seed lands under tenantB.
+        AuthorizeTenant(tenantB);
+        var seededB = await SeedAsync(tenantB, await EnsurePlanAsync(tenantB),
+            EligibilityRule.ContractActive());
+        var invB = await SeedInvoiceAsync(tenantB, seededB.ContractId);
+
+        await SeedCompletedPaymentWithAllocationsAsync(
+            tenantB, seededB.ContractId, invB,
+            paymentAmount: 10000m, allocatedAmount: 10000m,
+            currencyCode: "EGP",
+            completedAtUtc: DateTime.UtcNow.AddHours(-2),
+            method: PaymentMethod.Cash);
+
+        // Tenant A asks for AmountPaidAtLeast(1) — but tenant B's payment must NOT count.
+        var response = await FreezeAsync(tenantA, seededA.BenefitId);
+        Assert.False(response.IsEligible);
+    }
+
+    [Fact]
+    public async Task SqlFINAL09_AmountPaidAtLeastExactAllocationBoundary()
+    {
+        var tenantId = $"FCT09-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantId);
+        var planId = await EnsurePlanAsync(tenantId);
+
+        var seeded = await SeedAsync(tenantId, planId, EligibilityRule.AmountPaidAtLeast(5000m));
+        var inv = await SeedInvoiceAsync(tenantId, seeded.ContractId);
+
+        // Exact match: payment.Amount = 5000, allocation = 5000.
+        await SeedCompletedPaymentWithAllocationsAsync(
+            tenantId, seeded.ContractId, inv,
+            paymentAmount: 5000m, allocatedAmount: 5000m,
+            currencyCode: "EGP",
+            completedAtUtc: DateTime.UtcNow.AddHours(-2),
+            method: PaymentMethod.Cash);
+
+        var response = await FreezeAsync(tenantId, seeded.BenefitId);
+        Assert.True(response.IsEligible);
+    }
+
+    [Fact]
+    public async Task SqlFINAL10_AmountPaidAtLeastBelowAndAboveAllocationBoundary()
+    {
+        var tenantId = $"FCT10-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantId);
+        var planId = await EnsurePlanAsync(tenantId);
+
+        var seeded = await SeedAsync(tenantId, planId, EligibilityRule.AmountPaidAtLeast(5000m));
+        var inv = await SeedInvoiceAsync(tenantId, seeded.ContractId);
+
+        // payment.Amount = 10000 (large), allocation = 5000 (small).
+        await SeedCompletedPaymentWithAllocationsAsync(
+            tenantId, seeded.ContractId, inv,
+            paymentAmount: 10000m, allocatedAmount: 5000m,
+            currencyCode: "EGP",
+            completedAtUtc: DateTime.UtcNow.AddHours(-2),
+            method: PaymentMethod.Cash);
+
+        // Exactly 5000: 5000 >= 5000 => true
+        var response = await FreezeAsync(tenantId, seeded.BenefitId);
+        Assert.True(response.IsEligible);
+
+        // With AmountPaidAtLeast(5001) and allocation=5000, 5000 < 5001 => false.
+        // The seeded rule is already AmountPaidAtLeast(5000); to test the above/below boundary
+        // with a single allocation we use two seeded contracts:
+        //   contract 1: rule AmountPaidAtLeast(4999), allocation 5000 → true
+        //   contract 2: rule AmountPaidAtLeast(5001), allocation 5000 → false
+        var seededBelow = await SeedAsync(tenantId, planId,
+            EligibilityRule.AmountPaidAtLeast(4999m));
+        var inv2 = await SeedInvoiceAsync(tenantId, seededBelow.ContractId);
+        await SeedCompletedPaymentWithAllocationsAsync(
+            tenantId, seededBelow.ContractId, inv2,
+            paymentAmount: 10000m, allocatedAmount: 5000m,
+            currencyCode: "EGP",
+            completedAtUtc: DateTime.UtcNow.AddHours(-1),
+            method: PaymentMethod.Cash);
+        var responseBelow = await FreezeAsync(tenantId, seededBelow.BenefitId);
+        Assert.True(responseBelow.IsEligible); // 5000 >= 4999
+
+        var seededAbove = await SeedAsync(tenantId, planId,
+            EligibilityRule.AmountPaidAtLeast(5001m));
+        var inv3 = await SeedInvoiceAsync(tenantId, seededAbove.ContractId);
+        await SeedCompletedPaymentWithAllocationsAsync(
+            tenantId, seededAbove.ContractId, inv3,
+            paymentAmount: 10000m, allocatedAmount: 5000m,
+            currencyCode: "EGP",
+            completedAtUtc: DateTime.UtcNow.AddHours(-1),
+            method: PaymentMethod.Cash);
+        var responseAbove = await FreezeAsync(tenantId, seededAbove.BenefitId);
+        Assert.False(responseAbove.IsEligible); // 5000 < 5001
     }
 }

@@ -176,13 +176,19 @@ public sealed class EligibilityRuleEvaluator
         // Currency-consistent sum: only payments whose canonicalised currency matches the
         // contract's currency contribute. Payments in other currencies MUST NOT silently
         // contribute — that would corrupt fee/tax thresholds. EGP is not a hardcoded fallback.
+        //
+        // The amount summed is AllocatedAmountForThisContract (NOT Payment.Amount). A single
+        // Payment may be allocated across multiple contracts/invoices, and only the slice
+        // attributable to the evaluated Contract contributes. This prevents double-counting
+        // and ensures contract-level eligibility reflects settlement attributable to that
+        // contract only.
         var contractCurrency = context.ContractCurrencyCode;
         decimal total = 0m;
         for (int i = 0; i < context.CompletedPayments.Count; i++)
         {
             var fact = context.CompletedPayments[i];
             if (string.Equals(fact.CurrencyCode, contractCurrency, StringComparison.Ordinal))
-                total += fact.Amount;
+                total += fact.AllocatedAmountForThisContract;
         }
 
         return total >= rule.Amount

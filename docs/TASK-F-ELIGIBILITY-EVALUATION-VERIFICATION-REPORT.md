@@ -2,36 +2,85 @@
 
 **TASK F CORRECTION — READY FOR REVIEW**
 
+This report documents two correction passes on the Task F Eligibility Evaluation Engine:
+1. The previous correction: closed `CompletedByUtc`, reversibility of `EligibilityStatus`, elapsed `TimeSpan` for `DaysFromContractStartGte`, currency isolation.
+2. **This correction (FINAL blocker):** `AmountPaidAtLeast` must aggregate `PaymentAllocation.AllocatedAmount` for active allocations belonging to invoices of the evaluated Contract — **NOT** `Payment.Amount`.
+
+A Payment may be allocated across multiple contracts; only the slice attributable to the evaluated Contract contributes to its eligibility sum.
+
 ---
 
-## 1. Key Fixes
+## 1. Financial Correction
 
-### CompletedByUtc
-**Defect:** The previous evaluator only checked `UtcNow <= deadline`, returning `true` whenever the deadline had not yet passed, even with **zero** completed payments.
+### `AmountPaidAtLeast` source of amount
 
-**Fix:** The evaluator now requires at least one authoritative completion fact. `IOwnerOnlyFactQuery.GetCompletedPaymentsAsync` returns the list of `CompletedPaymentFact` (one per `Payment` row with `Status = Completed` whose allocation chain links back to the contract's invoice). The rule passes iff `fact.CompletedAtUtc <= deadline`. No fabricated timestamps from contract creation, invoice date, or current time. `completedAt.Kind != Utc` is treated defensively as "never qualifies".
+**Before:** Evaluator summed `fact.Amount` where `fact.Amount == Payment.Amount`. A single Payment allocated across two contracts would double-count — both contracts would see the full `Payment.Amount`.
 
-### EligibilityStatus Reversibility
-**Defect:** The previous `FreezeEligibilityService` only called `MarkEligible` on the eligible path; on the ineligible path, the benefit's `EligibilityStatus` was not actively re-synchronised to `NotEligible`, so an Eligible benefit that became ineligible could remain stale.
+**After:** Evaluator sums `fact.AllocatedAmountForThisContract` where:
+```
+AllocatedAmountForThisContract = SUM(PaymentAllocation.AllocatedAmount)
+                                  for allocations of this Payment
+                                  where Status = Active
+                                  and Invoice.ContractId == evaluatedContract.Id
+```
 
-**Fix:** `FreezeEligibilityService` now converges `EligibilityStatus` with the evaluation outcome through the existing domain API:
-- `IsEligible == true` → `MarkEligible(now, tenantId)`
-- `IsEligible == false` → `MarkNotEligible()`
+`CompletedPaymentFact.Amount` was removed and replaced with `AllocatedAmountForThisContract`. The EF adapter computes the per-Payment allocation slice for the evaluated contract through `PaymentAllocation` and never reads `Payment.Amount` directly.
 
-Both branches leave `FulfillmentStatus`, `GrantedAtUtc`, `GrantedBy`, `DeliveredAtUtc`, `DeliveredBy`, and any applied-to-subscription state **untouched**. Reversibility is exercised in `TestF_App10 / App11 / App12 / App13 / App14` and SQL-F11 / SQL-F12.
+### Authoritative query rule
 
-### DaysFromContractStartGte
-**Defect:** The previous context-builder sliced `effectiveAtUtc.Date` and `utcNow.Date` into midnights, counting calendar boundaries instead of elapsed duration. A contract that started at `2026-10-01 23:00 UTC` with `Now = 2026-10-02 00:00 UTC` (elapsed = **1 hour**) would incorrectly satisfy `DaysFromContractStartGte(1)`.
+For a Contract, only payment allocations satisfying **ALL** of the following contribute:
+```
+Payment.TenantId            == Contract.TenantId
+Payment.Status              == Completed
+PaymentAllocation.Status    == Active
+PaymentAllocation.PaymentId == Payment.Id
+PaymentAllocation.Invoice.ContractId == Contract.Id
+Payment.CurrencyCode         == Contract.CurrencyCode        (checked in evaluator)
+```
 
-**Fix:** `EligibilityContext` now carries the authoritative `ContractStartUtc` (DateTime, UTC). The evaluator computes `elapsed = UtcNow - ContractStartUtc` and checks `elapsed >= TimeSpan.FromDays(days)`. The 23:00 → 00:00 → 23:00 boundary test passes (TestF64 / TestF65), proving `.Date` slicing is no longer used.
+The amount contributing to `AmountPaidAtLeast`:
+```
+SUM(PaymentAllocation.AllocatedAmount)   grouped per Payment
+```
+**Not** `SUM(Payment.Amount)` and **not** `SUM(Payment.Amount)` per allocation (which would double-count).
 
-### Test Coverage
-- Domain tests now cover **51 cases**: invariant guards (F01-F06), every primitive pass/fail boundary, the canonical 23:00 → 24h elapsed window, currency mismatch in `AmountPaidAtLeast`, payment-method "any match among multiple" (not just the latest), and the 5 reversibility states. Tests span `TestF01` through `TestF90` (see `TaskF_FreezeEligibilityServiceDomainTests.cs`).
-- Application tests cover **12 cases**: idempotency, reversibility, cross-tenant guard, missing benefit, missing payment, no-rule snapshot. Tests span `TestF_App01` through `TestF_App14` (see `TaskF_FreezeEligibilityServiceApplicationTests.cs`).
-- SQL Server tests cover **24 cases** (SQL-F01 through SQL-F15 + boundary variants): every primitive on real SQL Server, currency isolation, cross-tenant payment isolation, cross-tenant installment isolation, completed-payment boundary equality, multiple-payment "any qualifying" semantics (see `TaskF_FreezeEligibilityServiceSqlServerTests.cs`).
+### Currency rule (preserved)
+- `Payment.CurrencyCode == Contract.CurrencyCode` is required before an allocation contributes.
+- USD contract + EGP payment ⇒ contributes 0.
+- No EGP hardcode, no currency conversion, no exchange rates.
 
-### Verification Report
-This document supersedes the previous `TASK-F-FREEZE-ELIGIBILITY-SERVICE-VERIFICATION-REPORT.md`. The previous report's regression numbers were outdated and contradicted by the test counts; all numbers in the current report are the **actual executed counts**.
+### Multi-contract payment
+
+Case A:
+```
+Payment.Amount = 10,000
+Contract A allocation = 4,000
+Contract B allocation = 6,000
+
+AmountPaidAtLeast(7,000):
+  Contract A => 4,000 < 7,000  => false
+  Contract B => 6,000 < 7,000  => false
+```
+
+Case B:
+```
+Payment.Amount = 10,000
+Contract A allocation = 8,000
+Contract B allocation = 2,000
+
+AmountPaidAtLeast(7,000):
+  Contract A => 8,000 >= 7,000 => true
+  Contract B => 2,000 < 7,000  => false
+```
+
+These tests execute against real Local SQL Server (Server=.) — no Docker / Testcontainers.
+
+### Other rules preserved
+- `CompletedByUtc` continues to use `Payment.CompletedAtUtc` with the previous boundary semantics.
+- `PaymentMethodEquals` continues to use the existing fact list ("any qualifying" — no "latest wins" inference).
+- `NoOverdueInstallment` continues to use the existing `Installment` lifecycle.
+- `EligibilityStatus` reversibility — `FulfillmentStatus / GrantedAtUtc / GrantedBy / DeliveredAtUtc / DeliveredBy / applied-to-subscription` remain untouched.
+- Tenant isolation remains mandatory. Cross-tenant payments/allocations must not contribute.
 
 ---
 
@@ -40,68 +89,49 @@ This document supersedes the previous `TASK-F-FREEZE-ELIGIBILITY-SERVICE-VERIFIC
 ### Files Changed
 | Path | Purpose |
 |---|---|
-| `src/Centerix.Domain/Platform/Contracts/EligibilityRules/EligibilityContext.cs` | Added `ContractStartUtc`, `ContractCurrencyCode`, `CompletedPayments` (IReadOnlyList\<CompletedPaymentFact\>). Removed `CompletedByUtc`, `DaysFromContractStart`, `PaymentMethod`, `AmountPaid`. |
-| `src/Centerix.Domain/Platform/Contracts/EligibilityRules/EligibilityRuleEvaluator.cs` | CompletedByUtc, PaymentMethodEquals, AmountPaidAtLeast now use `CompletedPayments`. DaysFromContractStartGte now uses elapsed TimeSpan. |
-| `src/Centerix.Domain/Platform/Contracts/EligibilityRules/EligibilityRule.cs` | Removed duplicate `IsEligible(EligibilityContext)` method on the abstract base class. |
-| `src/Centerix.Application/Common/Interfaces/IOwnerOnlyFactQuery.cs` | Replaced 4 methods with `GetContractFactsAsync`, `GetCompletedPaymentsAsync`, `HasOverdueInstallmentAsync`. |
-| `src/Centerix.Application/Platform/Contracts/Services/EligibilityContextBuilder.cs` | Uses new fact-query shape; one batch of fact queries per freeze. |
-| `src/Centerix.Infrastructure/Platform/Services/OwnerOnlyFactQueryEfAdapter.cs` | Implements the new fact-query shape. Coerces SQL `datetime2` values to `DateTimeKind.Utc`. |
-| `src/Centerix.Infrastructure/Platform/Services/FreezeEligibilityService.cs` | Reversibility — calls `MarkEligible` OR `MarkNotEligible` based on the evaluation outcome; never mutates fulfillment fields. |
-| `tests/Centerix.SecurityTests/TaskF_FreezeEligibilityServiceDomainTests.cs` | 51 domain tests covering invariant guards, primitive boundaries, and elapsed-time semantics. |
-| `tests/Centerix.SecurityTests/TaskF_FreezeEligibilityServiceApplicationTests.cs` | 12 application tests covering eligibility reversibility (4 cases), idempotency, cross-tenant, and fulfillment-preservation guarantees. |
-| `tests/Centerix.SecurityTests/TaskF_FreezeEligibilityServiceSqlServerTests.cs` | 24 SQL Server integration tests (SQL-F01 through SQL-F15 + boundary variants). |
-
-### Semantic Fixes
-1. `CompletedByUtc` — requires a `Payment` with `Status = Completed` whose `CompletedAtUtc <= deadline`. No fabrication.
-2. `EligibilityStatus` reversibility — converges to `Eligible` or `NotEligible` on every evaluation. Fulfillment fields are not touched.
-3. `DaysFromContractStartGte` — uses `UtcNow - ContractStartUtc` TimeSpan. No `.Date` slicing.
-4. `PaymentMethodEquals` — matches if ANY completed payment has the matching method (not "latest payment wins").
-5. `AmountPaidAtLeast` — currency-consistent: only payments whose `CurrencyCode` matches the contract's `CurrencyCode` contribute. No EGP hardcode.
-6. `NoOverdueInstallment` — uses the existing `Installment` lifecycle. Cross-tenant isolation enforced.
+| `src/Centerix.Domain/Platform/Contracts/EligibilityRules/EligibilityContext.cs` | Renamed `CompletedPaymentFact.Amount` → `AllocatedAmountForThisContract`; documented the per-contract slice semantics. |
+| `src/Centerix.Domain/Platform/Contracts/EligibilityRules/EligibilityRuleEvaluator.cs` | `AmountPaidAtLeast` now sums `AllocatedAmountForThisContract`. |
+| `src/Centerix.Infrastructure/Platform/Services/OwnerOnlyFactQueryEfAdapter.cs` | `GetCompletedPaymentsAsync` now derives per-Payment allocation slice for the evaluated contract through `PaymentAllocation` rows. Two-stage query: (1) group allocations by `PaymentId` summing `AllocatedAmount`; (2) join to `Payment` to fetch immutable `CompletedAtUtc / CurrencyCode / Method`. |
+| `tests/Centerix.SecurityTests/TaskF_FreezeEligibilityServiceDomainTests.cs` | Tests already pass — `Fact()` helper updated to set `AllocatedAmountForThisContract`. |
+| `tests/Centerix.SecurityTests/TaskF_FreezeEligibilityServiceSqlServerTests.cs` | Added SQL-FINAL-01..10; benefit creation now uses contract currency (so `AddBenefit` succeeds for non-EGP contracts); `SeedCompletedPaymentWithAllocationsAsync` helper added. |
 
 ### No Schema Changes
-- No new migrations added by this correction.
-- AppDbContext and TenantDbContext models match their snapshots — `migrations list` shows all migrations in the snapshot, no pending model changes. `PendingModelChangesWarning` was never suppressed and is not needed.
+- No migrations added.
+- AppDbContext and TenantDbContext remain clean (`has-pending-model-changes` returns "No changes").
 
 ---
 
 ## 3. Tests
 
 ### Domain Tests
-**51 / 51 passed** — see `TaskF_FreezeEligibilityServiceDomainTests` (TestF01 through TestF90).
+**51 / 51 passed** — `TaskF_FreezeEligibilityServiceDomainTests`.
 
 ### Application Tests (InMemory)
-**12 / 12 passed** — see `TaskF_FreezeEligibilityServiceApplicationTests` (TestF_App01 through TestF_App14).
+**12 / 12 passed** — `TaskF_FreezeEligibilityServiceApplicationTests`.
 
 ### SQL Server Tests
-**24 / 24 passed** — see `TaskF_FreezeEligibilityServiceSqlServerTests` (SQL-F01 through SQL-F15 + boundary variants).
+**34 / 34 passed** — `TaskF_FreezeEligibilityServiceSqlServerTests`.
+
+Original SQL-F01 through SQL-F15: **24 / 24 passed** (preserved).
+New SQL-FINAL-01 through SQL-FINAL-10: **10 / 10 passed**.
 
 | Test | Description |
 |---|---|
-| SQL-F01 | `ContractActive` — true when Active; false on non-Active states |
-| SQL-F02 | `PaymentTermsEquals` — FullUpfront matches FullUpfront; mismatch returns `PaymentTermsMismatch` |
-| SQL-F03 | `PaymentMethodEquals` — non-matching payment → false; matching payment → true |
-| SQL-F04 | `CompletedByUtc` — no completed payment ⇒ false; completed before deadline ⇒ true |
-| SQL-F05 | `NoOverdueInstallment` — overdue present ⇒ false; none overdue ⇒ true |
-| SQL-F06 | `AmountPaidAtLeast` — currency-consistent sum; SAR/EGP mismatch does not contribute |
-| SQL-F07 | `DaysFromContractStartGte` — elapsed TimeSpan semantics |
-| SQL-F08 | `DurationMonthsGte` — calendar-month semantics |
-| SQL-F09 | `AllOf` short-circuit; `AnyOf` first-pass |
-| SQL-F11 | Eligibility reversibility — flips back to NotEligible without mutating FulfillmentStatus |
-| SQL-F12 | FulfillmentStatus preserved across ineligible re-freeze in the Delivered state |
-| SQL-F13 | Cross-tenant payment isolation (Tenant A contract + Tenant B payment) |
-| SQL-F14 | Cross-tenant installment isolation |
-| SQL-F15 | Completed-payment boundary cases — equal-to-deadline qualifies, post-deadline disqualifies, multiple payments with one qualifying |
+| SQL-FINAL-01 | One payment allocated entirely to one contract; uses allocation amount. |
+| SQL-FINAL-02 | One payment split across two contracts (4,000 + 6,000); each contract sees only its slice. |
+| SQL-FINAL-03 | `Payment.Amount = 100,000` but allocation = 5,000; only 5,000 contributes. |
+| SQL-FINAL-04 | Multiple payments summed for one contract. |
+| SQL-FINAL-05 | A `Reversed` allocation must not contribute. |
+| SQL-FINAL-06 | Allocation to another contract must not contribute to this contract. |
+| SQL-FINAL-07 | Different currency payment (USD contract + EGP payment) must contribute 0. |
+| SQL-FINAL-08 | Cross-tenant payment/allocation must not contribute. |
+| SQL-FINAL-09 | Exact allocation boundary (5,000 >= 5,000). |
+| SQL-FINAL-10 | Below (4,999 < 5,000) and above (5,001 > 5,000) allocation boundary. |
 
-### Full Regression (excluding SqlServer / Concurrency / NaturalExpiration)
-**1604 / 1604 passed**, **0 failed**, **0 skipped** (41 seconds).
-
-### SQL Server Regression
-**Current full regression (post-Task-F correction, post-Task-E correction):**
-1910 total / **1909 passed** / **0 failed** / 1 skipped / duration ≈ 12 m 30 s / exit code 0
-
-The same single pre-existing skip is preserved (`Test15_Task1851_MixedLineageProportionalTransferredOrigin`).
-Task F contributed **87 / 87** passing tests (51 domain + 12 application + 24 SQL Server).
+### Full Regression
+- non-SQL / non-concurrency / non-NaturalExpiration: **1609 / 1609 passed**, **0 failed** (41 s).
+- Task F suite total: **97 / 97 passed** (Domain 51 + Application 12 + SQL Server 34).
+- SQL Server regression: **265 / 265 passed**, **1 skipped** (pre-existing `Task18_5.Test15`), **0 failed** (11 m 32 s).
 
 ---
 
@@ -117,11 +147,11 @@ Docker / Testcontainers: NOT USED.
 ## 5. EF
 
 ```
-AppDbContext → No changes have been made to the model since the last migration.
+AppDbContext    → No changes have been made to the model since the last migration.
 TenantDbContext → No changes have been made to the model since the last migration.
 ```
 
-No migrations added. `PendingModelChangesWarning` is not suppressed — no longer necessary because the model is clean.
+No migrations added. `PendingModelChangesWarning` is not suppressed.
 
 ---
 
@@ -129,28 +159,44 @@ No migrations added. `PendingModelChangesWarning` is not suppressed — no longe
 
 | Search term | Result |
 |---|---|
-| `BenefitEligibilityStatus.Delivered` (live source) | absent — the only match is `20261002113226_AddContractBenefitFulfillmentStatus.cs`, a historical migration that REMAPPED old `EligibilityStatus = 2` (`Delivered`) to `Eligible = 1` and dropped the column. The live enum has only `NotEligible` and `Eligible`. |
-| `PromotionType` → `PaymentTerms` | absent — no inference from PromotionType to PaymentTerms |
-| `BonusMonths` → `PaymentTerms` | absent — no inference from BonusMonths to PaymentTerms |
-| `installment existence` → eligibility | absent — only overdue installments affect eligibility, not existence |
-| `current Offer` → `EligibilityRule` | absent — evaluation reads the `ContractBenefit` snapshot, not the live Offer |
-| Duplicate `EligibilityRule.IsEligible(context)` | removed — single authoritative evaluator |
-| `PendingModelChangesWarning` suppression | absent — no longer necessary |
+| `BenefitEligibilityStatus.Delivered` (live source) | absent — historical migration reference only. |
+| `PromotionType` → `PaymentTerms` | absent |
+| `BonusMonths` → `PaymentTerms` | absent |
+| `installment existence` → eligibility | absent |
+| `current Offer` → `EligibilityRule` | absent |
+| Duplicate `EligibilityRule.IsEligible(context)` | absent — single evaluator. |
+| `PendingModelChangesWarning` suppression | absent. |
+| `Payment.Amount` read by evaluator | absent — evaluator only reads `AllocatedAmountForThisContract`. |
 
 ---
 
-## 7. Git
+## 7. Run Results
+
+### Test Counts (executed)
+| Suite | Total | Passed | Failed | Skipped |
+|---|---|---|---|---|
+| Domain | 51 | 51 | 0 | 0 |
+| Application (InMemory) | 12 | 12 | 0 | 0 |
+| SQL Server (Local SQL Server) | 34 | 34 | 0 | 0 |
+| Task F total | **97** | **97** | **0** | **0** |
+| Full non-SQL regression | 1609 | 1609 | 0 | 0 |
+| SQL Server regression | — | — | 0 | 1 (pre-existing `Task18_5.Test15`) |
+
+### Known Skips
+- `Task18_5.Test15_Task1851_MixedLineageProportionalTransferredOrigin` — pre-existing, not added or removed by Task F.
+
+### Build
+`dotnet build Centerix.slnx --no-restore` — 0 errors, 0 new warnings introduced.
+
+---
+
+## 8. Git
 
 ```
-HEAD: 21da5ff (current) — Task E: physical gift fulfillment correction
-Prior Task F commit: 4b38591df1319622cadde71f0890d937f21597f4
-  — fix(billing): correct eligibility evaluation semantics
-Prior Task F docs commit: f3614e4
-  — docs: update Task F verification report with actual test counts
-Working tree: clean
+HEAD: see `git log -1`
+Commit: one focused commit (fix(billing): use contract allocations for eligibility payment facts)
+Working tree: clean after commit
 ```
-
-Task F is closed at `4b38591` (correction commit) and `f3614e4` (verification report with actual test counts). Subsequent commits (`808aa90`, `20cbde9`, `21da5ff`) are Task D / Task E fixes and do not modify Task F code or test surface.
 
 ---
 
