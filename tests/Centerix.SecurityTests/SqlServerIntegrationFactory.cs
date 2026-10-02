@@ -168,13 +168,11 @@ public sealed class SqlServerWebApplicationFactory(string masterConnectionString
     }
 
     protected override void ConfigureAppDatabase(IServiceProvider services, DbContextOptionsBuilder options)
-        => options.UseSqlServer(_connectionString)
-            .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+        => options.UseSqlServer(_connectionString);
 
     protected override void ConfigureTenantDatabase(IServiceProvider services, DbContextOptionsBuilder options)
         => options.UseSqlServer(_connectionString,
-            sql => sql.MigrationsHistoryTable("__TenantMigrationsHistory"))
-            .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+            sql => sql.MigrationsHistoryTable("__TenantMigrationsHistory"));
 }
 
 /// <summary>
