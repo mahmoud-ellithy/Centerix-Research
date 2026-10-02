@@ -139,6 +139,10 @@ public static class DependencyInjection
         // Phase 7: Contract Benefits eligibility service
         services.AddScoped<IBenefitEligibilityService, BenefitEligibilityService>();
 
+        // Task F: freeze eligibility pipeline — owner-only fact query + freeze service.
+        services.AddScoped<IOwnerOnlyFactQuery, OwnerOnlyFactQueryEfAdapter>();
+        services.AddScoped<IFreezeEligibilityService, FreezeEligibilityService>();
+
         // JWT settings (strongly-typed) with startup validation
         services.Configure<JwtSettings>(configuration.GetSection("JwtSettings"));
         services.AddOptions<JwtSettings>()

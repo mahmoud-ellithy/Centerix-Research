@@ -1,5 +1,8 @@
 using Centerix.Application.Common.Behaviours;
+using Centerix.Application.Common.Interfaces;
+using Centerix.Application.Platform.Contracts.Services;
 using Centerix.Domain.Platform.Billing.Refunds;
+using Centerix.Domain.Platform.Contracts.EligibilityRules;
 using Centerix.Domain.Platform.Promotions;
 using FluentValidation;
 using MediatR;
@@ -30,6 +33,15 @@ public static class DependencyInjection
 
         // Register promotion calculation service
         services.AddScoped<IPromotionCalculationService, PromotionCalculationService>();
+
+        // Task F: eligibility rule algebra — stateless, thread-safe; singleton lifetime.
+        services.AddSingleton<EligibilityRuleEvaluator>();
+
+        // The EligibilityContextBuilder is also stateless and only depends on the
+        // owner-only fact query interface. Its DI lifetime is decided by the lifetime
+        // of IOwnerOnlyFactQuery (scoped) — Microsoft.Extensions.DependencyInjection
+        // resolves it per scope automatically.
+        services.AddScoped<EligibilityContextBuilder>();
 
         return services;
     }
