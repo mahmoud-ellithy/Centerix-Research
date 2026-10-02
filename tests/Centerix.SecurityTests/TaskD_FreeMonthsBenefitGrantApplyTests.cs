@@ -54,7 +54,7 @@ public class TaskD_FreeMonthsBenefitGrantApplyTests
         var result = benefit.Grant(t);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Granted, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Granted, benefit.FulfillmentStatus);
         Assert.Equal(t, benefit.GrantedAtUtc);
         Assert.True(benefit.IsGranted);
         Assert.False(benefit.IsAppliedToSubscription);
@@ -89,7 +89,7 @@ public class TaskD_FreeMonthsBenefitGrantApplyTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.FreeMonthsBenefit.NotEligible", result.Errors!.First().Code);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Pending, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Pending, benefit.FulfillmentStatus);
         Assert.Null(benefit.GrantedAtUtc);
     }
 
@@ -107,7 +107,7 @@ public class TaskD_FreeMonthsBenefitGrantApplyTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(t1, benefit.GrantedAtUtc); // Original timestamp preserved
-        Assert.Equal(FreeMonthsFulfillmentStatus.Granted, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Granted, benefit.FulfillmentStatus);
     }
 
     /// <summary>TestD05: AppliedToSubscription → Grant is no-op (idempotent on terminal)</summary>
@@ -123,7 +123,7 @@ public class TaskD_FreeMonthsBenefitGrantApplyTests
         var result = benefit.Grant(t);
 
         Assert.True(result.IsSuccess); // Domain model returns Updated (idempotent)
-        Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
         Assert.Equal(t, benefit.GrantedAtUtc);
         Assert.Equal(t, benefit.AppliedAtUtc);
     }
@@ -189,7 +189,7 @@ public class TaskD_FreeMonthsBenefitGrantApplyTests
         var result = benefit.MarkAppliedToSubscription(t);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
         Assert.Equal(t, benefit.AppliedAtUtc);
         Assert.True(benefit.IsAppliedToSubscription);
         Assert.True(benefit.IsGranted); // AppliedToSubscription implies Granted
@@ -224,7 +224,7 @@ public class TaskD_FreeMonthsBenefitGrantApplyTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.FreeMonthsBenefit.NotGranted", result.Errors!.First().Code);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Pending, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Pending, benefit.FulfillmentStatus);
     }
 
     /// <summary>TestD12: AppliedToSubscription → Apply idempotent (success, no re-apply)</summary>
@@ -242,7 +242,7 @@ public class TaskD_FreeMonthsBenefitGrantApplyTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(t1, benefit.AppliedAtUtc); // Original timestamp preserved
-        Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -290,14 +290,14 @@ public class TaskD_FreeMonthsBenefitGrantApplyTests
         var t2 = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc);
         var t3 = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc);
 
-        Assert.Equal(FreeMonthsFulfillmentStatus.Pending, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Pending, benefit.FulfillmentStatus);
 
         benefit.MarkEligible(t1);
         benefit.Grant(t1);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Granted, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Granted, benefit.FulfillmentStatus);
 
         benefit.MarkAppliedToSubscription(t2);
-        Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
 
         // Verify all timestamps
         Assert.Equal(t1, benefit.GrantedAtUtc);
@@ -306,7 +306,7 @@ public class TaskD_FreeMonthsBenefitGrantApplyTests
         // No backwards transitions possible
         // Grant on AppliedToSubscription is a no-op (returns Updated/success) — no backwards transition to Pending
         Assert.True(benefit.Grant(t3).IsSuccess); // Domain allows Grant as no-op on terminal state
-        Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
     }
 
     /// <summary>TestD16: Eligibility remains reversible after Grant</summary>
@@ -323,7 +323,7 @@ public class TaskD_FreeMonthsBenefitGrantApplyTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(FreeMonthsEligibilityStatus.NotEligible, benefit.EligibilityStatus);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Granted, benefit.FulfillmentStatus); // Fulfillment unchanged
+        Assert.Equal(FulfillmentStatus.Granted, benefit.FulfillmentStatus); // Fulfillment unchanged
         Assert.Equal(t, benefit.GrantedAtUtc); // Grant timestamp preserved
     }
 
@@ -342,7 +342,7 @@ public class TaskD_FreeMonthsBenefitGrantApplyTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(FreeMonthsEligibilityStatus.NotEligible, benefit.EligibilityStatus);
-        Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus); // Terminal
+        Assert.Equal(FulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus); // Terminal
         Assert.Equal(t, benefit.GrantedAtUtc);
         Assert.Equal(t, benefit.AppliedAtUtc);
     }

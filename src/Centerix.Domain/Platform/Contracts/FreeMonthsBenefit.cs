@@ -35,7 +35,7 @@ using Centerix.Domain.Platform.Contracts.Enums;
 ///   <item>
 ///     <term>Grant</term>
 ///     <description>
-///       <see cref="FulfillmentStatus"/> = <see cref="FreeMonthsFulfillmentStatus.Granted"/>
+///       <see cref="FulfillmentStatus"/> = <see cref="FulfillmentStatus.Granted"/>
 ///       and <see cref="GrantedAtUtc"/> — recorded exactly once by <see cref="Grant"/>.
 ///       <b>Monotone</b> (no backwards transitions).
 ///     </description>
@@ -43,7 +43,7 @@ using Centerix.Domain.Platform.Contracts.Enums;
 ///   <item>
 ///     <term>Application</term>
 ///     <description>
-///       <see cref="FulfillmentStatus"/> = <see cref="FreeMonthsFulfillmentStatus.AppliedToSubscription"/>
+///       <see cref="FulfillmentStatus"/> = <see cref="FulfillmentStatus.AppliedToSubscription"/>
 ///       and <see cref="AppliedAtUtc"/> — recorded exactly once by
 ///       <see cref="MarkAppliedToSubscription"/>; the bonus has been added to
 ///       the subscription's <c>EffectiveEndsAtUtc</c>. <b>Terminal</b>.
@@ -115,16 +115,16 @@ public class FreeMonthsBenefit : Entity
     public DateTime? EligibleAtUtc { get; private set; }
 
     /// <summary>
-    /// Monotone fulfillment flag. Always <see cref="FreeMonthsFulfillmentStatus.Pending"/>
-    /// on row creation; transitions to <see cref="FreeMonthsFulfillmentStatus.Granted"/>
-    /// then <see cref="FreeMonthsFulfillmentStatus.AppliedToSubscription"/>.
+    /// Monotone fulfillment flag. Always <see cref="FulfillmentStatus.Pending"/>
+    /// on row creation; transitions to <see cref="FulfillmentStatus.Granted"/>
+    /// then <see cref="FulfillmentStatus.AppliedToSubscription"/>.
     /// </summary>
-    public FreeMonthsFulfillmentStatus FulfillmentStatus { get; private set; }
+    public FulfillmentStatus FulfillmentStatus { get; private set; }
 
-    /// <summary>UTC timestamp of the <see cref="FreeMonthsFulfillmentStatus.Granted"/> transition. Null before grant.</summary>
+    /// <summary>UTC timestamp of the <see cref="FulfillmentStatus.Granted"/> transition. Null before grant.</summary>
     public DateTime? GrantedAtUtc { get; private set; }
 
-    /// <summary>UTC timestamp of the <see cref="FreeMonthsFulfillmentStatus.AppliedToSubscription"/> transition. Null before apply.</summary>
+    /// <summary>UTC timestamp of the <see cref="FulfillmentStatus.AppliedToSubscription"/> transition. Null before apply.</summary>
     public DateTime? AppliedAtUtc { get; private set; }
 
     /// <summary>
@@ -153,7 +153,7 @@ public class FreeMonthsBenefit : Entity
         CurrencyCode = currencyCode;
         EligibilityRule = eligibilityRule;
         EligibilityStatus = FreeMonthsEligibilityStatus.NotEligible;
-        FulfillmentStatus = FreeMonthsFulfillmentStatus.Pending;
+        FulfillmentStatus = FulfillmentStatus.Pending;
     }
 
     /// <summary>
@@ -275,8 +275,8 @@ public class FreeMonthsBenefit : Entity
 
     /// <summary>
     /// Records the grant decision. Transitions
-    /// <see cref="FulfillmentStatus"/> from <see cref="FreeMonthsFulfillmentStatus.Pending"/>
-    /// to <see cref="FreeMonthsFulfillmentStatus.Granted"/> and stamps
+    /// <see cref="FulfillmentStatus"/> from <see cref="FulfillmentStatus.Pending"/>
+    /// to <see cref="FulfillmentStatus.Granted"/> and stamps
     /// <see cref="GrantedAtUtc"/>.
     /// </summary>
     /// <remarks>
@@ -299,34 +299,34 @@ public class FreeMonthsBenefit : Entity
         if (!Enum.IsDefined(FulfillmentStatus))
             return FreeMonthsBenefitErrors.InvalidFulfillmentStatus;
 
-        if (FulfillmentStatus == FreeMonthsFulfillmentStatus.Granted)
+        if (FulfillmentStatus == FulfillmentStatus.Granted)
             return Result.Updated;
 
         // Application is terminal — calling Grant after MarkAppliedToSubscription
         // is a no-op (the bonus has already extended the subscription once).
-        if (FulfillmentStatus == FreeMonthsFulfillmentStatus.AppliedToSubscription)
+        if (FulfillmentStatus == FulfillmentStatus.AppliedToSubscription)
             return Result.Updated;
 
-        if (FulfillmentStatus != FreeMonthsFulfillmentStatus.Pending)
+        if (FulfillmentStatus != FulfillmentStatus.Pending)
             return FreeMonthsBenefitErrors.InvalidFulfillmentStatus;
 
         if (EligibilityStatus != FreeMonthsEligibilityStatus.Eligible)
             return FreeMonthsBenefitErrors.NotEligible;
 
-        FulfillmentStatus = FreeMonthsFulfillmentStatus.Granted;
+        FulfillmentStatus = FulfillmentStatus.Granted;
         GrantedAtUtc = utcNow;
         return Result.Updated;
     }
 
     /// <summary>
     /// Records application of the bonus to the subscription. Transitions
-    /// <see cref="FulfillmentStatus"/> from <see cref="FreeMonthsFulfillmentStatus.Granted"/>
-    /// to <see cref="FreeMonthsFulfillmentStatus.AppliedToSubscription"/> and stamps
+    /// <see cref="FulfillmentStatus"/> from <see cref="FulfillmentStatus.Granted"/>
+    /// to <see cref="FulfillmentStatus.AppliedToSubscription"/> and stamps
     /// <see cref="AppliedAtUtc"/>. Terminal: idempotent on already-Applied.
     /// </summary>
     /// <remarks>
     /// Requires <see cref="FulfillmentStatus"/> to be
-    /// <see cref="FreeMonthsFulfillmentStatus.Granted"/> at the moment of apply —
+    /// <see cref="FulfillmentStatus.Granted"/> at the moment of apply —
     /// this is the "ApplyFreeMonthsToSubscriptionCommand verifies FulfillmentStatus == Granted"
     /// invariant (per design §F.3 and §G.3). The TenantPlan-side idempotency
     /// guard (using <c>TenantPlan.AppliedFreeMonthsBenefitIds[]</c>) is enforced
@@ -337,13 +337,13 @@ public class FreeMonthsBenefit : Entity
         if (!Enum.IsDefined(FulfillmentStatus))
             return FreeMonthsBenefitErrors.InvalidFulfillmentStatus;
 
-        if (FulfillmentStatus == FreeMonthsFulfillmentStatus.AppliedToSubscription)
+        if (FulfillmentStatus == FulfillmentStatus.AppliedToSubscription)
             return Result.Updated;
 
-        if (FulfillmentStatus != FreeMonthsFulfillmentStatus.Granted)
+        if (FulfillmentStatus != FulfillmentStatus.Granted)
             return FreeMonthsBenefitErrors.NotGranted;
 
-        FulfillmentStatus = FreeMonthsFulfillmentStatus.AppliedToSubscription;
+        FulfillmentStatus = FulfillmentStatus.AppliedToSubscription;
         AppliedAtUtc = utcNow;
         return Result.Updated;
     }
@@ -352,14 +352,14 @@ public class FreeMonthsBenefit : Entity
     // Read-only projections for callers (commands / queries)
     // ────────────────────────────────────────────────────────────────────────
 
-    /// <summary>True iff <see cref="FulfillmentStatus"/> is <see cref="FreeMonthsFulfillmentStatus.AppliedToSubscription"/>.</summary>
+    /// <summary>True iff <see cref="FulfillmentStatus"/> is <see cref="FulfillmentStatus.AppliedToSubscription"/>.</summary>
     public bool IsAppliedToSubscription =>
-        FulfillmentStatus == FreeMonthsFulfillmentStatus.AppliedToSubscription;
+        FulfillmentStatus == FulfillmentStatus.AppliedToSubscription;
 
-    /// <summary>True iff <see cref="FulfillmentStatus"/> is <see cref="FreeMonthsFulfillmentStatus.Granted"/> (or later).</summary>
+    /// <summary>True iff <see cref="FulfillmentStatus"/> is <see cref="FulfillmentStatus.Granted"/> (or later).</summary>
     public bool IsGranted =>
-        FulfillmentStatus is FreeMonthsFulfillmentStatus.Granted
-                            or FreeMonthsFulfillmentStatus.AppliedToSubscription;
+        FulfillmentStatus is FulfillmentStatus.Granted
+                            or FulfillmentStatus.AppliedToSubscription;
 
     /// <summary>True iff <see cref="EligibilityStatus"/> is <see cref="FreeMonthsEligibilityStatus.Eligible"/>.</summary>
     public bool IsEligible =>

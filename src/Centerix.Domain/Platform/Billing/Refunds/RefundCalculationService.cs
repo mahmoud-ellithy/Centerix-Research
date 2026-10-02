@@ -3,6 +3,7 @@ namespace Centerix.Domain.Platform.Billing.Refunds;
 using Centerix.Domain.Platform.Billing.Payments;
 using Centerix.Domain.Platform.Billing.Payments.Enums;
 using Centerix.Domain.Platform.Contracts;
+using Centerix.Domain.Platform.Contracts.Enums;
 
 /// <summary>
 /// Deterministic service for calculating refund amounts for early cancellations.
@@ -69,8 +70,10 @@ public sealed class RefundCalculationService : IRefundCalculationService
         {
             totalBenefitValue += benefit.ContractualValue;
 
-            // Only granted benefits are recoverable
-            if (!benefit.IsGranted)
+            // Only granted/delivered benefits are recoverable. Task E: the predicate now reads
+// from the authoritative FulfillmentStatus. IsGranted is kept as a sync-mirror for
+// external consumer stability.
+                        if (benefit.FulfillmentStatus == FulfillmentStatus.Pending)
             {
                 benefitContributions.Add(new BenefitContribution
                 {

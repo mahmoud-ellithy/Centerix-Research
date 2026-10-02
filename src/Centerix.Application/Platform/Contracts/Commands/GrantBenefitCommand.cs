@@ -11,34 +11,39 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 
 /// <summary>
-/// Command to mark a contract benefit as delivered (physical gift handover).
-/// Requires the benefit to have already been explicitly granted (Pending → Granted → Delivered).
-/// Idempotent: if the benefit is already delivered, returns success without mutation.
-/// Uses optimistic concurrency to prevent duplicate delivery events.
+/// Explicit GRANT operation for a PhysicalGift ContractBenefit.
+/// Transitions FulfillmentStatus from Pending → Granted.
+/// Requires:
+///   * BenefitType == PhysicalGift
+///   * EligibilityStatus == Eligible
+///   * FulfillmentStatus == Pending
+/// Idempotent: already-Granted or already-Delivered calls return the existing state.
+/// Does NOT set Delivered — use <see cref="MarkBenefitDeliveredCommand"/> for that.
 /// </summary>
-public record MarkBenefitDeliveredCommand(
+public record GrantBenefitCommand(
     Guid ContractId,
-    Guid BenefitId) : IRequest<Result<BenefitDeliveryResult>>;
+    Guid BenefitId) : IRequest<Result<BenefitGrantResult>>;
 
 /// <summary>
-/// Result of a benefit delivery operation.
+/// Result of a benefit grant operation.
 /// </summary>
-public sealed record BenefitDeliveryResult
+public sealed record BenefitGrantResult
 {
     public Guid BenefitId { get; init; }
-    public bool IsDelivered { get; init; }
-    public DateTime? DeliveredAtUtc { get; init; }
+    public FulfillmentStatus FulfillmentStatus { get; init; }
+    public DateTime? GrantedAtUtc { get; init; }
+    public string? GrantedBy { get; init; }
 }
 
-public class MarkBenefitDeliveredHandler(
+public class GrantBenefitHandler(
     IAppDbContext dbContext,
     ICurrentUser currentUserService,
-    IAuditWriter auditWriter) : IRequestHandler<MarkBenefitDeliveredCommand, Result<BenefitDeliveryResult>>
+    IAuditWriter auditWriter) : IRequestHandler<GrantBenefitCommand, Result<BenefitGrantResult>>
 {
     private const int MaxDeadlockRetries = 3;
 
-    public async Task<Result<BenefitDeliveryResult>> Handle(
-        MarkBenefitDeliveredCommand request,
+    public async Task<Result<BenefitGrantResult>> Handle(
+        GrantBenefitCommand request,
         CancellationToken cancellationToken)
     {
         for (int attempt = 0; attempt <= MaxDeadlockRetries; attempt++)
@@ -54,17 +59,17 @@ public class MarkBenefitDeliveredHandler(
             }
         }
 
-        return Error.Conflict("BenefitDelivery.ConcurrencyConflict",
-            "This delivery request conflicted with another concurrent request. Please retry.");
+        return Error.Conflict("BenefitGrant.ConcurrencyConflict",
+            "This grant request conflicted with another concurrent request. Please retry.");
     }
 
-    private static bool IsRetryableError(Result<BenefitDeliveryResult> result)
+    private static bool IsRetryableError(Result<BenefitGrantResult> result)
     {
-        return result.Errors?.Any(e => e.Code == "BenefitDelivery.ConcurrencyConflict") ?? false;
+        return result.Errors?.Any(e => e.Code == "BenefitGrant.ConcurrencyConflict") ?? false;
     }
 
-    private async Task<Result<BenefitDeliveryResult>> TryHandleAsync(
-        MarkBenefitDeliveredCommand request,
+    private async Task<Result<BenefitGrantResult>> TryHandleAsync(
+        GrantBenefitCommand request,
         CancellationToken cancellationToken)
     {
         await using var transaction = dbContext.IsRelational
@@ -73,20 +78,20 @@ public class MarkBenefitDeliveredHandler(
 
         try
         {
-            return await ExecuteDeliveryAsync(request, cancellationToken, transaction);
+            return await ExecuteGrantAsync(request, cancellationToken, transaction);
         }
         catch (Exception ex) when (IsDeadlockException(ex))
         {
             if (transaction is not null)
                 await transaction.RollbackAsync(cancellationToken);
 
-            return Error.Conflict("BenefitDelivery.ConcurrencyConflict",
-                "This delivery request conflicted with another concurrent request. Please retry.");
+            return Error.Conflict("BenefitGrant.ConcurrencyConflict",
+                "This grant request conflicted with another concurrent request. Please retry.");
         }
     }
 
-    private async Task<Result<BenefitDeliveryResult>> ExecuteDeliveryAsync(
-        MarkBenefitDeliveredCommand request,
+    private async Task<Result<BenefitGrantResult>> ExecuteGrantAsync(
+        GrantBenefitCommand request,
         CancellationToken cancellationToken,
         IDbContextTransaction? transaction)
     {
@@ -105,33 +110,47 @@ public class MarkBenefitDeliveredHandler(
         if (string.IsNullOrWhiteSpace(tenantId) || contract.TenantId != tenantId)
             return ContractErrors.Benefit.CrossTenantBenefit;
 
-        // Only PhysicalGift benefits can be delivered
+        // Only PhysicalGift benefits participate in the grant/delivery lifecycle.
         if (benefit.BenefitType != ContractBenefitType.PhysicalGift)
             return ContractErrors.Benefit.OnlyPhysicalGiftCanBeDelivered;
 
-        // Already delivered — idempotent
-        if (benefit.FulfillmentStatus == FulfillmentStatus.Delivered)
+        // Idempotent: already granted.
+        if (benefit.FulfillmentStatus == FulfillmentStatus.Granted)
         {
-            return new BenefitDeliveryResult
+            return new BenefitGrantResult
             {
                 BenefitId = benefit.Id,
-                IsDelivered = true,
-                DeliveredAtUtc = benefit.DeliveredAtUtc
+                FulfillmentStatus = benefit.FulfillmentStatus,
+                GrantedAtUtc = benefit.GrantedAtUtc,
+                GrantedBy = benefit.GrantedBy
             };
         }
 
-        // Delivery requires prior explicit grant
-        if (benefit.FulfillmentStatus != FulfillmentStatus.Granted)
+        // Idempotent: already delivered — return terminal state.
+        if (benefit.FulfillmentStatus == FulfillmentStatus.Delivered)
         {
-            return ContractErrors.Benefit.NotGranted;
+            return new BenefitGrantResult
+            {
+                BenefitId = benefit.Id,
+                FulfillmentStatus = benefit.FulfillmentStatus,
+                GrantedAtUtc = benefit.GrantedAtUtc,
+                GrantedBy = benefit.GrantedBy
+            };
         }
 
-        var now = DateTime.UtcNow;
-        var deliveredBy = currentUserService.UserId;
+        // Domain guards.
+        if (benefit.EligibilityStatus != BenefitEligibilityStatus.Eligible)
+            return ContractErrors.Benefit.NotEligible;
 
-        var deliverResult = benefit.Deliver(now, deliveredBy, contract.TenantId);
-        if (!deliverResult.IsSuccess)
-            return deliverResult.Errors!;
+        if (benefit.FulfillmentStatus != FulfillmentStatus.Pending)
+            return ContractErrors.Benefit.InvalidFulfillmentTransition;
+
+        var now = DateTime.UtcNow;
+        var grantedBy = currentUserService.UserId;
+
+        var grantResult = benefit.Grant(now, grantedBy, contract.TenantId);
+        if (!grantResult.IsSuccess)
+            return grantResult.Errors!;
 
         dbContext.StampAddedTenantIds(contract.TenantId!);
 
@@ -144,42 +163,43 @@ public class MarkBenefitDeliveredHandler(
             if (transaction is not null)
                 await transaction.RollbackAsync(cancellationToken);
 
-            return Error.Conflict("BenefitDelivery.ConcurrencyConflict",
-                "This delivery request conflicted with another concurrent request. Please retry.");
+            return Error.Conflict("BenefitGrant.ConcurrencyConflict",
+                "This grant request conflicted with another concurrent request. Please retry.");
         }
         catch (Exception ex) when (IsDeadlockException(ex))
         {
             if (transaction is not null)
                 await transaction.RollbackAsync(cancellationToken);
 
-            return Error.Conflict("BenefitDelivery.ConcurrencyConflict",
-                "This delivery request conflicted with another concurrent request. Please retry.");
+            return Error.Conflict("BenefitGrant.ConcurrencyConflict",
+                "This grant request conflicted with another concurrent request. Please retry.");
         }
 
         if (transaction is not null)
             await transaction.CommitAsync(cancellationToken);
 
         await auditWriter.WriteAsync(
-            action: "Benefit.Delivered",
+            action: "Benefit.Granted",
             entityType: nameof(ContractBenefit),
             entityId: benefit.Id.ToString(),
-            oldValue: AuditPayload.Serialize(new { FulfillmentStatus = FulfillmentStatus.Granted.ToString() }),
+            oldValue: AuditPayload.Serialize(new { FulfillmentStatus = FulfillmentStatus.Pending.ToString() }),
             newValue: AuditPayload.Serialize(new
             {
-                FulfillmentStatus = FulfillmentStatus.Delivered.ToString(),
-                DeliveredAtUtc = now,
-                DeliveredBy = deliveredBy,
+                FulfillmentStatus = FulfillmentStatus.Granted.ToString(),
+                GrantedAtUtc = now,
+                GrantedBy = grantedBy,
                 benefit.Name,
                 benefit.ContractualValue,
                 benefit.CurrencyCode
             }),
             cancellationToken: cancellationToken);
 
-        return new BenefitDeliveryResult
+        return new BenefitGrantResult
         {
             BenefitId = benefit.Id,
-            IsDelivered = true,
-            DeliveredAtUtc = now
+            FulfillmentStatus = benefit.FulfillmentStatus,
+            GrantedAtUtc = benefit.GrantedAtUtc,
+            GrantedBy = benefit.GrantedBy
         };
     }
 

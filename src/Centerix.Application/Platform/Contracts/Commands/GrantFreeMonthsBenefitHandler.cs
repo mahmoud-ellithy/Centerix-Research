@@ -84,8 +84,8 @@ public class GrantFreeMonthsBenefitHandler(
             return FreeMonthsBenefitErrors.CrossTenantFreeMonthsBenefit;
 
         // Idempotent: already Granted
-        if (benefit.FulfillmentStatus == FreeMonthsFulfillmentStatus.Granted ||
-            benefit.FulfillmentStatus == FreeMonthsFulfillmentStatus.AppliedToSubscription)
+        if (benefit.FulfillmentStatus == FulfillmentStatus.Granted ||
+            benefit.FulfillmentStatus == FulfillmentStatus.AppliedToSubscription)
         {
             return new GrantFreeMonthsBenefitResult
             {
@@ -95,7 +95,7 @@ public class GrantFreeMonthsBenefitHandler(
             };
         }
 
-        if (benefit.FulfillmentStatus != FreeMonthsFulfillmentStatus.Pending)
+        if (benefit.FulfillmentStatus != FulfillmentStatus.Pending)
             return FreeMonthsBenefitErrors.InvalidFulfillmentStatus;
 
         if (benefit.EligibilityStatus != FreeMonthsEligibilityStatus.Eligible)

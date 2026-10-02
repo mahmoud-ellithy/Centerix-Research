@@ -40,7 +40,7 @@ public static class FreeMonthsBenefitErrors
 
     public static Error InvalidFulfillmentStatus =>
         Error.Validation("Contract.FreeMonthsBenefit.FulfillmentStatus_Invalid",
-            "FreeMonthsFulfillmentStatus value is not defined");
+            "FulfillmentStatus value is not defined");
 
     public static Error NotEligible =>
         Error.Validation("Contract.FreeMonthsBenefit.NotEligible",

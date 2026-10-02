@@ -166,7 +166,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
         var benefit = NewBenefit();
 
         Assert.Equal(FreeMonthsEligibilityStatus.NotEligible, benefit.EligibilityStatus);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Pending, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Pending, benefit.FulfillmentStatus);
         Assert.Null(benefit.EligibleAtUtc);
         Assert.Null(benefit.GrantedAtUtc);
         Assert.Null(benefit.AppliedAtUtc);
@@ -257,7 +257,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
         var result = benefit.Grant(t);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Granted, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Granted, benefit.FulfillmentStatus);
         Assert.Equal(t, benefit.GrantedAtUtc);
         Assert.True(benefit.IsGranted);
         Assert.False(benefit.IsAppliedToSubscription);
@@ -272,7 +272,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.FreeMonthsBenefit.NotEligible", result.Errors!.First().Code);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Pending, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Pending, benefit.FulfillmentStatus);
     }
 
     [Fact]
@@ -302,7 +302,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
         var result = benefit.MarkAppliedToSubscription(t);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
         Assert.Equal(t, benefit.AppliedAtUtc);
         Assert.True(benefit.IsAppliedToSubscription);
     }
@@ -316,7 +316,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.FreeMonthsBenefit.NotGranted", result.Errors!.First().Code);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Pending, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Pending, benefit.FulfillmentStatus);
     }
 
     [Fact]
@@ -357,7 +357,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(FreeMonthsEligibilityStatus.NotEligible, benefit.EligibilityStatus);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Granted, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Granted, benefit.FulfillmentStatus);
         Assert.Equal(t, benefit.GrantedAtUtc); // Fulfillment timestamp preserved
     }
 
@@ -377,7 +377,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(FreeMonthsEligibilityStatus.NotEligible, benefit.EligibilityStatus);
-        Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
         Assert.Equal(t, benefit.GrantedAtUtc);
         Assert.Equal(t, benefit.AppliedAtUtc);
         Assert.True(benefit.IsAppliedToSubscription);
@@ -399,7 +399,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(FreeMonthsEligibilityStatus.Eligible, benefit.EligibilityStatus);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Granted, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Granted, benefit.FulfillmentStatus);
         Assert.Equal(t1, benefit.GrantedAtUtc); // original grant timestamp preserved
         Assert.Equal(t2, benefit.EligibleAtUtc); // latest EligibleAtUtc tracks the current state
     }
@@ -423,7 +423,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(FreeMonthsEligibilityStatus.Eligible, benefit.EligibilityStatus);
-        Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
         Assert.Equal(t1, benefit.GrantedAtUtc);
         Assert.Equal(t1, benefit.AppliedAtUtc);
         Assert.Equal(t2, benefit.EligibleAtUtc);
@@ -442,7 +442,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
 
         Assert.True(result.IsSuccess); // idempotent on already-Applied path
         // No state change.
-        Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -485,7 +485,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
         benefit.MarkNotEligible();
         benefit.MarkEligible(t);
 
-        Assert.Equal(FreeMonthsFulfillmentStatus.Pending, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Pending, benefit.FulfillmentStatus);
         Assert.Null(benefit.GrantedAtUtc);
         Assert.Null(benefit.AppliedAtUtc);
     }
@@ -498,19 +498,19 @@ public class TaskC_FreeMonthsBenefitFoundationTests
     public void Test28_FreeMonthsBenefit_UsesSeparateEnumsFromContractBenefit_BenefitEligibilityStatus()
     {
         // Verify FreeMonthsEligibilityStatus does NOT have a Delivered value
-        // (that's PhysicalGift-only) and FreeMonthsFulfillmentStatus does NOT
+        // (that's PhysicalGift-only) and FulfillmentStatus does NOT
         // have a Delivered value.
         Assert.False(Enum.IsDefined(typeof(FreeMonthsEligibilityStatus), 2));
-        Assert.False(Enum.IsDefined(typeof(FreeMonthsFulfillmentStatus), 3));
+        Assert.False(Enum.IsDefined(typeof(FulfillmentStatus), 3));
     }
 
     [Fact]
-    public void Test29_FreeMonthsFulfillmentStatus_UnderlyingNumericValues_ArePinned()
+    public void Test29_FulfillmentStatus_UnderlyingNumericValues_ArePinned()
     {
         // Pinned so persisted columns and tests remain stable across refactors.
-        Assert.Equal(0, (byte)FreeMonthsFulfillmentStatus.Pending);
-        Assert.Equal(1, (byte)FreeMonthsFulfillmentStatus.Granted);
-        Assert.Equal(2, (byte)FreeMonthsFulfillmentStatus.AppliedToSubscription);
+        Assert.Equal(0, (byte)FulfillmentStatus.Pending);
+        Assert.Equal(1, (byte)FulfillmentStatus.Granted);
+        Assert.Equal(2, (byte)FulfillmentStatus.AppliedToSubscription);
     }
 
     [Fact]
@@ -537,7 +537,7 @@ public class TaskC_FreeMonthsBenefitFoundationTests
 
         // Not eligible at construction.
         Assert.Equal(FreeMonthsEligibilityStatus.NotEligible, benefit.EligibilityStatus);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Pending, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Pending, benefit.FulfillmentStatus);
 
         // Eligibility flips to Eligible once the rule evaluates true.
         Assert.True(benefit.MarkEligible(t1).IsSuccess);
@@ -545,14 +545,14 @@ public class TaskC_FreeMonthsBenefitFoundationTests
 
         // Grant step records the grant decision.
         Assert.True(benefit.Grant(t2).IsSuccess);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Granted, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Granted, benefit.FulfillmentStatus);
         Assert.Equal(t2, benefit.GrantedAtUtc);
 
         // Apply step extends TenantPlan.EffectiveEndsAtUtc (out of scope for this
         // aggregate; idempotency is enforced by TenantPlan.AppliedFreeMonthsBenefitIds,
         // not here).
         Assert.True(benefit.MarkAppliedToSubscription(t3).IsSuccess);
-        Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.AppliedToSubscription, benefit.FulfillmentStatus);
         Assert.Equal(t3, benefit.AppliedAtUtc);
         Assert.True(benefit.IsAppliedToSubscription);
     }

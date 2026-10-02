@@ -169,7 +169,7 @@ public class TaskD_FreeMonthsBenefitSqlServerTests
                 .AsNoTracking()
                 .FirstAsync(b => b.Id == benefitId);
 
-            Assert.Equal(FreeMonthsFulfillmentStatus.Granted, reloaded.FulfillmentStatus);
+            Assert.Equal(FulfillmentStatus.Granted, reloaded.FulfillmentStatus);
             Assert.NotNull(reloaded.GrantedAtUtc);
             Assert.Equal(2, reloaded.EntitlementMonths);
             Assert.Equal("EGP", reloaded.CurrencyCode);
@@ -264,7 +264,7 @@ public class TaskD_FreeMonthsBenefitSqlServerTests
                 .AsNoTracking()
                 .FirstAsync(b => b.Id == benefitId);
 
-            Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, reloadedBenefit.FulfillmentStatus);
+            Assert.Equal(FulfillmentStatus.AppliedToSubscription, reloadedBenefit.FulfillmentStatus);
             Assert.NotNull(reloadedBenefit.AppliedAtUtc);
 
             var reloadedSub = await db.TenantPlans
@@ -476,7 +476,7 @@ public class TaskD_FreeMonthsBenefitSqlServerTests
                 .AsNoTracking()
                 .FirstAsync(b => b.Id == benefitId);
 
-            Assert.Equal(FreeMonthsFulfillmentStatus.Granted, reloadedBenefit.FulfillmentStatus); // Still Granted, not Applied
+            Assert.Equal(FulfillmentStatus.Granted, reloadedBenefit.FulfillmentStatus); // Still Granted, not Applied
 
             var reloadedSub = await db.TenantPlans
                 .IgnoreQueryFilters()
@@ -699,7 +699,7 @@ public class TaskD_FreeMonthsBenefitSqlServerTests
         Assert.Equal(5, reloaded.EntitlementMonths);
         Assert.Equal("EGP", reloaded.CurrencyCode);
         Assert.Equal(FreeMonthsEligibilityStatus.Eligible, reloaded.EligibilityStatus);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Granted, reloaded.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Granted, reloaded.FulfillmentStatus);
         Assert.NotNull(reloaded.GrantedAtUtc);
         Assert.NotNull(reloaded.EligibleAtUtc);
         Assert.Null(reloaded.AppliedAtUtc); // Not yet applied
@@ -798,7 +798,7 @@ public class TaskD_FreeMonthsBenefitSqlServerTests
                 .AsNoTracking()
                 .FirstAsync(b => b.Id == benefitId);
 
-            Assert.Equal(FreeMonthsFulfillmentStatus.Granted, reloadedBenefit.FulfillmentStatus);
+            Assert.Equal(FulfillmentStatus.Granted, reloadedBenefit.FulfillmentStatus);
             Assert.Null(reloadedBenefit.AppliedAtUtc);
 
             var reloadedSub = await db.TenantPlans

@@ -136,3 +136,22 @@ public class BenefitDeliveredEvent : DomainEvent
         DeliveredBy = deliveredBy;
     }
 }
+
+/// <summary>Raised when a Contract Benefit is explicitly granted (Pending → Granted).</summary>
+public class BenefitGrantedEvent : DomainEvent
+{
+    public Guid ContractId { get; }
+    public Guid BenefitId { get; }
+    public string TenantId { get; }
+    public DateTime GrantedAtUtc { get; }
+    public string? GrantedBy { get; }
+
+    public BenefitGrantedEvent(Guid contractId, Guid benefitId, string tenantId, DateTime grantedAtUtc, string? grantedBy)
+    {
+        ContractId = contractId;
+        BenefitId = benefitId;
+        TenantId = tenantId;
+        GrantedAtUtc = grantedAtUtc;
+        GrantedBy = grantedBy;
+    }
+}

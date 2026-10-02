@@ -45,10 +45,22 @@ public class ContractBenefitConfiguration : IEntityTypeConfiguration<ContractBen
 
         builder.Property(b => b.EligibleAtUtc);
 
+        builder.Property(b => b.FulfillmentStatus)
+            .HasConversion<byte>()
+            .IsRequired();
+
+        // IsGranted remains as a persisted legacy flag for migration compatibility
+        // and external reader queries; it MUST be kept in sync with FulfillmentStatus.
+        // SyncIsGranted() is called from Grant() / Deliver() and via the load interceptor.
         builder.Property(b => b.IsGranted)
             .IsRequired();
 
         builder.Property(b => b.GrantedAtUtc);
+
+        builder.Property(b => b.GrantedBy)
+            .HasMaxLength(450);
+
+        builder.Property(b => b.DeliveredAtUtc);
 
         builder.Property(b => b.DeliveredBy)
             .HasMaxLength(450);
@@ -65,6 +77,9 @@ public class ContractBenefitConfiguration : IEntityTypeConfiguration<ContractBen
 
         builder.HasIndex(b => new { b.ContractId, b.IsGranted })
             .HasDatabaseName("IX_ContractBenefits_ContractId_IsGranted");
+
+        builder.HasIndex(b => new { b.ContractId, b.FulfillmentStatus })
+            .HasDatabaseName("IX_ContractBenefits_ContractId_FulfillmentStatus");
 
         builder.HasIndex(b => new { b.ContractId, b.EligibilityStatus })
             .HasDatabaseName("IX_ContractBenefits_ContractId_EligibilityStatus");

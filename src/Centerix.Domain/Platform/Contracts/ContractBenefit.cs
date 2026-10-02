@@ -19,13 +19,29 @@ using Centerix.Domain.Platform.Contracts.Events;
 /// The financial invariant requires that the total value of all benefits under a Contract
 /// must not exceed three months of the customer's contractual monthly value.
 ///
-/// Delivery lifecycle: NotEligible → Eligible → Delivered
-/// - NotEligible: configured on contract, conditions not yet met
-/// - Eligible: contractual conditions satisfied, ready for delivery
-/// - Delivered: physical gift handed to customer (IsGranted = true)
+/// The PhysicalGift benefit tracks TWO independent state machines:
 ///
-/// A benefit that was never delivered must not generate a recovery deduction.
-/// Once delivered, the benefit's snapshot fields (Name, Value, Type, Currency) are immutable.
+/// <list type="number">
+///   <item>
+///     <term>Eligibility (reversible)</term>
+///     <description>
+///       <see cref="EligibilityStatus"/> ∈ { NotEligible, Eligible }.
+///       Updated by the eligibility evaluator; never moves fulfillment backward.
+///     </description>
+///   </item>
+///   <item>
+///     <term>Fulfillment (monotone)</term>
+///     <description>
+///       <see cref="FulfillmentStatus"/> ∈ { Pending, Granted, Delivered }.
+///       Pending → Granted via <see cref="Grant"/>; Granted → Delivered via <see cref="Deliver"/>.
+///       Once <c>Delivered</c>, terminal. PhysicalGift MUST NOT use
+///       <see cref="FulfillmentStatus.AppliedToSubscription"/>.
+///     </description>
+///   </item>
+/// </list>
+///
+/// A benefit that was never granted/delivered must not generate a recovery deduction.
+/// Once granted, the benefit's snapshot fields (Name, Value, Type, Currency) are immutable.
 /// </remarks>
 public class ContractBenefit : Entity
 {
@@ -47,17 +63,30 @@ public class ContractBenefit : Entity
     /// <summary>Currency code (ISO-4217, e.g., EGP, USD).</summary>
     public string CurrencyCode { get; private set; } = default!;
 
-    /// <summary>Delivery lifecycle status.</summary>
+    /// <summary>
+    /// Reversible eligibility status. Independent of <see cref="FulfillmentStatus"/>:
+    /// eligibility changes MUST NEVER move fulfillment backward.
+    /// </summary>
     public BenefitEligibilityStatus EligibilityStatus { get; private set; }
 
     /// <summary>UTC timestamp when the benefit became eligible.</summary>
     public DateTime? EligibleAtUtc { get; private set; }
 
-    /// <summary>Whether this benefit has been actually granted/delivered to the tenant.</summary>
-    public bool IsGranted { get; private set; }
+    /// <summary>
+    /// Monotone fulfillment status for <c>ContractBenefit</c> PhysicalGift benefits.
+    /// Lifecycle: Pending → Granted → Delivered. Terminal at <c>Delivered</c>.
+    /// <see cref="FulfillmentStatus.AppliedToSubscription"/> is never valid here.
+    /// </summary>
+    public FulfillmentStatus FulfillmentStatus { get; private set; }
 
-    /// <summary>UTC timestamp when the benefit was granted/delivered.</summary>
+    /// <summary>UTC timestamp when the benefit was granted.</summary>
     public DateTime? GrantedAtUtc { get; private set; }
+
+    /// <summary>ID of the user who granted the benefit (audit trail).</summary>
+    public string? GrantedBy { get; private set; }
+
+    /// <summary>UTC timestamp when the benefit was delivered (physical handover).</summary>
+    public DateTime? DeliveredAtUtc { get; private set; }
 
     /// <summary>ID of the user who delivered the benefit (audit trail).</summary>
     public string? DeliveredBy { get; private set; }
@@ -94,6 +123,7 @@ public class ContractBenefit : Entity
         ContractualValue = contractualValue;
         CurrencyCode = currencyCode;
         EligibilityStatus = BenefitEligibilityStatus.NotEligible;
+        FulfillmentStatus = FulfillmentStatus.Pending;
         EligibilityRule = eligibilityRule;
     }
 
@@ -142,15 +172,14 @@ public class ContractBenefit : Entity
 
     /// <summary>
     /// Transitions the benefit from NotEligible to Eligible.
-    /// Must be called before MarkGranted/Deliver for physical gifts.
-    /// Idempotent: returns success if already eligible or delivered.
+    /// Idempotent: returns success if already eligible. Does NOT mutate fulfillment.
     /// </summary>
     public Result<Updated> MarkEligible(DateTime utcNow, string? tenantId = null)
     {
-        if (EligibilityStatus == BenefitEligibilityStatus.Delivered)
+        if (EligibilityStatus == BenefitEligibilityStatus.Eligible)
             return Result.Updated;
 
-        if (EligibilityStatus == BenefitEligibilityStatus.Eligible)
+        if (EligibilityStatus == BenefitEligibilityStatus.Delivered)
             return Result.Updated;
 
         EligibilityStatus = BenefitEligibilityStatus.Eligible;
@@ -162,32 +191,107 @@ public class ContractBenefit : Entity
     }
 
     /// <summary>
-    /// Marks this benefit as granted/delivered to the tenant.
-    /// For physical gifts, this records the physical handover.
-    /// Only PhysicalGift benefits can be delivered; other types are rejected.
-    /// Idempotent: returns success if already granted.
+    /// Transitions the benefit from NotEligible back to NotEligible (no-op marker for symmetry).
+    /// Used by the eligibility evaluator when re-evaluation flips the result.
+    /// Idempotent. Does NOT mutate fulfillment.
     /// </summary>
-    /// <remarks>
-    /// Delivery creates an immutable audit record. Once delivered, the benefit's
-    /// snapshot fields (Name, Value, Type, Currency) cannot be silently changed.
-    /// </remarks>
-    public Result<Updated> MarkGranted(DateTime utcNow, string? deliveredBy = null, string? tenantId = null)
+    public Result<Updated> MarkNotEligible()
     {
-        if (IsGranted)
+        if (FulfillmentStatus == FulfillmentStatus.Delivered)
+        {
+            // Delivered remains delivered even if eligibility flips back.
+            // The eligibility status may move but Delivered is terminal.
+            if (EligibilityStatus == BenefitEligibilityStatus.NotEligible)
+                return Result.Updated;
+
+            EligibilityStatus = BenefitEligibilityStatus.NotEligible;
+            return Result.Updated;
+        }
+
+        if (EligibilityStatus == BenefitEligibilityStatus.NotEligible)
             return Result.Updated;
 
-        // Only PhysicalGift benefits can be delivered.
+        EligibilityStatus = BenefitEligibilityStatus.NotEligible;
+        return Result.Updated;
+    }
+
+    /// <summary>
+    /// Records the explicit GRANT decision. Transitions fulfillment from Pending → Granted.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Rules:
+    /// <list type="bullet">
+    ///   <item><description>BenefitType MUST be <see cref="ContractBenefitType.PhysicalGift"/>.</description></item>
+    ///   <item><description><see cref="EligibilityStatus"/> MUST be <see cref="BenefitEligibilityStatus.Eligible"/>.</description></item>
+    ///   <item><description><see cref="FulfillmentStatus"/> MUST be <see cref="FulfillmentStatus.Pending"/>.</description></item>
+    ///   <item><description>Idempotent: if already Granted or Delivered, returns success without mutating fields.</description></item>
+    ///   <item><description>Stamps <c>GrantedAtUtc</c> and <c>GrantedBy</c> on first transition.</description></item>
+    ///   <item><description>Does NOT set Delivered; does NOT mutate <see cref="EligibilityStatus"/>.</description></item>
+    /// </para>
+    /// </remarks>
+    public Result<Updated> Grant(DateTime utcNow, string? grantedBy = null, string? tenantId = null)
+    {
+        // Only PhysicalGift benefits participate in the grant/delivery lifecycle.
         if (BenefitType != ContractBenefitType.PhysicalGift)
             return ContractErrors.Benefit.OnlyPhysicalGiftCanBeDelivered;
 
-        // Must be eligible before delivery.
+        // Already granted or delivered — idempotent.
+        if (FulfillmentStatus == FulfillmentStatus.Granted ||
+            FulfillmentStatus == FulfillmentStatus.Delivered)
+        {
+            return Result.Updated;
+        }
+
+        // Must be eligible before grant.
         if (EligibilityStatus != BenefitEligibilityStatus.Eligible)
             return ContractErrors.Benefit.NotEligible;
 
-        IsGranted = true;
+        if (FulfillmentStatus != FulfillmentStatus.Pending)
+            return ContractErrors.Benefit.InvalidFulfillmentTransition;
+
+        FulfillmentStatus = FulfillmentStatus.Granted;
         GrantedAtUtc = utcNow;
+        GrantedBy = grantedBy;
+        SyncIsGranted();
+
+        AddDomainEvent(new BenefitGrantedEvent(ContractId, Id, tenantId ?? string.Empty, utcNow, grantedBy));
+
+        return Result.Updated;
+    }
+
+    /// <summary>
+    /// Records the physical DELIVERY. Transitions fulfillment from Granted → Delivered.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Rules:
+    /// <list type="bullet">
+    ///   <item><description>BenefitType MUST be <see cref="ContractBenefitType.PhysicalGift"/>.</description></item>
+    ///   <item><description><see cref="FulfillmentStatus"/> MUST be <see cref="FulfillmentStatus.Granted"/>.</description></item>
+    ///   <item><description>Idempotent: if already Delivered, returns success without mutating fields.</description></item>
+    ///   <item><description>Stamps <c>DeliveredAtUtc</c> and <c>DeliveredBy</c> on first transition.</description></item>
+    ///   <item><description>Does NOT mutate <see cref="EligibilityStatus"/>.</description></item>
+    ///   <item><description>Terminal — fulfillment MUST NOT move backward.</description></item>
+    /// </para>
+    /// </remarks>
+    public Result<Updated> Deliver(DateTime utcNow, string? deliveredBy = null, string? tenantId = null)
+    {
+        if (BenefitType != ContractBenefitType.PhysicalGift)
+            return ContractErrors.Benefit.OnlyPhysicalGiftCanBeDelivered;
+
+        // Already delivered — idempotent.
+        if (FulfillmentStatus == FulfillmentStatus.Delivered)
+            return Result.Updated;
+
+        // Must be granted before delivery.
+        if (FulfillmentStatus != FulfillmentStatus.Granted)
+            return ContractErrors.Benefit.NotGranted;
+
+        FulfillmentStatus = FulfillmentStatus.Delivered;
+        DeliveredAtUtc = utcNow;
         DeliveredBy = deliveredBy;
-        EligibilityStatus = BenefitEligibilityStatus.Delivered;
+        SyncIsGranted();
 
         AddDomainEvent(new BenefitDeliveredEvent(ContractId, Id, tenantId ?? string.Empty, utcNow, deliveredBy));
 
@@ -195,12 +299,35 @@ public class ContractBenefit : Entity
     }
 
     /// <summary>
+    /// Backward-compatible grant-or-deliver single-shot. Used only by legacy callers/tests
+    /// that conflate grant with delivery. New code MUST use <see cref="Grant"/> followed by
+    /// <see cref="Deliver"/>.
+    /// </summary>
+    [Obsolete("Use Grant() + Deliver() instead. This entry point is kept for legacy tests only.")]
+    public Result<Updated> MarkGranted(DateTime utcNow, string? deliveredBy = null, string? tenantId = null)
+    {
+        // Try grant first
+        if (FulfillmentStatus == FulfillmentStatus.Pending)
+        {
+            var grantResult = Grant(utcNow, deliveredBy, tenantId);
+            if (!grantResult.IsSuccess)
+                return grantResult;
+        }
+        // Then try deliver (idempotent if already Delivered)
+        if (FulfillmentStatus == FulfillmentStatus.Granted)
+        {
+            var deliverResult = Deliver(utcNow, deliveredBy, tenantId);
+            if (!deliverResult.IsSuccess)
+                return deliverResult;
+        }
+        SyncIsGranted();
+        return Result.Updated;
+    }
+
+    /// <summary>
     /// Calculates the consumed value of this benefit based on elapsed contract duration.
     /// Uses day-based formula: ConsumedValue = ContractualValue × ElapsedDays / DurationDays
     /// </summary>
-    /// <param name="elapsedDays">Days elapsed since contract effective date.</param>
-    /// <param name="contractDurationDays">Total contract duration in days (EndsAtUtc - EffectiveAtUtc).</param>
-    /// <returns>Consumed value, clamped to [0, ContractualValue].</returns>
     public decimal CalculateConsumedValue(int elapsedDays, int contractDurationDays)
     {
         if (ContractualValue <= 0)
@@ -222,19 +349,32 @@ public class ContractBenefit : Entity
     /// <summary>
     /// Calculates the remaining (unconsumed) value of this benefit.
     /// </summary>
-    /// <param name="elapsedDays">Days elapsed since contract effective date.</param>
-    /// <param name="contractDurationDays">Total contract duration in days.</param>
-    /// <returns>Remaining value, always >= 0.</returns>
     public decimal CalculateRemainingValue(int elapsedDays, int contractDurationDays)
     {
         var consumed = CalculateConsumedValue(elapsedDays, contractDurationDays);
         return ContractualValue - consumed;
     }
 
-    /// <summary>Whether this benefit is eligible for delivery.</summary>
-    public bool IsEligibleForDelivery =>
-        EligibilityStatus == BenefitEligibilityStatus.Eligible;
+    /// <summary>Whether this benefit is eligible for grant.</summary>
+    public bool IsEligibleForGrant =>
+        BenefitType == ContractBenefitType.PhysicalGift
+        && EligibilityStatus == BenefitEligibilityStatus.Eligible
+        && FulfillmentStatus == FulfillmentStatus.Pending;
+
+    /// <summary>Whether this benefit has been granted (forward-only fulfillment predicate).</summary>
+    public bool IsGranted { get; private set; }
 
     /// <summary>Whether this benefit has been delivered.</summary>
-    public bool IsDelivered => IsGranted;
+    public bool IsDelivered => FulfillmentStatus == FulfillmentStatus.Delivered;
+
+    /// <summary>
+    /// Reconciles the legacy <c>IsGranted</c> flag with the new authoritative
+    /// <see cref="FulfillmentStatus"/>. MUST be called after <see cref="Grant"/>,
+    /// <see cref="Deliver"/>, and on entity load (to keep the column in sync).
+    /// </summary>
+    internal void SyncIsGranted()
+    {
+        IsGranted = FulfillmentStatus == FulfillmentStatus.Granted
+                    || FulfillmentStatus == FulfillmentStatus.Delivered;
+    }
 }

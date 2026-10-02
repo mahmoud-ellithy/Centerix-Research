@@ -87,7 +87,7 @@ public class ApplyFreeMonthsBenefitToSubscriptionHandler(
             return FreeMonthsBenefitErrors.CrossTenantFreeMonthsBenefit;
 
         // 2. Idempotent: already Applied
-        if (benefit.FulfillmentStatus == FreeMonthsFulfillmentStatus.AppliedToSubscription)
+        if (benefit.FulfillmentStatus == FulfillmentStatus.AppliedToSubscription)
         {
             // Find the currently-active subscription for this tenant+contract to return accurate metadata.
             // An expired/cancelled subscription must not be reported as the applied-to target.
@@ -111,7 +111,7 @@ public class ApplyFreeMonthsBenefitToSubscriptionHandler(
         }
 
         // 3. Must be Granted before applying
-        if (benefit.FulfillmentStatus != FreeMonthsFulfillmentStatus.Granted)
+        if (benefit.FulfillmentStatus != FulfillmentStatus.Granted)
             return FreeMonthsBenefitErrors.NotGranted;
 
         // 4. Load the currently-active, unexpired subscription for this tenant+contract.

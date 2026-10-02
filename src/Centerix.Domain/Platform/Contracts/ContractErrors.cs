@@ -164,11 +164,26 @@ public static class ContractErrors
 
         public static Error NotEligible =>
             Error.Validation("Contract.Benefit.NotEligible",
-                "Benefit must be eligible before it can be delivered");
+                "Benefit must be eligible before it can be granted");
+
+        public static Error NotGranted =>
+            Error.Validation("Contract.Benefit.NotGranted",
+                "Benefit must be granted before it can be delivered");
 
         public static Error OnlyPhysicalGiftCanBeDelivered =>
             Error.Validation("Contract.Benefit.OnlyPhysicalGiftCanBeDelivered",
-                "Only PhysicalGift benefits can be delivered through MarkBenefitDelivered");
+                "Only PhysicalGift benefits participate in the grant/delivery lifecycle");
+
+        public static Error InvalidFulfillmentTransition =>
+            Error.Conflict("Contract.Benefit.InvalidFulfillmentTransition",
+                "FulfillmentStatus transition is not permitted from the current state");
+
+        public static Error AlreadyGranted =>
+            Error.Conflict("Contract.Benefit.AlreadyGranted", "Benefit has already been granted");
+
+        public static Error AlreadyAppliedToSubscription =>
+            Error.Conflict("Contract.Benefit.AlreadyAppliedToSubscription",
+                "AppliedToSubscription is not valid for PhysicalGift benefits");
 
         public static Error NonFinancialBenefitNotRecoverable =>
             Error.Validation("Contract.Benefit.NonFinancialBenefitNotRecoverable",

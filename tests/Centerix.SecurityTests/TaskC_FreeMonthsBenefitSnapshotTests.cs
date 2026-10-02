@@ -291,7 +291,7 @@ public class TaskC_FreeMonthsBenefitSnapshotTests : IClassFixture<TaskCFakeTenan
 
         // Initial state on the Contract-side row is NotEligible + Pending.
         Assert.Equal(FreeMonthsEligibilityStatus.NotEligible, loadedBenefit.EligibilityStatus);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Pending, loadedBenefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Pending, loadedBenefit.FulfillmentStatus);
         Assert.Null(loadedBenefit.GrantedAtUtc);
         Assert.Null(loadedBenefit.AppliedAtUtc);
     }
@@ -436,7 +436,7 @@ public class TaskC_FreeMonthsBenefitSnapshotTests : IClassFixture<TaskCFakeTenan
         var loadedBenefit = loaded.FreeMonthsBenefits[0];
         Assert.Equal(FreeMonthsEligibilityStatus.Eligible, loadedBenefit.EligibilityStatus);
         Assert.Equal(t1, loadedBenefit.EligibleAtUtc);
-        Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, loadedBenefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.AppliedToSubscription, loadedBenefit.FulfillmentStatus);
         Assert.Equal(t2, loadedBenefit.GrantedAtUtc);
         Assert.Equal(t3, loadedBenefit.AppliedAtUtc);
         Assert.True(loadedBenefit.IsAppliedToSubscription);

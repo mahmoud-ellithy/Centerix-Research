@@ -102,7 +102,7 @@ public class TaskD_FreeMonthsBenefitApplicationTests : IClassFixture<TaskCFakeTe
             .IgnoreQueryFilters()
             .FirstAsync(b => b.Id == benefit.Id);
 
-        Assert.Equal(FreeMonthsFulfillmentStatus.Granted, reloaded.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Granted, reloaded.FulfillmentStatus);
         Assert.NotNull(reloaded.GrantedAtUtc);
     }
 
@@ -251,7 +251,7 @@ public class TaskD_FreeMonthsBenefitApplicationTests : IClassFixture<TaskCFakeTe
         var reloadedBenefit = await db2.FreeMonthsBenefits
             .IgnoreQueryFilters()
             .FirstAsync(b => b.Id == benefit.Id);
-        Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, reloadedBenefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.AppliedToSubscription, reloadedBenefit.FulfillmentStatus);
 
         // Reload subscription
         var reloadedSubscription = await db2.TenantPlans
@@ -472,7 +472,7 @@ public class TaskD_FreeMonthsBenefitApplicationTests : IClassFixture<TaskCFakeTe
         var reloadedBenefit = await db2.FreeMonthsBenefits
             .IgnoreQueryFilters()
             .FirstAsync(b => b.Id == benefit.Id);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Granted, reloadedBenefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Granted, reloadedBenefit.FulfillmentStatus);
 
         var reloadedSub = await db2.TenantPlans
             .IgnoreQueryFilters()
@@ -599,7 +599,7 @@ public class TaskD_FreeMonthsBenefitApplicationTests : IClassFixture<TaskCFakeTe
         var reloadedBenefit = await db2.FreeMonthsBenefits
             .IgnoreQueryFilters()
             .FirstAsync(b => b.Id == benefit.Id);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Granted, reloadedBenefit.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Granted, reloadedBenefit.FulfillmentStatus);
 
         var reloadedSub = await db2.TenantPlans
             .IgnoreQueryFilters()

@@ -353,7 +353,7 @@ public class TaskC_FreeMonthsBenefitSqlServerTests
         Assert.Equal(sourceRuleJson, loadedJson);
         Assert.Equal(1, loaded.EntitlementMonths);
         Assert.Equal(FreeMonthsEligibilityStatus.NotEligible, loaded.EligibilityStatus);
-        Assert.Equal(FreeMonthsFulfillmentStatus.Pending, loaded.FulfillmentStatus);
+        Assert.Equal(FulfillmentStatus.Pending, loaded.FulfillmentStatus);
 
         // Persisted JSON must be safe.
         var rawJson = await LoadPersistedFreeMonthsBenefitJson(tenantId, loaded.Id);
@@ -461,7 +461,7 @@ public class TaskC_FreeMonthsBenefitSqlServerTests
             var loadedBenefit = loaded.FreeMonthsBenefits[0];
             Assert.Equal(FreeMonthsEligibilityStatus.Eligible, loadedBenefit.EligibilityStatus);
             Assert.Equal(t1, loadedBenefit.EligibleAtUtc);
-            Assert.Equal(FreeMonthsFulfillmentStatus.AppliedToSubscription, loadedBenefit.FulfillmentStatus);
+            Assert.Equal(FulfillmentStatus.AppliedToSubscription, loadedBenefit.FulfillmentStatus);
             Assert.Equal(t2, loadedBenefit.GrantedAtUtc);
             Assert.Equal(t3, loadedBenefit.AppliedAtUtc);
             Assert.True(loadedBenefit.IsAppliedToSubscription);
