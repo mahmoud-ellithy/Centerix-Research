@@ -5,26 +5,28 @@ using Centerix.Domain.Platform.Contracts;
 using Centerix.Domain.Platform.Contracts.Enums;
 
 /// <summary>
-/// Determines whether a Contract Benefit can become eligible for delivery
+/// Determines whether a Contract Benefit can become eligible for grant / application
 /// based on the contract status, payment obligation state, and installment compliance.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Eligibility rules:
-/// 1. Contract must be Active
-/// 2. Required contractual payment obligation must be satisfied
-///    (completed payments >= contracted amount)
-/// 3. No overdue required installment
+/// </para>
+/// <list type="number">
+///   <item><description>Contract must be Active.</description></item>
+///   <item><description>Required contractual payment obligation is satisfied (completed payments ≥ contracted amount).</description></item>
+///   <item><description>No overdue required installment.</description></item>
+/// </list>
 ///
-/// Zero-value benefits (ContractualValue = 0) are NOT exempt from eligibility checks.
-/// All benefits, regardless of value, must satisfy the same contract and payment conditions.
-///
-/// For physical gifts, eligibility must be established before delivery.
+/// <para>
+/// This service ONLY mutates <see cref="BenefitEligibilityStatus"/>. It MUST NEVER
+/// affect <see cref="FulfillmentStatus"/>. Historical fulfillment state
+/// (Granted / Delivered / AppliedToSubscription) is the authoritative record and
+/// is preserved across eligibility re-evaluations.
+/// </para>
 /// </remarks>
 public class BenefitEligibilityService : IBenefitEligibilityService
 {
-    /// <summary>
-    /// Determines whether a benefit can become eligible for delivery.
-    /// </summary>
     public bool CanBecomeEligible(
         ContractBenefit benefit,
         Contract contract,
@@ -35,34 +37,25 @@ public class BenefitEligibilityService : IBenefitEligibilityService
         if (benefit == null) return false;
         if (contract == null) return false;
 
-        // Already delivered or eligible
-        if (benefit.EligibilityStatus == BenefitEligibilityStatus.Delivered)
-            return true;
-
+        // Already eligible — preserve state.
         if (benefit.EligibilityStatus == BenefitEligibilityStatus.Eligible)
             return true;
 
-        // Zero-value benefits are NOT exempt from eligibility checks.
-        // All benefits must satisfy the same contract and payment conditions.
-
-        // Contract must be Active
+        // Contract must be Active.
         if (contract.Status != ContractStatus.Active)
             return false;
 
-        // Payment obligation check: completed payments must cover the contracted amount
+        // Payment obligation check: completed payments must cover the contracted amount.
         if (contractedAmount > 0 && completedPaymentTotal < contractedAmount)
             return false;
 
-        // Overdue installment check: no overdue required installment allowed
+        // Overdue installment check: no overdue required installment allowed.
         if (hasOverdueInstallment)
             return false;
 
         return true;
     }
 
-    /// <summary>
-    /// Determines the effective eligibility status for a benefit given the current state.
-    /// </summary>
     public BenefitEligibilityStatus DetermineEligibilityStatus(
         ContractBenefit benefit,
         Contract contract,
@@ -70,15 +63,11 @@ public class BenefitEligibilityService : IBenefitEligibilityService
         decimal contractedAmount,
         bool hasOverdueInstallment = false)
     {
-        // Already delivered - keep delivered status
-        if (benefit.EligibilityStatus == BenefitEligibilityStatus.Delivered)
-            return BenefitEligibilityStatus.Delivered;
-
-        // Already eligible - keep eligible status
+        // Already eligible — preserve state. Eligibility is reversible, so this is a
+        // no-op recommendation: it does NOT lock fulfillment to Granted or Delivered.
         if (benefit.EligibilityStatus == BenefitEligibilityStatus.Eligible)
             return BenefitEligibilityStatus.Eligible;
 
-        // Check if can become eligible now
         if (CanBecomeEligible(benefit, contract, completedPaymentTotal, contractedAmount, hasOverdueInstallment))
             return BenefitEligibilityStatus.Eligible;
 

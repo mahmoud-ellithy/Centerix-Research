@@ -406,7 +406,7 @@ public class Phase9_4CancellationTests
         var h = CreateHandler(db);
         var c = CreateContract(db, "tenant-1", 1000m);
         var b = ContractBenefit.Create(Guid.NewGuid(), c.Id, ContractBenefitType.PhysicalGift, "Gift", null, 1000m, "EGP").Value;
-        b.MarkEligible(DateTime.UtcNow); b.MarkGranted(DateTime.UtcNow, "admin");
+        b.MarkEligible(DateTime.UtcNow); b.Grant(DateTime.UtcNow, "admin"); b.Deliver(DateTime.UtcNow, "admin");
         c.AddBenefit(b);
         db.ContractBenefits.Add(b);
         db.SaveChanges();

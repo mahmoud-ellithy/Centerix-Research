@@ -1183,14 +1183,16 @@ public class OfferToContractFlowTests
         physicalBenefit.MarkEligible(UtcNow);
         Assert.Equal(BenefitEligibilityStatus.Eligible, contract.Benefits[0].EligibilityStatus);
 
-        physicalBenefit.MarkGranted(UtcNow);
-        Assert.Equal(BenefitEligibilityStatus.Delivered, contract.Benefits[0].EligibilityStatus);
+        physicalBenefit.Grant(UtcNow);
+        physicalBenefit.Deliver(UtcNow);
+        Assert.Equal(FulfillmentStatus.Delivered, contract.Benefits[0].FulfillmentStatus);
         Assert.True(contract.Benefits[0].IsGranted);
+        Assert.True(contract.Benefits[0].IsDelivered);
 
         var serviceBenefit = ContractBenefit.Create(Guid.NewGuid(), contract.Id, ContractBenefitType.Service, "Support", null, 500m, "EGP").Value;
         contract.AddBenefit(serviceBenefit);
 
-        var deliverResult = serviceBenefit.MarkGranted(UtcNow);
+        var deliverResult = serviceBenefit.Deliver(UtcNow);
         Assert.False(deliverResult.IsSuccess);
     }
 

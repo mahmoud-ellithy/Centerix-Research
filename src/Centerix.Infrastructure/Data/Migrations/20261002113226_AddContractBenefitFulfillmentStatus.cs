@@ -11,6 +11,18 @@ namespace Centerix.Infrastructure.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // 0. Remap old BenefitEligibilityStatus.Delivered (byte 2) to Eligible (1).
+            //    BenefitEligibilityStatus is being reduced to a 2-value axis
+            //    (NotEligible / Eligible); the historical "Delivered" value carries
+            //    NO separate commercial meaning that we cannot already derive from
+            //    IsGranted + FulfillmentStatus, so collapsing it to Eligible is
+            //    the only correct semantic preservation.
+            migrationBuilder.Sql(@"
+                UPDATE [Platform].[ContractBenefits]
+                SET [EligibilityStatus] = 1  -- Eligible
+                WHERE [EligibilityStatus] = 2;
+            ");
+
             // 1. Add new column as nullable so the migration can populate it
             //    from existing data without violating NOT NULL.
             migrationBuilder.AddColumn<byte>(

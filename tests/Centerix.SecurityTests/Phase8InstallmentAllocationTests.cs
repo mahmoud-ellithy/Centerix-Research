@@ -92,11 +92,14 @@ public class Phase8InstallmentAllocationTests : IClassFixture<TestWebApplication
         var contract = CreateActiveContract();
         var benefit = CreateContractBenefit();
         benefit.MarkEligible(DateTime.UtcNow, "tenant-1");
-        benefit.MarkGranted(DateTime.UtcNow, "tenant-1", "Platform");
+        benefit.Grant(DateTime.UtcNow, "tenant-1", "Platform"); benefit.Deliver(DateTime.UtcNow, "tenant-1", "Platform");
 
         var result = service.DetermineEligibilityStatus(benefit, contract, 6000m, 12000m, hasOverdueInstallment: true);
 
-        Assert.Equal(BenefitEligibilityStatus.Delivered, result);
+        // Eligibility is independent of fulfillment: a Delivered benefit remains
+        // eligible-as-current-state but does NOT require a fresh eligibility check
+        // (the prior Delivered state is preserved).
+        Assert.Equal(BenefitEligibilityStatus.Eligible, result);
     }
 
     [Fact]

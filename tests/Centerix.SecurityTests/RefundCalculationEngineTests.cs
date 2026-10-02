@@ -194,7 +194,7 @@ public class RefundCalculationEngineTests
         var grantResult = benefit.MarkEligible(grantedAtUtc ?? DateTime.UtcNow);
         Assert.True(grantResult.IsSuccess);
 
-        var grantResult2 = benefit.MarkGranted(grantedAtUtc ?? DateTime.UtcNow);
+        var grantResult2 = benefit.Grant(grantedAtUtc ?? DateTime.UtcNow); benefit.Deliver(grantedAtUtc ?? DateTime.UtcNow);
         Assert.True(grantResult2.IsSuccess);
 
         return benefit;

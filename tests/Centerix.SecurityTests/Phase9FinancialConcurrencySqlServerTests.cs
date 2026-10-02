@@ -1594,7 +1594,7 @@ public class Phase9FinancialConcurrencySqlServerTests
                 null,
                 1000m,
                 "EGP").Value;
-            benefit.MarkGranted(DateTime.UtcNow);
+            benefit.Grant(DateTime.UtcNow); benefit.Deliver(DateTime.UtcNow);
             contract.AddBenefit(benefit);
 
             db.Contracts.Add(contract);

@@ -179,9 +179,6 @@ public class ContractBenefit : Entity
         if (EligibilityStatus == BenefitEligibilityStatus.Eligible)
             return Result.Updated;
 
-        if (EligibilityStatus == BenefitEligibilityStatus.Delivered)
-            return Result.Updated;
-
         EligibilityStatus = BenefitEligibilityStatus.Eligible;
         EligibleAtUtc = utcNow;
 
@@ -191,23 +188,12 @@ public class ContractBenefit : Entity
     }
 
     /// <summary>
-    /// Transitions the benefit from NotEligible back to NotEligible (no-op marker for symmetry).
-    /// Used by the eligibility evaluator when re-evaluation flips the result.
-    /// Idempotent. Does NOT mutate fulfillment.
+    /// Transitions the benefit from Eligible back to NotEligible.
+    /// Idempotent. Does NOT mutate fulfillment — a delivered benefit remains
+    /// delivered even if current eligibility flips back to NotEligible.
     /// </summary>
     public Result<Updated> MarkNotEligible()
     {
-        if (FulfillmentStatus == FulfillmentStatus.Delivered)
-        {
-            // Delivered remains delivered even if eligibility flips back.
-            // The eligibility status may move but Delivered is terminal.
-            if (EligibilityStatus == BenefitEligibilityStatus.NotEligible)
-                return Result.Updated;
-
-            EligibilityStatus = BenefitEligibilityStatus.NotEligible;
-            return Result.Updated;
-        }
-
         if (EligibilityStatus == BenefitEligibilityStatus.NotEligible)
             return Result.Updated;
 
@@ -253,7 +239,6 @@ public class ContractBenefit : Entity
         FulfillmentStatus = FulfillmentStatus.Granted;
         GrantedAtUtc = utcNow;
         GrantedBy = grantedBy;
-        SyncIsGranted();
 
         AddDomainEvent(new BenefitGrantedEvent(ContractId, Id, tenantId ?? string.Empty, utcNow, grantedBy));
 
@@ -291,36 +276,9 @@ public class ContractBenefit : Entity
         FulfillmentStatus = FulfillmentStatus.Delivered;
         DeliveredAtUtc = utcNow;
         DeliveredBy = deliveredBy;
-        SyncIsGranted();
 
         AddDomainEvent(new BenefitDeliveredEvent(ContractId, Id, tenantId ?? string.Empty, utcNow, deliveredBy));
 
-        return Result.Updated;
-    }
-
-    /// <summary>
-    /// Backward-compatible grant-or-deliver single-shot. Used only by legacy callers/tests
-    /// that conflate grant with delivery. New code MUST use <see cref="Grant"/> followed by
-    /// <see cref="Deliver"/>.
-    /// </summary>
-    [Obsolete("Use Grant() + Deliver() instead. This entry point is kept for legacy tests only.")]
-    public Result<Updated> MarkGranted(DateTime utcNow, string? deliveredBy = null, string? tenantId = null)
-    {
-        // Try grant first
-        if (FulfillmentStatus == FulfillmentStatus.Pending)
-        {
-            var grantResult = Grant(utcNow, deliveredBy, tenantId);
-            if (!grantResult.IsSuccess)
-                return grantResult;
-        }
-        // Then try deliver (idempotent if already Delivered)
-        if (FulfillmentStatus == FulfillmentStatus.Granted)
-        {
-            var deliverResult = Deliver(utcNow, deliveredBy, tenantId);
-            if (!deliverResult.IsSuccess)
-                return deliverResult;
-        }
-        SyncIsGranted();
         return Result.Updated;
     }
 
@@ -361,20 +319,15 @@ public class ContractBenefit : Entity
         && EligibilityStatus == BenefitEligibilityStatus.Eligible
         && FulfillmentStatus == FulfillmentStatus.Pending;
 
-    /// <summary>Whether this benefit has been granted (forward-only fulfillment predicate).</summary>
-    public bool IsGranted { get; private set; }
-
-    /// <summary>Whether this benefit has been delivered.</summary>
-    public bool IsDelivered => FulfillmentStatus == FulfillmentStatus.Delivered;
-
     /// <summary>
-    /// Reconciles the legacy <c>IsGranted</c> flag with the new authoritative
-    /// <see cref="FulfillmentStatus"/>. MUST be called after <see cref="Grant"/>,
-    /// <see cref="Deliver"/>, and on entity load (to keep the column in sync).
+    /// Projection of <see cref="FulfillmentStatus"/>: true iff the benefit has been
+    /// granted (or delivered). MUST NOT be set independently of <see cref="FulfillmentStatus"/>;
+    /// the EF column is only kept for backward-compatible external readers.
     /// </summary>
-    internal void SyncIsGranted()
-    {
-        IsGranted = FulfillmentStatus == FulfillmentStatus.Granted
-                    || FulfillmentStatus == FulfillmentStatus.Delivered;
-    }
+    public bool IsGranted =>
+        FulfillmentStatus == FulfillmentStatus.Granted
+        || FulfillmentStatus == FulfillmentStatus.Delivered;
+
+    /// <summary>Whether this benefit has been delivered. Projection of <see cref="FulfillmentStatus"/>.</summary>
+    public bool IsDelivered => FulfillmentStatus == FulfillmentStatus.Delivered;
 }

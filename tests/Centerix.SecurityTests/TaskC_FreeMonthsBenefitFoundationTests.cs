@@ -498,10 +498,11 @@ public class TaskC_FreeMonthsBenefitFoundationTests
     public void Test28_FreeMonthsBenefit_UsesSeparateEnumsFromContractBenefit_BenefitEligibilityStatus()
     {
         // Verify FreeMonthsEligibilityStatus does NOT have a Delivered value
-        // (that's PhysicalGift-only) and FulfillmentStatus does NOT
-        // have a Delivered value.
+        // (that's PhysicalGift-only). Shared FulfillmentStatus DOES have Delivered
+        // (slot 2) and AppliedToSubscription (slot 3).
         Assert.False(Enum.IsDefined(typeof(FreeMonthsEligibilityStatus), 2));
-        Assert.False(Enum.IsDefined(typeof(FulfillmentStatus), 3));
+        Assert.True(Enum.IsDefined(typeof(FulfillmentStatus), 2));
+        Assert.True(Enum.IsDefined(typeof(FulfillmentStatus), 3));
     }
 
     [Fact]
@@ -510,7 +511,8 @@ public class TaskC_FreeMonthsBenefitFoundationTests
         // Pinned so persisted columns and tests remain stable across refactors.
         Assert.Equal(0, (byte)FulfillmentStatus.Pending);
         Assert.Equal(1, (byte)FulfillmentStatus.Granted);
-        Assert.Equal(2, (byte)FulfillmentStatus.AppliedToSubscription);
+        Assert.Equal(2, (byte)FulfillmentStatus.Delivered);
+        Assert.Equal(3, (byte)FulfillmentStatus.AppliedToSubscription);
     }
 
     [Fact]

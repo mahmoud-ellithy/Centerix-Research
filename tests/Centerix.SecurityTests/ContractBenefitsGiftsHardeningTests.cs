@@ -103,7 +103,8 @@ public class ContractBenefitsGiftsHardeningTests
 
         if (type == ContractBenefitType.PhysicalGift)
         {
-            benefit.MarkGranted(grantedAtUtc ?? DateTime.UtcNow, tenantId: tenantId);
+            benefit.Grant(grantedAtUtc ?? DateTime.UtcNow, grantedBy: tenantId);
+            benefit.Deliver(grantedAtUtc ?? DateTime.UtcNow, deliveredBy: tenantId);
         }
         else
         {
@@ -113,8 +114,8 @@ public class ContractBenefitsGiftsHardeningTests
                 .SetValue(benefit, true);
             typeof(ContractBenefit).GetProperty(nameof(ContractBenefit.GrantedAtUtc))!
                 .SetValue(benefit, grantedAtUtc ?? DateTime.UtcNow);
-            typeof(ContractBenefit).GetProperty(nameof(ContractBenefit.EligibilityStatus))!
-                .SetValue(benefit, BenefitEligibilityStatus.Delivered);
+            typeof(ContractBenefit).GetProperty(nameof(ContractBenefit.FulfillmentStatus))!
+                .SetValue(benefit, FulfillmentStatus.Delivered);
         }
 
         return benefit;
@@ -518,17 +519,22 @@ public class ContractBenefitsGiftsHardeningTests
         var contract = CreateValidContract();
         var benefit = CreateEligibleBenefit(contract.Id, "Printer", 1000m);
 
-        // First delivery
-        var result1 = benefit.MarkGranted(DateTime.UtcNow, "user-1");
-        Assert.True(result1.IsSuccess);
+        // First grant then delivery
+        var grant1 = benefit.Grant(DateTime.UtcNow, "user-1");
+        Assert.True(grant1.IsSuccess);
+        var deliver1 = benefit.Deliver(DateTime.UtcNow, "user-1");
+        Assert.True(deliver1.IsSuccess);
         Assert.True(benefit.IsGranted);
+        Assert.True(benefit.IsDelivered);
 
         // Second delivery (idempotent)
-        var result2 = benefit.MarkGranted(DateTime.UtcNow, "user-2");
-        Assert.True(result2.IsSuccess);
+        var deliver2 = benefit.Deliver(DateTime.UtcNow, "user-2");
+        Assert.True(deliver2.IsSuccess);
         Assert.True(benefit.IsGranted);
+        Assert.True(benefit.IsDelivered);
 
-        // Only one delivery recorded
+        // Only one grant + one delivery event recorded
+        Assert.Single(benefit.DomainEvents.OfType<BenefitGrantedEvent>());
         Assert.Single(benefit.DomainEvents.OfType<BenefitDeliveredEvent>());
     }
 
@@ -682,7 +688,7 @@ public class ContractBenefitsGiftsHardeningTests
 
         // Deliver Benefit
         benefit.MarkEligible(DateTime.UtcNow);
-        benefit.MarkGranted(DateTime.UtcNow, "user-1");
+        benefit.Grant(DateTime.UtcNow, "user-1"); benefit.Deliver(DateTime.UtcNow, "user-1");
 
         // Verify snapshot is immutable
         Assert.Equal("Printer", benefit.Name);
@@ -690,7 +696,8 @@ public class ContractBenefitsGiftsHardeningTests
         Assert.Equal(ContractBenefitType.PhysicalGift, benefit.BenefitType);
         Assert.Equal("EGP", benefit.CurrencyCode);
         Assert.True(benefit.IsGranted);
-        Assert.Equal(BenefitEligibilityStatus.Delivered, benefit.EligibilityStatus);
+        Assert.True(benefit.IsDelivered);
+        Assert.Equal(FulfillmentStatus.Delivered, benefit.FulfillmentStatus);
 
         // Simulate Plan/Promotion/Benefit catalog changes (would happen elsewhere)
         // The contract benefit snapshot must remain authoritative
@@ -769,7 +776,11 @@ public class ContractBenefitsGiftsHardeningTests
             endsAtUtc: endsAt);
         contract.AddPricingTier(ContractPricingTier.Create(Guid.NewGuid(), contract.Id, 6, 5220m, "EGP", 1000m, 1).Value);
 
-        var zeroBenefit = CreateGrantedBenefit(contract.Id, "Service", 0m, ContractBenefitType.Service);
+        // Non-financial (zero-value) Service benefit: non-PhysicalGift types cannot participate
+        // in the grant/delivery lifecycle. The benefit's FulfillmentStatus stays Pending and
+        // IsGranted stays false. The refund calculation must therefore exclude it (no recovery).
+        var zeroBenefit = CreateBenefit(contract.Id, "Service", 0m, ContractBenefitType.Service);
+        zeroBenefit.MarkEligible(DateTime.UtcNow, contract.TenantId);
         contract.AddBenefit(zeroBenefit);
 
         var payment = CreateCompletedPayment(10000m, 10000m, contract);
@@ -818,8 +829,8 @@ public class ContractBenefitsGiftsHardeningTests
 
         // Mark delivered
         var deliveredTime = new DateTime(2026, 3, 20, 14, 30, 0, DateTimeKind.Utc);
-        benefit.MarkGranted(deliveredTime, "staff-42");
-        Assert.Equal(BenefitEligibilityStatus.Delivered, benefit.EligibilityStatus);
+        benefit.Grant(deliveredTime, "staff-42"); benefit.Deliver(deliveredTime, "staff-42");
+        Assert.True(benefit.IsDelivered);
         Assert.True(benefit.IsGranted);
         Assert.Equal(deliveredTime, benefit.GrantedAtUtc);
         Assert.Equal("staff-42", benefit.DeliveredBy);
@@ -894,7 +905,9 @@ public class ContractBenefitsGiftsHardeningTests
         var status = s_eligibilityService.DetermineEligibilityStatus(
             benefit, contract, 0m, contract.ContractedAmount);
 
-        Assert.Equal(BenefitEligibilityStatus.Delivered, status);
+        Assert.Equal(BenefitEligibilityStatus.Eligible, status);
+        Assert.True(benefit.IsDelivered);
+        Assert.Equal(FulfillmentStatus.Delivered, benefit.FulfillmentStatus);
     }
 
     // ==================================================================
@@ -941,10 +954,10 @@ public class ContractBenefitsGiftsHardeningTests
         Assert.Equal(ContractBenefitType.PhysicalGift, benefit.BenefitType);
 
         benefit.MarkEligible(DateTime.UtcNow);
-        benefit.MarkGranted(DateTime.UtcNow, "user-1");
+        benefit.Grant(DateTime.UtcNow, "user-1"); benefit.Deliver(DateTime.UtcNow, "user-1");
 
         Assert.True(benefit.IsGranted);
-        Assert.Equal(BenefitEligibilityStatus.Delivered, benefit.EligibilityStatus);
+        Assert.True(benefit.IsDelivered);
     }
 
     [Fact]
@@ -956,7 +969,7 @@ public class ContractBenefitsGiftsHardeningTests
         Assert.Equal(ContractBenefitType.Service, benefit.BenefitType);
 
         benefit.MarkEligible(DateTime.UtcNow);
-        var result = benefit.MarkGranted(DateTime.UtcNow);
+        var result = benefit.Grant(DateTime.UtcNow); benefit.Deliver(DateTime.UtcNow);
 
         // Service benefits cannot be delivered through MarkBenefitDelivered
         Assert.False(result.IsSuccess);
@@ -1043,7 +1056,7 @@ public class ContractBenefitsGiftsHardeningTests
         var benefit = CreateBenefit(contract.Id, "Printer", 1000m);
 
         benefit.MarkEligible(DateTime.UtcNow, contract.TenantId);
-        benefit.MarkGranted(DateTime.UtcNow, "user-1", contract.TenantId);
+        benefit.Grant(DateTime.UtcNow, "user-1", contract.TenantId); benefit.Deliver(DateTime.UtcNow, "user-1", contract.TenantId);
 
         var domainEvents = benefit.DomainEvents;
         Assert.Contains(domainEvents, e => e is BenefitDeliveredEvent);
@@ -1146,11 +1159,11 @@ public class ContractBenefitsGiftsHardeningTests
         var benefit = CreateBenefit(contract.Id, "Printer", 1000m, ContractBenefitType.PhysicalGift);
 
         benefit.MarkEligible(DateTime.UtcNow);
-        var result = benefit.MarkGranted(DateTime.UtcNow, "user-1");
+        var result = benefit.Grant(DateTime.UtcNow, "user-1"); benefit.Deliver(DateTime.UtcNow, "user-1");
 
         Assert.True(result.IsSuccess);
         Assert.True(benefit.IsGranted);
-        Assert.Equal(BenefitEligibilityStatus.Delivered, benefit.EligibilityStatus);
+        Assert.True(benefit.IsDelivered);
     }
 
     [Fact]
@@ -1160,7 +1173,7 @@ public class ContractBenefitsGiftsHardeningTests
         var benefit = CreateBenefit(contract.Id, "Support", 500m, ContractBenefitType.Service);
 
         benefit.MarkEligible(DateTime.UtcNow);
-        var result = benefit.MarkGranted(DateTime.UtcNow);
+        var result = benefit.Grant(DateTime.UtcNow); benefit.Deliver(DateTime.UtcNow);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.Benefit.OnlyPhysicalGiftCanBeDelivered", result.Errors[0].Code);
@@ -1174,7 +1187,7 @@ public class ContractBenefitsGiftsHardeningTests
         var benefit = CreateBenefit(contract.Id, "Credit", 500m, ContractBenefitType.FinancialCredit);
 
         benefit.MarkEligible(DateTime.UtcNow);
-        var result = benefit.MarkGranted(DateTime.UtcNow);
+        var result = benefit.Grant(DateTime.UtcNow); benefit.Deliver(DateTime.UtcNow);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.Benefit.OnlyPhysicalGiftCanBeDelivered", result.Errors[0].Code);
@@ -1188,7 +1201,7 @@ public class ContractBenefitsGiftsHardeningTests
         var benefit = CreateBenefit(contract.Id, "Extension", 500m, ContractBenefitType.ExtendedTerm);
 
         benefit.MarkEligible(DateTime.UtcNow);
-        var result = benefit.MarkGranted(DateTime.UtcNow);
+        var result = benefit.Grant(DateTime.UtcNow); benefit.Deliver(DateTime.UtcNow);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.Benefit.OnlyPhysicalGiftCanBeDelivered", result.Errors[0].Code);
@@ -1202,7 +1215,7 @@ public class ContractBenefitsGiftsHardeningTests
         var benefit = CreateBenefit(contract.Id, "OtherBenefit", 500m, ContractBenefitType.Other);
 
         benefit.MarkEligible(DateTime.UtcNow);
-        var result = benefit.MarkGranted(DateTime.UtcNow);
+        var result = benefit.Grant(DateTime.UtcNow); benefit.Deliver(DateTime.UtcNow);
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.Benefit.OnlyPhysicalGiftCanBeDelivered", result.Errors[0].Code);
@@ -1216,13 +1229,15 @@ public class ContractBenefitsGiftsHardeningTests
         var benefit = CreateBenefit(contract.Id, "Printer", 1000m, ContractBenefitType.PhysicalGift);
 
         benefit.MarkEligible(DateTime.UtcNow, contract.TenantId);
-        benefit.MarkGranted(DateTime.UtcNow, "user-1", contract.TenantId);
+        benefit.Grant(DateTime.UtcNow, "user-1", contract.TenantId); benefit.Deliver(DateTime.UtcNow, "user-1", contract.TenantId);
         Assert.True(benefit.IsGranted);
+        Assert.True(benefit.IsDelivered);
 
         // Second delivery is idempotent
-        var result2 = benefit.MarkGranted(DateTime.UtcNow, "user-2", contract.TenantId);
-        Assert.True(result2.IsSuccess);
+        var deliver2 = benefit.Deliver(DateTime.UtcNow, "user-2", contract.TenantId);
+        Assert.True(deliver2.IsSuccess);
         Assert.True(benefit.IsGranted);
+        Assert.True(benefit.IsDelivered);
     }
 
     // ==================================================================
@@ -1250,7 +1265,7 @@ public class ContractBenefitsGiftsHardeningTests
         var benefit = CreateBenefit(contract.Id, "Printer", 1000m);
 
         benefit.MarkEligible(DateTime.UtcNow, contract.TenantId);
-        benefit.MarkGranted(DateTime.UtcNow, "user-1", contract.TenantId);
+        benefit.Grant(DateTime.UtcNow, "user-1", contract.TenantId); benefit.Deliver(DateTime.UtcNow, "user-1", contract.TenantId);
 
         var deliveredEvent = benefit.DomainEvents.OfType<BenefitDeliveredEvent>().Single();
         Assert.Equal(contract.TenantId, deliveredEvent.TenantId);
@@ -1339,12 +1354,12 @@ public class ContractBenefitsGiftsHardeningTests
         var benefit = CreateBenefit(contract.Id, "Printer", 1000m);
 
         benefit.MarkEligible(DateTime.UtcNow, contract.TenantId);
-        benefit.MarkGranted(DateTime.UtcNow, "user-1", contract.TenantId);
-        Assert.Equal(BenefitEligibilityStatus.Delivered, benefit.EligibilityStatus);
+        benefit.Grant(DateTime.UtcNow, "user-1", contract.TenantId); benefit.Deliver(DateTime.UtcNow, "user-1", contract.TenantId);
+        Assert.True(benefit.IsDelivered);
 
         // Attempt to mark eligible again — should be idempotent, not revert
         benefit.MarkEligible(DateTime.UtcNow, contract.TenantId);
-        Assert.Equal(BenefitEligibilityStatus.Delivered, benefit.EligibilityStatus);
+        Assert.True(benefit.IsDelivered);
         Assert.True(benefit.IsGranted);
     }
 
@@ -1357,7 +1372,7 @@ public class ContractBenefitsGiftsHardeningTests
         Assert.Equal(BenefitEligibilityStatus.NotEligible, benefit.EligibilityStatus);
 
         // Cannot deliver a benefit that is not eligible
-        var result = benefit.MarkGranted(DateTime.UtcNow);
+        var result = benefit.Grant(DateTime.UtcNow); benefit.Deliver(DateTime.UtcNow);
         Assert.False(result.IsSuccess);
         Assert.Equal("Contract.Benefit.NotEligible", result.Errors[0].Code);
         Assert.False(benefit.IsGranted);

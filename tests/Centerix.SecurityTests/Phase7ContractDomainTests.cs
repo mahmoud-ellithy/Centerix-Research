@@ -421,7 +421,7 @@ public class Phase7ContractDomainTests
     }
 
     [Fact]
-    public void Contract_Benefit_MarkGranted_SetsTimestamp()
+    public void Contract_Benefit_GrantAndDeliver_SetsTimestamp()
     {
         var contract = CreateValidContract();
         var benefit = ContractBenefit.Create(Guid.NewGuid(), contract.Id, ContractBenefitType.PhysicalGift, "Gift", null, 100m, "EGP").Value;
@@ -431,10 +431,13 @@ public class Phase7ContractDomainTests
 
         var grantTime = new DateTime(2026, 6, 15, 0, 0, 0, DateTimeKind.Utc);
         benefit.MarkEligible(grantTime);
-        Assert.True(benefit.MarkGranted(grantTime).IsSuccess);
+        Assert.True(benefit.Grant(grantTime).IsSuccess);
+        Assert.True(benefit.Deliver(grantTime).IsSuccess);
 
         Assert.True(benefit.IsGranted);
+        Assert.True(benefit.IsDelivered);
         Assert.Equal(grantTime, benefit.GrantedAtUtc);
+        Assert.Equal(grantTime, benefit.DeliveredAtUtc);
     }
 
     // ------------------------------------------------------------------
