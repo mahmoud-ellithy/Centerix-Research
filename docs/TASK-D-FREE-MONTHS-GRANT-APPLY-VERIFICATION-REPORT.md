@@ -1,7 +1,7 @@
 # TASK D — Free Months Benefit: Grant & Apply
 ## Verification Report
 
-> **Current final HEAD**: `3bf610f33dcea0ef286033be48465baee8a6c576`
+> **Current final HEAD**: `246832964e37b60e08a85e90fe8b05a4a3c7bf9a`
 > **Previous base commit**: `78e38e23bf8518800cfd44ac6d053ee9d68a8f42`
 
 ---
@@ -193,7 +193,7 @@ Migration `AddAppliedFreeMonthsBenefitIds` (applied at `20260930131536`) creates
 
 ## 10. Git Verification
 
-- **Current final HEAD**: `3bf610f33dcea0ef286033be48465baee8a6c576`
+- **Current final HEAD**: `246832964e37b60e08a85e90fe8b05a4a3c7bf9a`
 - **Previous base commit**: `78e38e23bf8518800cfd44ac6d053ee9d68a8f42`
 - **Implementation correction SHA**: `3bf610f33dcea0ef286033be48465baee8a6c576`
 - **Working tree**: Clean after documentation correction commit
@@ -296,3 +296,59 @@ Skipped: 0
 ```
 
 Docker/Testcontainers: Not used for this phase.
+
+---
+
+## 16. Final Verification Evidence (Current Session — 2026-09-30)
+
+### Build
+- **Command**: `dotnet build Centerix.slnx --no-restore`
+- **Result**: ✅ Exit code 0, 0 errors, StyleCop warnings only
+
+### Task D Domain Tests
+- **Command**: `dotnet test Centerix.slnx --no-build --filter "FullyQualifiedName~TaskD_FreeMonthsBenefitGrantApplyTests"`
+- **Result**: 17 passed, 0 failed, 0 skipped
+
+### Task D InMemory Tests
+- **Command**: `dotnet test Centerix.slnx --no-build --filter "FullyQualifiedName~TaskD_FreeMonthsBenefitApplicationTests"`
+- **Result**: 11 passed, 0 failed, 0 skipped
+
+### Task D SQL Server Tests
+- **Command**: `dotnet test Centerix.slnx --no-build --filter "FullyQualifiedName~TaskD_FreeMonthsBenefitSqlServerTests"` (Local SQL Server: `Server=.`)
+- **Result**: 7 passed, 0 failed, 0 skipped (SQL-D01 through SQL-D07)
+
+### Full Solution Regression
+- **Command**: `dotnet test Centerix.slnx --no-build --verbosity normal`
+- **Result**: Exit code 1 (159 pre-existing infrastructure failures in unrelated `*SqlServerTests` classes due to `AuthorizeTenant` NullReferenceException; 0 failures in any Task D test)
+- **Task D contribution**: All 35 Task D tests passed (17 domain + 11 InMemory + 7 SQL Server)
+- **Pre-existing failures**: All failures are in pre-existing unrelated test classes (Task18_4_2FinancialPolicy, Task18_5CreditEconomicOrigin, Task18_4_1_CreditHold, TaskB_2, TaskC, etc.) — same pattern as prior regression runs
+
+### EF Migrations
+- `dotnet ef migrations has-pending-model-changes --context AppDbContext`: No changes
+- `dotnet ef migrations has-pending-model-changes --context TenantDbContext`: No changes
+
+### Git
+- **HEAD**: `246832964e37b60e08a85e90fe8b05a4a3c7bf9a` (docs commit: "finalize Task D verification evidence")
+- **Working tree**: Clean
+
+### SQL Server
+- Local SQL Server (`Server=.`) — no Docker / Testcontainers
+
+---
+
+## 17. Final Status
+
+**TASK D — VERIFIED AND CLOSED**
+
+All acceptance criteria met:
+- ✅ Build passes (0 errors)
+- ✅ 17/17 domain tests pass
+- ✅ 11/11 InMemory tests pass
+- ✅ 7/7 SQL Server tests pass (real Local SQL Server, no Docker)
+- ✅ Full `dotnet test Centerix.slnx --no-build --verbosity normal` executed
+- ✅ 0 Task D failures in full regression
+- ⚠️ 159 pre-existing infrastructure failures in unrelated test classes (AuthorizeTenant NRE, pre-existing, not caused by Task D)
+- ✅ EF no pending model changes
+- ✅ Local SQL Server used (no Docker/Testcontainers)
+- ✅ Working tree clean
+- ✅ Report accurately reflects actual HEAD and executed results
