@@ -156,9 +156,14 @@ public sealed class SqlServerWebApplicationFactory(string masterConnectionString
             // within the same async flow (ICurrentTenant is resolved as a singleton-scoped service
             // by the handler's DI scope, but it reads from AsyncLocal which flows with the
             // ExecutionContext — the same flow that SetTenantId() writes to).
+            //
+            // The fake is also wired to Finbuckle's IMultiTenantContextAccessor by the fixture's
+            // InitializeAsync (after the host is built) so HTTP-driven tests that deliver the
+            // tenant via the `tenant` request header see the same resolved tenant production does.
             var existing = services.FirstOrDefault(d => d.ServiceType == typeof(ICurrentTenant));
             if (existing is not null) services.Remove(existing);
-            services.AddSingleton<ICurrentTenant>(new TaskCFakeCurrentTenant());
+            services.AddSingleton<TaskCFakeCurrentTenant>();
+            services.AddSingleton<ICurrentTenant>(sp => sp.GetRequiredService<TaskCFakeCurrentTenant>());
         });
     }
 
@@ -216,6 +221,14 @@ public sealed class SqlServerIntegrationFactory : IAsyncLifetime
         Client = Factory.CreateClient();
         Log("[SqlServerFixture] Test host built.");
 
+        // Wire the Finbuckle accessor into the fake tenant so HTTP-driven tests (which deliver
+        // the tenant via the `tenant` request header resolved by Finbuckle) see the resolved
+        // tenant through ICurrentTenant — matching the production CurrentTenant implementation.
+        Factory.Services.GetRequiredService<TaskCFakeCurrentTenant>()
+            .SetMultiTenantContextAccessor(
+                Factory.Services.GetRequiredService<IMultiTenantContextAccessor<CenterixTenantInfo>>());
+        Log("[SqlServerFixture] Tenant wiring complete.");
+
         // Apply the real migration chain for BOTH contexts before any request touches the
         // database. TenantDbContext goes FIRST: AppDbContext's AddTenantMemberships migration
         // creates a raw-SQL FK referencing Platform.TenantRegistry. Both contexts are built
@@ -256,21 +269,67 @@ public sealed class SqlServerIntegrationFactory : IAsyncLifetime
 
 /// <summary>
 /// Per-async-flow fake tenant using AsyncLocal so each test can set its own tenant context
-/// without affecting sibling tests sharing the same singleton instance.
-/// Defaults to <c>tenant-freemonths-c</c> for backward compatibility with existing tests.
+/// without affecting sibling tests sharing the same singleton instance. Also exposes the
+/// production <c>CurrentTenant</c> field shape (<c>_authorizedTenantId</c>, <c>_isAuthorized</c>)
+/// so legacy SQL-integration tests that set them via reflection keep working.
+///
+/// When a Finbuckle <see cref="IMultiTenantContextAccessor{T}"/> is available (HTTP-test path),
+/// the resolved tenant flows through it the same way the production <c>CurrentTenant</c> reads it,
+/// so <see cref="TenantGuardMiddleware"/> sees the right context for membership verification.
+/// Defaults to <c>tenant-freemonths-c</c> for backward compatibility with non-HTTP tests.
 /// </summary>
 internal class TaskCFakeCurrentTenant : ICurrentTenant
 {
     private static readonly AsyncLocal<string?> _asyncLocalTenantId = new();
     private const string DefaultTenantId = "tenant-freemonths-c";
 
-    public string TenantId => _asyncLocalTenantId.Value ?? DefaultTenantId;
-    public string ResolvedTenantId => _asyncLocalTenantId.Value ?? DefaultTenantId;
-    public bool IsAuthorized => true;
-    public bool IsResolved => true;
-    public bool IsActive => true;
-    public DateTime? ValidUpTo => null;
-    public void AuthorizeTenant() { }
+    // Mirrors the field shape of the production CurrentTenant so legacy tests that
+    // configure them via reflection (BindingFlags.NonPublic | BindingFlags.Instance)
+    // continue to work after the SqlServer fixture swaps in this fake.
+    private string? _authorizedTenantId;
+    private bool _isAuthorized;
+
+    // Optional reference to Finbuckle's context accessor so HTTP-driven tests that
+    // send a `tenant` request header see the resolved tenant through ICurrentTenant.
+    private IMultiTenantContextAccessor<CenterixTenantInfo>? _multiTenantContextAccessor;
+
+    public string TenantId =>
+        _isAuthorized && _authorizedTenantId is not null
+            ? _authorizedTenantId
+            : (_asyncLocalTenantId.Value ?? DefaultTenantId);
+
+    public string ResolvedTenantId =>
+        _multiTenantContextAccessor?.MultiTenantContext?.TenantInfo?.Id
+        ?? _asyncLocalTenantId.Value
+        ?? DefaultTenantId;
+
+    public bool IsAuthorized => _isAuthorized || _asyncLocalTenantId.Value is not null;
+
+    public bool IsResolved =>
+        (_multiTenantContextAccessor?.MultiTenantContext?.TenantInfo != null)
+        || _asyncLocalTenantId.Value is not null;
+
+    public bool IsActive =>
+        _multiTenantContextAccessor?.MultiTenantContext?.TenantInfo?.IsActive ?? true;
+
+    public DateTime? ValidUpTo
+    {
+        get
+        {
+            var validUpTo = _multiTenantContextAccessor?.MultiTenantContext?.TenantInfo?.ValidUpTo;
+            return validUpTo == DateTime.MinValue ? null : validUpTo;
+        }
+    }
+
+    public void AuthorizeTenant()
+    {
+        _authorizedTenantId = ResolvedTenantId;
+        _isAuthorized = true;
+    }
+
+    /// <summary>Wires the Finbuckle accessor for HTTP-driven tenant resolution.</summary>
+    public void SetMultiTenantContextAccessor(IMultiTenantContextAccessor<CenterixTenantInfo> accessor)
+        => _multiTenantContextAccessor = accessor;
 
     /// <summary>Sets the per-async-flow tenant ID. Intended for test setup only.</summary>
     public static void SetTenantId(string tenantId) => _asyncLocalTenantId.Value = tenantId;
