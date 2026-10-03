@@ -1,5 +1,6 @@
 namespace Centerix.SecurityTests;
 
+using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform.Contracts.Commands;
 using Centerix.Application.Platform.Contracts.Services;
 using Centerix.Domain.Platform.Billing.Installments;
@@ -41,6 +42,9 @@ using Xunit;
 ///   SQL-F13: Cross-tenant payment isolation (Tenant A contract + Tenant B payment)
 ///   SQL-F14: Cross-tenant installment isolation
 ///   SQL-F15: Completed-payment boundary cases (equal to deadline qualifies, after deadline disqualifies)
+///   SQL-FINAL-02: ONE payment (10,000) split 4,000 / 6,000 across two contracts — both fail a 7,000 threshold
+///   SQL-FINAL-11: ONE payment split 8,000 / 2,000 — asymmetric: only the 8,000 contract qualifies
+///   SQL-FINAL-12: ONE payment with two allocations to the SAME contract aggregates to one fact (3,000 + 2,000 = 5,000)
 /// </summary>
 [Collection("SqlServerIntegration")]
 [Trait("Category", "SqlServer")]
@@ -893,6 +897,92 @@ public class TaskF_FreezeEligibilityServiceSqlServerTests
         await db.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// One allocation row belonging to a single <see cref="Payment"/>, used by
+    /// <see cref="SeedCompletedPaymentWithMultipleAllocationsAsync"/>.
+    /// </summary>
+    private sealed record PaymentAllocationSeed(Guid InvoiceId, decimal AllocatedAmount);
+
+    /// <summary>
+    /// Creates EXACTLY ONE Completed <see cref="Payment"/> and attaches every supplied allocation row
+    /// to that single payment id.
+    /// <para>
+    /// This is the only helper in this file that can model a real multi-contract (or
+    /// multi-invoice) settlement. <see cref="SeedCompletedPaymentWithAllocationsAsync"/> creates a
+    /// fresh <c>Payment</c> per invocation and therefore can never prove that a single payment split
+    /// across several contracts contributes only its attributable slice to each contract.
+    /// </para>
+    /// <para>
+    /// <paramref name="paymentAmount"/> is deliberately allowed to differ from the sum of the
+    /// allocations: the payment header amount is the gross tender, while eligibility must be driven
+    /// exclusively by the per-contract allocation slice.
+    /// </para>
+    /// </summary>
+    /// <returns>The id of the single created <c>Payment</c> row.</returns>
+    private async Task<Guid> SeedCompletedPaymentWithMultipleAllocationsAsync(
+        string tenantId,
+        decimal paymentAmount,
+        string currencyCode,
+        DateTime completedAtUtc,
+        PaymentMethod method,
+        IReadOnlyList<PaymentAllocationSeed> allocations)
+    {
+        Assert.NotEmpty(allocations);
+
+        using var scope = _env.Factory.Services.CreateScope();
+        AuthorizeTenant(scope.ServiceProvider, tenantId);
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var payment = Payment.Create(
+            id: Guid.NewGuid(),
+            paymentNumber: $"PAY-{Guid.NewGuid():N}"[..16],
+            amount: paymentAmount,
+            currencyCode: currencyCode,
+            method: method).Value;
+        payment.Complete(completedAtUtc);
+        db.Payments.Add(payment);
+
+        foreach (var allocation in allocations)
+        {
+            db.PaymentAllocations.Add(PaymentAllocation.Create(
+                id: Guid.NewGuid(),
+                paymentId: payment.Id, // SAME payment id for every allocation
+                invoiceId: allocation.InvoiceId,
+                allocatedAmount: allocation.AllocatedAmount,
+                allocatedAtUtc: DateTime.UtcNow).Value);
+        }
+
+        db.StampAddedTenantIds(tenantId);
+        await db.SaveChangesAsync();
+
+        // Guard the helper's own contract: exactly one Payment row must have been created, and
+        // every allocation must point at it.
+        var paymentRows = await db.Payments
+            .IgnoreQueryFilters()
+            .CountAsync(p => p.TenantId == tenantId);
+        Assert.Equal(1, paymentRows);
+
+        var allocationRows = await db.PaymentAllocations
+            .IgnoreQueryFilters()
+            .Where(a => a.PaymentId == payment.Id)
+            .ToListAsync();
+        Assert.Equal(allocations.Count, allocationRows.Count);
+        Assert.All(allocationRows, a => Assert.Equal(payment.Id, a.PaymentId));
+
+        return payment.Id;
+    }
+
+    /// <summary>Reads the authoritative completed-payment facts for a contract off the real database.</summary>
+    private async Task<IReadOnlyList<CompletedPaymentFact>> ReadPaymentFactsAsync(
+        string tenantId,
+        Guid contractId)
+    {
+        using var scope = _env.Factory.Services.CreateScope();
+        AuthorizeTenant(scope.ServiceProvider, tenantId);
+        var factQuery = scope.ServiceProvider.GetRequiredService<IOwnerOnlyFactQuery>();
+        return await factQuery.GetCompletedPaymentsAsync(tenantId, contractId);
+    }
+
     private async Task<Guid> SeedInvoiceAsync(string tenantId, Guid contractId, decimal total = 12000m)
     {
         using var scope = _env.Factory.Services.CreateScope();
@@ -938,6 +1028,15 @@ public class TaskF_FreezeEligibilityServiceSqlServerTests
         Assert.True(response.IsEligible);
     }
 
+    /// <summary>
+    /// SQL-FINAL-02 — ONE payment of 10,000 split across TWO contracts (4,000 + 6,000).
+    /// Both contracts evaluate AmountPaidAtLeast(7,000) and MUST be ineligible.
+    /// <para>
+    /// This test fails against any implementation that reads <c>Payment.Amount</c>: such an
+    /// implementation would report 10,000 to each contract and mark both eligible. The direct fact
+    /// assertions below pin the per-contract slice to 4,000 and 6,000 respectively.
+    /// </para>
+    /// </summary>
     [Fact]
     public async Task SqlFINAL02_OnePayment_AllocatedAcross_TwoContracts_SumPerContract()
     {
@@ -953,28 +1052,142 @@ public class TaskF_FreezeEligibilityServiceSqlServerTests
         var invoiceA = await SeedInvoiceAsync(tenantId, seededA.ContractId, total: 4000m);
         var invoiceB = await SeedInvoiceAsync(tenantId, seededB.ContractId, total: 6000m);
 
-        // Payment.Amount = 10000 split across two contracts: 4000 + 6000.
-        await SeedCompletedPaymentWithAllocationsAsync(
-            tenantId, seededA.ContractId, invoiceA,
-            paymentAmount: 10000m, allocatedAmount: 4000m,
+        // ONE payment (Amount = 10,000) with TWO allocations:
+        //   4,000 → Invoice A → Contract A
+        //   6,000 → Invoice B → Contract B
+        var paymentId = await SeedCompletedPaymentWithMultipleAllocationsAsync(
+            tenantId,
+            paymentAmount: 10000m,
             currencyCode: "EGP",
             completedAtUtc: DateTime.UtcNow.AddHours(-2),
-            method: PaymentMethod.Cash);
-        await SeedCompletedPaymentWithAllocationsAsync(
-            tenantId, seededB.ContractId, invoiceB,
-            paymentAmount: 10000m, allocatedAmount: 6000m,
-            currencyCode: "EGP",
-            completedAtUtc: DateTime.UtcNow.AddHours(-2),
-            method: PaymentMethod.Cash);
+            method: PaymentMethod.Cash,
+            allocations: new[]
+            {
+                new PaymentAllocationSeed(invoiceA, 4000m),
+                new PaymentAllocationSeed(invoiceB, 6000m),
+            });
 
-        // Both contracts ask for AmountPaidAtLeast(7000).
-        // Contract A: 4000 < 7000 => false
-        // Contract B: 6000 < 7000 => false
+        // Fact-level proof: each contract sees the SAME payment, but only its own slice.
+        var factsA = await ReadPaymentFactsAsync(tenantId, seededA.ContractId);
+        var factA = Assert.Single(factsA);
+        Assert.Equal(paymentId, factA.PaymentId);
+        Assert.Equal(4000m, factA.AllocatedAmountForThisContract);
+
+        var factsB = await ReadPaymentFactsAsync(tenantId, seededB.ContractId);
+        var factB = Assert.Single(factsB);
+        Assert.Equal(paymentId, factB.PaymentId);
+        Assert.Equal(6000m, factB.AllocatedAmountForThisContract);
+
+        // Contract A: 4,000 < 7,000 => false
+        // Contract B: 6,000 < 7,000 => false
         var aResponse = await FreezeAsync(tenantId, seededA.BenefitId);
         Assert.False(aResponse.IsEligible);
+        Assert.Equal(nameof(WhyIneligible.AmountBelowMinimum), aResponse.ReasonCode);
 
         var bResponse = await FreezeAsync(tenantId, seededB.BenefitId);
         Assert.False(bResponse.IsEligible);
+        Assert.Equal(nameof(WhyIneligible.AmountBelowMinimum), bResponse.ReasonCode);
+    }
+
+    /// <summary>
+    /// SQL-FINAL-11 — asymmetric proof. ONE payment of 10,000 split 8,000 / 2,000 across two
+    /// contracts, both evaluating AmountPaidAtLeast(7,000).
+    /// Expected: Contract A (8,000) eligible, Contract B (2,000) NOT eligible.
+    /// <para>
+    /// This is the strongest available proof that a contract receives only its attributable
+    /// allocation: the two contracts are paid by the same <c>Payment.Id</c>, so any implementation
+    /// that charges <c>Payment.Amount</c> (10,000) to both contracts makes Contract B eligible and
+    /// this test fails.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SqlFINAL11_SinglePayment_AsymmetricAllocations_OnlyLargerContractQualifies()
+    {
+        var tenantId = $"FCT06-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantId);
+        var planId = await EnsurePlanAsync(tenantId);
+
+        var seededA = await SeedAsync(tenantId, planId,
+            EligibilityRule.AmountPaidAtLeast(7000m), contractedAmount: 8000m);
+        var seededB = await SeedAsync(tenantId, planId,
+            EligibilityRule.AmountPaidAtLeast(7000m), contractedAmount: 2000m);
+
+        var invoiceA = await SeedInvoiceAsync(tenantId, seededA.ContractId, total: 8000m);
+        var invoiceB = await SeedInvoiceAsync(tenantId, seededB.ContractId, total: 2000m);
+
+        // ONE payment (Amount = 10,000) with TWO allocations on the SAME payment id.
+        var paymentId = await SeedCompletedPaymentWithMultipleAllocationsAsync(
+            tenantId,
+            paymentAmount: 10000m,
+            currencyCode: "EGP",
+            completedAtUtc: DateTime.UtcNow.AddHours(-2),
+            method: PaymentMethod.Cash,
+            allocations: new[]
+            {
+                new PaymentAllocationSeed(invoiceA, 8000m),
+                new PaymentAllocationSeed(invoiceB, 2000m),
+            });
+
+        var factA = Assert.Single(await ReadPaymentFactsAsync(tenantId, seededA.ContractId));
+        Assert.Equal(paymentId, factA.PaymentId);
+        Assert.Equal(8000m, factA.AllocatedAmountForThisContract);
+
+        var factB = Assert.Single(await ReadPaymentFactsAsync(tenantId, seededB.ContractId));
+        Assert.Equal(paymentId, factB.PaymentId);
+        Assert.Equal(2000m, factB.AllocatedAmountForThisContract);
+
+        // Contract A: 8,000 >= 7,000 => true
+        var aResponse = await FreezeAsync(tenantId, seededA.BenefitId);
+        Assert.True(aResponse.IsEligible);
+
+        // Contract B: 2,000 < 7,000 => false (NOT 10,000, NOT 12,000)
+        var bResponse = await FreezeAsync(tenantId, seededB.BenefitId);
+        Assert.False(bResponse.IsEligible);
+        Assert.Equal(nameof(WhyIneligible.AmountBelowMinimum), bResponse.ReasonCode);
+    }
+
+    /// <summary>
+    /// SQL-FINAL-12 — aggregation WITHIN one payment. ONE payment of 10,000 carries two active
+    /// allocations whose invoices both belong to Contract A (3,000 + 2,000).
+    /// AmountPaidAtLeast(5,000) must pass, and the payment must still surface as exactly ONE
+    /// completed payment fact carrying AllocatedAmountForThisContract = 5,000. This protects the
+    /// per-Payment grouping in the fact query (a naive per-allocation projection would emit two
+    /// facts and the evaluator would double count against other rules).
+    /// </summary>
+    [Fact]
+    public async Task SqlFINAL12_SinglePayment_TwoAllocations_SameContract_AggregatesToOneFact()
+    {
+        var tenantId = $"FCT11-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantId);
+        var planId = await EnsurePlanAsync(tenantId);
+
+        var seeded = await SeedAsync(tenantId, planId,
+            EligibilityRule.AmountPaidAtLeast(5000m), contractedAmount: 10000m);
+
+        var invoiceA1 = await SeedInvoiceAsync(tenantId, seeded.ContractId, total: 3000m);
+        var invoiceA2 = await SeedInvoiceAsync(tenantId, seeded.ContractId, total: 2000m);
+
+        var paymentId = await SeedCompletedPaymentWithMultipleAllocationsAsync(
+            tenantId,
+            paymentAmount: 10000m,
+            currencyCode: "EGP",
+            completedAtUtc: DateTime.UtcNow.AddHours(-2),
+            method: PaymentMethod.Cash,
+            allocations: new[]
+            {
+                new PaymentAllocationSeed(invoiceA1, 3000m),
+                new PaymentAllocationSeed(invoiceA2, 2000m),
+            });
+
+        // One fact for the single payment, carrying the aggregated per-contract slice.
+        var facts = await ReadPaymentFactsAsync(tenantId, seeded.ContractId);
+        var fact = Assert.Single(facts);
+        Assert.Equal(paymentId, fact.PaymentId);
+        Assert.Equal(5000m, fact.AllocatedAmountForThisContract);
+
+        // 3,000 + 2,000 = 5,000 >= 5,000 => true
+        var response = await FreezeAsync(tenantId, seeded.BenefitId);
+        Assert.True(response.IsEligible);
     }
 
     [Fact]
@@ -1097,7 +1310,8 @@ public class TaskF_FreezeEligibilityServiceSqlServerTests
         var invoiceA = await SeedInvoiceAsync(tenantId, seededA.ContractId);
         var invoiceB = await SeedInvoiceAsync(tenantId, seededB.ContractId);
 
-        // Payment.Amount = 10000 with allocation 8000 to A and 2000 to B.
+        // Two SEPARATE payments, each with its own allocation to one contract.
+        // (The single-payment multi-contract split is proven by SQL-FINAL-02 and SQL-FINAL-11.)
         await SeedCompletedPaymentWithAllocationsAsync(
             tenantId, seededA.ContractId, invoiceA,
             paymentAmount: 10000m, allocatedAmount: 8000m,
