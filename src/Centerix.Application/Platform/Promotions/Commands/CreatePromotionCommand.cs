@@ -25,7 +25,8 @@ public record CreatePromotionCommand(
     string? BenefitDescription = null,
     decimal? BenefitValue = null,
     ContractBenefitType? BenefitType = null,
-    string? BenefitCurrencyCode = null) : IRequest<Result<int>>;
+    string? BenefitCurrencyCode = null,
+    string? BenefitEligibilityRule = null) : IRequest<Result<int>>;
 
 public class CreatePromotionHandler(
     IAppDbContext dbContext,
@@ -37,6 +38,10 @@ public class CreatePromotionHandler(
         var guardResult = platformAdminGuard.EnsurePlatformAdmin();
         if (!guardResult.IsSuccess)
             return guardResult.Errors!;
+
+        var ruleResult = BenefitEligibilityRuleParser.Parse(request.BenefitEligibilityRule);
+        if (!ruleResult.IsSuccess)
+            return ruleResult.Errors!;
 
         var promotionResult = Promotion.Create(
             id: 0,
@@ -57,7 +62,8 @@ public class CreatePromotionHandler(
             benefitDescription: request.BenefitDescription,
             benefitValue: request.BenefitValue,
             benefitType: request.BenefitType,
-            benefitCurrencyCode: request.BenefitCurrencyCode);
+            benefitCurrencyCode: request.BenefitCurrencyCode,
+            benefitEligibilityRule: ruleResult.Value);
 
         if (!promotionResult.IsSuccess)
             return promotionResult.Errors!;
@@ -89,7 +95,9 @@ public class CreatePromotionHandler(
                 promotionResult.Value.BenefitDescription,
                 promotionResult.Value.BenefitValue,
                 BenefitType = promotionResult.Value.BenefitType?.ToString(),
-                promotionResult.Value.BenefitCurrencyCode
+                promotionResult.Value.BenefitCurrencyCode,
+                BenefitEligibilityRule = BenefitEligibilityRuleParser.ToCanonical(
+                    promotionResult.Value.BenefitEligibilityRule)
             }),
             cancellationToken: cancellationToken);
 

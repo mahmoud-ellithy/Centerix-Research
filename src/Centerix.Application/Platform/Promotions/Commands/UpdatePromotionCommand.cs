@@ -27,7 +27,8 @@ public record UpdatePromotionCommand(
     string? BenefitDescription = null,
     decimal? BenefitValue = null,
     ContractBenefitType? BenefitType = null,
-    string? BenefitCurrencyCode = null) : IRequest<Result<Updated>>;
+    string? BenefitCurrencyCode = null,
+    string? BenefitEligibilityRule = null) : IRequest<Result<Updated>>;
 
 public class UpdatePromotionHandler(
     IAppDbContext dbContext,
@@ -45,6 +46,10 @@ public class UpdatePromotionHandler(
 
         if (promotion is null)
             return PromotionErrors.NotFound(request.Id);
+
+        var ruleResult = BenefitEligibilityRuleParser.Parse(request.BenefitEligibilityRule);
+        if (!ruleResult.IsSuccess)
+            return ruleResult.Errors!;
 
         var updateResult = promotion.Update(
             name: request.Name,
@@ -64,7 +69,8 @@ public class UpdatePromotionHandler(
             benefitDescription: request.BenefitDescription,
             benefitValue: request.BenefitValue,
             benefitType: request.BenefitType,
-            benefitCurrencyCode: request.BenefitCurrencyCode);
+            benefitCurrencyCode: request.BenefitCurrencyCode,
+            benefitEligibilityRule: ruleResult.Value);
 
         if (!updateResult.IsSuccess)
             return updateResult.Errors!;
@@ -95,7 +101,9 @@ public class UpdatePromotionHandler(
                 promotion.BenefitDescription,
                 promotion.BenefitValue,
                 BenefitType = promotion.BenefitType?.ToString(),
-                promotion.BenefitCurrencyCode
+                promotion.BenefitCurrencyCode,
+                BenefitEligibilityRule = BenefitEligibilityRuleParser.ToCanonical(
+                    promotion.BenefitEligibilityRule)
             }),
             cancellationToken: cancellationToken);
 

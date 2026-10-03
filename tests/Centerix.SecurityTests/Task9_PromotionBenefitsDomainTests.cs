@@ -1,5 +1,6 @@
 namespace Centerix.SecurityTests;
 
+using Centerix.Domain.Platform.Contracts.EligibilityRules;
 using Centerix.Domain.Platform.Contracts.Enums;
 using Centerix.Domain.Platform.Plans;
 using Centerix.Domain.Platform.Promotions;
@@ -50,6 +51,15 @@ public class Task9_PromotionBenefitsDomainTests
             durationMonths: durationMonths,
             bonusMonths: bonusMonths).Value;
 
+    /// <summary>
+    /// A concrete, explicitly configured benefit rule. Benefit-bearing promotions must carry one;
+    /// there is no generated default.
+    /// </summary>
+    private static EligibilityRule DefaultBenefitRule() =>
+        EligibilityRule.AllOf(
+            EligibilityRule.ContractActive(),
+            EligibilityRule.AmountPaidAtLeast(1000m));
+
     private static Promotion NewPromotion(
         PromotionType type,
         int durationMonths = 12,
@@ -64,6 +74,7 @@ public class Task9_PromotionBenefitsDomainTests
         decimal? benefitValue = null,
         ContractBenefitType? benefitType = null,
         string? benefitCurrencyCode = null,
+        EligibilityRule? benefitEligibilityRule = null,
         bool activate = true)
     {
         var result = Promotion.Create(
@@ -80,6 +91,7 @@ public class Task9_PromotionBenefitsDomainTests
             benefitValue: benefitValue,
             benefitType: benefitType,
             benefitCurrencyCode: benefitCurrencyCode,
+            benefitEligibilityRule: benefitEligibilityRule,
             percentage: percentage,
             fixedAmount: fixedAmount,
             promotionalPrice: promotionalPrice,
@@ -93,7 +105,11 @@ public class Task9_PromotionBenefitsDomainTests
     }
 
     private static Promotion FreeMonthsPromotion(int freeMonths = 2, int durationMonths = 12) =>
-        NewPromotion(PromotionType.FreeMonthsBonus, durationMonths: durationMonths, freeMonthsCount: freeMonths);
+        NewPromotion(
+            PromotionType.FreeMonthsBonus,
+            durationMonths: durationMonths,
+            freeMonthsCount: freeMonths,
+            benefitEligibilityRule: DefaultBenefitRule());
 
     private static Promotion AdditionalBenefitPromotion(
         decimal value = 500m,
@@ -106,7 +122,8 @@ public class Task9_PromotionBenefitsDomainTests
             benefitDescription: "Free barcode printer",
             benefitValue: value,
             benefitType: ContractBenefitType.PhysicalGift,
-            benefitCurrencyCode: currency);
+            benefitCurrencyCode: currency,
+            benefitEligibilityRule: DefaultBenefitRule());
 
     // ─────────────────────────────────────────────────────────────────
     // T9-D01 — Free months are granted and never change the charged amount
@@ -369,26 +386,39 @@ public class Task9_PromotionBenefitsDomainTests
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void T9_D14_EntitlementCarriesRule_AndRuleIsOfferDerivedNotPlanDerived()
+    public void T9_D14_EntitlementCarriesExactlyTheConfiguredPromotionRule()
     {
         var plan = NewPlan(monthlyPrice: 1000m);
-        var promotion = FreeMonthsPromotion(freeMonths: 2);
+        // A deliberately distinctive rule so the assertion cannot pass by coincidence.
+        var configured = EligibilityRule.AllOf(
+            EligibilityRule.ContractActive(),
+            EligibilityRule.PaymentTermsEquals(PaymentTerms.FullUpfront),
+            EligibilityRule.AmountPaidAtLeast(7777m));
+        var promotion = NewPromotion(
+            PromotionType.FreeMonthsBonus, freeMonthsCount: 2, benefitEligibilityRule: configured);
 
         var result = Service().Calculate(plan, 12, Now, [promotion]);
 
         Assert.True(result.IsSuccess);
         Assert.NotNull(result.Value.EntitlementEligibilityRule);
 
+        // The carried rule is the configured one, unmodified — not a regenerated default.
+        Assert.Equal(
+            EligibilityRuleSerializer.Serialize(configured),
+            EligibilityRuleSerializer.Serialize(result.Value.EntitlementEligibilityRule!));
+
         // The rule is deterministic: the same inputs always produce the same rule snapshot.
         var again = Service().Calculate(plan, 12, Now, [promotion]);
         Assert.Equal(
-            result.Value.EntitlementEligibilityRule!.ToString(),
-            again.Value.EntitlementEligibilityRule!.ToString());
+            EligibilityRuleSerializer.Serialize(result.Value.EntitlementEligibilityRule!),
+            EligibilityRuleSerializer.Serialize(again.Value.EntitlementEligibilityRule!));
 
-        // Changing the Plan afterwards does not change the rule the offer already carries.
+        // Changing the Plan does not change the rule the promotion carries.
         var changedPlan = NewPlan(monthlyPrice: 5000m, durationMonths: 24);
         var afterPlanChange = Service().Calculate(changedPlan, 12, Now, [promotion]);
-        Assert.NotNull(afterPlanChange.Value.EntitlementEligibilityRule);
+        Assert.Equal(
+            EligibilityRuleSerializer.Serialize(configured),
+            EligibilityRuleSerializer.Serialize(afterPlanChange.Value.EntitlementEligibilityRule!));
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -400,9 +430,10 @@ public class Task9_PromotionBenefitsDomainTests
     {
         var plan = NewPlan(monthlyPrice: 1000m);
 
-        // Pay 10 get 12 => 2 extra months.
+        // Pay 10 get 12 => 2 extra months. Opted in, so a rule is configured.
         var promotion = NewPromotion(
-            PromotionType.PayForXMonths, durationMonths: 12, chargedMonths: 10, freeMonthsCount: 1);
+            PromotionType.PayForXMonths, durationMonths: 12, chargedMonths: 10, freeMonthsCount: 1,
+            benefitEligibilityRule: DefaultBenefitRule());
 
         var result = Service().Calculate(plan, 12, Now, [promotion]);
 
@@ -437,7 +468,9 @@ public class Task9_PromotionBenefitsDomainTests
     {
         var plan = NewPlan(monthlyPrice: 1000m);
 
-        var draft = NewPromotion(PromotionType.FreeMonthsBonus, freeMonthsCount: 2, activate: false);
+        var draft = NewPromotion(
+            PromotionType.FreeMonthsBonus, freeMonthsCount: 2,
+            benefitEligibilityRule: DefaultBenefitRule(), activate: false);
         var draftResult = Service().Calculate(plan, 12, Now, [draft]);
         Assert.True(draftResult.IsSuccess);
         Assert.Null(draftResult.Value.PromotionId);
@@ -449,7 +482,8 @@ public class Task9_PromotionBenefitsDomainTests
             startsAtUtc: new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             endsAtUtc: new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             benefitName: "Gift", benefitValue: 100m, benefitType: ContractBenefitType.Service,
-            benefitCurrencyCode: "EGP").Value;
+            benefitCurrencyCode: "EGP",
+            benefitEligibilityRule: DefaultBenefitRule()).Value;
         Assert.True(expired.Activate().IsSuccess);
 
         var expiredResult = Service().Calculate(plan, 12, Now, [expired]);

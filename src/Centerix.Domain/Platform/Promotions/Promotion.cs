@@ -2,6 +2,7 @@ namespace Centerix.Domain.Platform.Promotions;
 
 using Centerix.Domain.Common;
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Contracts.EligibilityRules;
 using Centerix.Domain.Platform.Contracts.Enums;
 using Centerix.Domain.Platform.Promotions.Enums;
 
@@ -91,6 +92,25 @@ public class Promotion : GlobalAuditableEntity<int>
     /// </summary>
     public string? BenefitCurrencyCode { get; private set; }
 
+    /// <summary>
+    /// The commercial eligibility rule that governs when the entitlement granted by this promotion
+    /// becomes eligible. This is TRUSTED PLATFORM CONFIGURATION owned by the Promotion — it is the
+    /// single authoritative source of the rule and is never derived from
+    /// <see cref="PromotionType"/>, the discount, or any runtime state.
+    /// <para>
+    /// Required for every benefit-bearing promotion: <see cref="PromotionType.FreeMonthsBonus"/>,
+    /// <see cref="PromotionType.AdditionalBenefits"/>, and <see cref="PromotionType.PayForXMonths"/>
+    /// configured with a <see cref="FreeMonthsCount"/> entitlement. Rejected for discount-only
+    /// promotion types. No default is ever generated — a benefit-bearing promotion without a
+    /// configured rule is a validation failure.
+    /// </para>
+    /// <para>
+    /// Nullable so that Promotion rows created before this rule existed are never given an
+    /// invented historical rule.
+    /// </para>
+    /// </summary>
+    public EligibilityRule? BenefitEligibilityRule { get; private set; }
+
     private Promotion() { }
 
     private Promotion(
@@ -113,7 +133,8 @@ public class Promotion : GlobalAuditableEntity<int>
         string? benefitDescription,
         decimal? benefitValue,
         ContractBenefitType? benefitType,
-        string? benefitCurrencyCode)
+        string? benefitCurrencyCode,
+        EligibilityRule? benefitEligibilityRule)
         : base(id)
     {
         Name = name;
@@ -135,6 +156,7 @@ public class Promotion : GlobalAuditableEntity<int>
         BenefitValue = benefitValue;
         BenefitType = benefitType;
         BenefitCurrencyCode = benefitCurrencyCode;
+        BenefitEligibilityRule = benefitEligibilityRule;
     }
 
     public static Result<Promotion> Create(
@@ -156,7 +178,8 @@ public class Promotion : GlobalAuditableEntity<int>
         string? benefitDescription = null,
         decimal? benefitValue = null,
         ContractBenefitType? benefitType = null,
-        string? benefitCurrencyCode = null)
+        string? benefitCurrencyCode = null,
+        EligibilityRule? benefitEligibilityRule = null)
     {
         if (id < 0)
             return PromotionErrors.InvalidId;
@@ -196,7 +219,8 @@ public class Promotion : GlobalAuditableEntity<int>
             benefitName,
             benefitValue,
             benefitType,
-            benefitCurrencyCode);
+            benefitCurrencyCode,
+            benefitEligibilityRule);
         if (!benefitValidation.IsSuccess)
             return benefitValidation.Errors!;
 
@@ -220,7 +244,8 @@ public class Promotion : GlobalAuditableEntity<int>
             benefitDescription?.Trim(),
             benefitValue,
             benefitType,
-            benefitCurrencyCode?.Trim().ToUpperInvariant());
+            benefitCurrencyCode?.Trim().ToUpperInvariant(),
+            benefitEligibilityRule);
     }
 
     /// <summary>
@@ -287,7 +312,8 @@ public class Promotion : GlobalAuditableEntity<int>
         string? benefitDescription = null,
         decimal? benefitValue = null,
         ContractBenefitType? benefitType = null,
-        string? benefitCurrencyCode = null)
+        string? benefitCurrencyCode = null,
+        EligibilityRule? benefitEligibilityRule = null)
     {
         if (Status is PromotionStatus.Expired or PromotionStatus.Disabled)
             return PromotionErrors.InvalidStateTransition(Status, "update");
@@ -326,7 +352,8 @@ public class Promotion : GlobalAuditableEntity<int>
             benefitName,
             benefitValue,
             benefitType,
-            benefitCurrencyCode);
+            benefitCurrencyCode,
+            benefitEligibilityRule);
         if (!benefitValidation.IsSuccess)
             return benefitValidation.Errors!;
 
@@ -348,6 +375,7 @@ public class Promotion : GlobalAuditableEntity<int>
         BenefitValue = benefitValue;
         BenefitType = benefitType;
         BenefitCurrencyCode = benefitCurrencyCode?.Trim().ToUpperInvariant();
+        BenefitEligibilityRule = benefitEligibilityRule;
 
         return Result.Updated;
     }
@@ -399,7 +427,8 @@ public class Promotion : GlobalAuditableEntity<int>
         string? benefitName,
         decimal? benefitValue,
         ContractBenefitType? benefitType,
-        string? benefitCurrencyCode)
+        string? benefitCurrencyCode,
+        EligibilityRule? benefitEligibilityRule)
     {
         var grantsFreeMonths = type == PromotionType.FreeMonthsBonus || freeMonthsCount.HasValue;
         var grantsBenefit = type == PromotionType.AdditionalBenefits
@@ -447,6 +476,22 @@ public class Promotion : GlobalAuditableEntity<int>
         // on every other type a stray non-positive free months count is still a data-entry error.
         if (type != PromotionType.FreeMonthsBonus && freeMonthsCount is <= 0)
             return PromotionErrors.InvalidFreeMonthsCount;
+
+        // ---- The eligibility rule is trusted platform configuration, not a derived value ----
+        // A benefit-bearing promotion MUST carry an explicit rule. There is deliberately no
+        // default: silently inventing a rule would let the promotion type decide who gets the
+        // entitlement, which is exactly the defect this corrects.
+        if (grantsFreeMonths || grantsBenefit)
+        {
+            if (benefitEligibilityRule is null)
+                return PromotionErrors.BenefitEligibilityRule_Required;
+        }
+        else if (benefitEligibilityRule is not null)
+        {
+            // A discount-only promotion grants nothing, so a rule on it is meaningless and rejected
+            // rather than stored as dead configuration.
+            return PromotionErrors.BenefitEligibilityRule_NotSupportedForType(type);
+        }
 
         return Result.Updated;
     }

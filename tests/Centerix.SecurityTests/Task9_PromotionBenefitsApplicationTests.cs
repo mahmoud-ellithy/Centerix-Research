@@ -4,6 +4,7 @@ using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform.Contracts.Commands;
 using Centerix.Application.Platform.Promotions.Commands;
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Contracts.EligibilityRules;
 using Centerix.Domain.Platform.Contracts.Enums;
 using Centerix.Domain.Platform.Plans;
 using Centerix.Domain.Platform.Promotions;
@@ -73,8 +74,13 @@ public class Task9_PromotionBenefitsApplicationTests : IClassFixture<TaskCFakeTe
         return plan.Id;
     }
 
-    private static async Task<int> SeedPromotionAsync(
-        IAppDbContext db,
+    /// <summary>A concrete, explicitly configured benefit rule (no generated default exists).</summary>
+    private static EligibilityRule DefaultBenefitRule() =>
+        EligibilityRule.AllOf(
+            EligibilityRule.ContractActive(),
+            EligibilityRule.AmountPaidAtLeast(1000m));
+
+    private static async Task<int> SeedPromotionAsync(        IAppDbContext db,
         int planId,
         PromotionType type,
         int durationMonths = 12,
@@ -85,8 +91,16 @@ public class Task9_PromotionBenefitsApplicationTests : IClassFixture<TaskCFakeTe
         string? benefitCurrencyCode = null,
         decimal? percentage = null,
         int? chargedMonths = null,
+        EligibilityRule? benefitEligibilityRule = null,
         bool activate = true)
     {
+        // Benefit-bearing promotions must carry an explicit rule; there is no generated default.
+        // Discount-only types get none.
+        var grantsBenefit = type is PromotionType.FreeMonthsBonus
+                            or PromotionType.AdditionalBenefits
+                            || (type == PromotionType.PayForXMonths && freeMonthsCount.HasValue);
+        var rule = benefitEligibilityRule ?? (grantsBenefit ? DefaultBenefitRule() : null);
+
         var promotion = Promotion.Create(
             id: 0,
             name: $"T9 promo {Guid.NewGuid():N}"[..16],
@@ -100,6 +114,7 @@ public class Task9_PromotionBenefitsApplicationTests : IClassFixture<TaskCFakeTe
             benefitValue: benefitValue,
             benefitType: benefitType,
             benefitCurrencyCode: benefitCurrencyCode,
+            benefitEligibilityRule: rule,
             percentage: percentage,
             chargedMonths: chargedMonths).Value;
 
@@ -219,7 +234,8 @@ public class Task9_PromotionBenefitsApplicationTests : IClassFixture<TaskCFakeTe
             startsAtUtc: promotion.StartsAtUtc,
             endsAtUtc: promotion.EndsAtUtc,
             priority: promotion.Priority,
-            freeMonthsCount: 11).IsSuccess);
+            freeMonthsCount: 11,
+            benefitEligibilityRule: DefaultBenefitRule()).IsSuccess);
         await db2.SaveChangesAsync();
 
         // The existing Offer snapshot is unchanged â€” the offer is authoritative.

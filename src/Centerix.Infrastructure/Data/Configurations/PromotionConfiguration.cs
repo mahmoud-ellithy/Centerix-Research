@@ -1,5 +1,6 @@
 namespace Centerix.Infrastructure.Data.Configurations;
 
+using Centerix.Domain.Platform.Contracts.EligibilityRules;
 using Centerix.Domain.Platform.Promotions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -83,6 +84,15 @@ public class PromotionConfiguration : IEntityTypeConfiguration<Promotion>
 
         builder.Property(p => p.BenefitCurrencyCode)
             .HasMaxLength(3);
+
+        // Canonical JSON eligibility rule, using the same canonical serializer/converter as every
+        // other eligibility rule column in this database. Nullable so pre-existing promotion rows
+        // keep a null rule rather than an invented historical one.
+        builder.Property(p => p.BenefitEligibilityRule)
+            .HasConversion(
+                v => v == null ? null : EligibilityRuleSerializer.Serialize(v),
+                v => v == null ? null : EligibilityRuleSerializer.Deserialize(v)!)
+            .HasColumnType("nvarchar(max)");
 
         // Indexes for common query patterns
         builder.HasIndex(p => p.Status)

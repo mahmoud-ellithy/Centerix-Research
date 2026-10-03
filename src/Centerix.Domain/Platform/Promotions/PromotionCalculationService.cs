@@ -184,7 +184,7 @@ public sealed class PromotionCalculationService : IPromotionCalculationService
             case PromotionType.FreeMonthsBonus:
             {
                 var freeMonths = promotion.FreeMonthsCount!.Value;
-                return ValidateFreeMonths(freeMonths, durationMonths);
+                return ValidateFreeMonths(freeMonths, durationMonths, promotion.BenefitEligibilityRule);
             }
 
             case PromotionType.PayForXMonths:
@@ -200,7 +200,7 @@ public sealed class PromotionCalculationService : IPromotionCalculationService
                 if (extraMonths <= 0)
                     return EntitlementResolution.Empty();
 
-                return ValidateFreeMonths(extraMonths, durationMonths);
+                return ValidateFreeMonths(extraMonths, durationMonths, promotion.BenefitEligibilityRule);
             }
 
             case PromotionType.AdditionalBenefits:
@@ -208,8 +208,9 @@ public sealed class PromotionCalculationService : IPromotionCalculationService
                 var benefitValue = promotion.BenefitValue!.Value;
 
                 // The benefit value must fit the Contract gift invariant: total benefits may never
-                // exceed three months of the subscription value. Enforced here because this is the
-                // only place the Plan's monthly price is known.
+                // exceed three months of the subscription value. The monthly value used here is the
+                // same one that becomes Offer.MonthlyListPrice and then Contract.ContractualMonthlyValue,
+                // so the offer can never be converted into a contract that violates the invariant.
                 var threeMonthsValue = plan.MonthlyPrice * 3m;
                 if (benefitValue > threeMonthsValue)
                     return Error.Validation("Promotion.BenefitValue_ExceedsMaximum",
@@ -223,7 +224,7 @@ public sealed class PromotionCalculationService : IPromotionCalculationService
                     BenefitValue = benefitValue,
                     BenefitType = promotion.BenefitType,
                     BenefitCurrencyCode = promotion.BenefitCurrencyCode,
-                    EligibilityRule = BuildEntitlementRule(finalAmount)
+                    EligibilityRule = promotion.BenefitEligibilityRule
                 };
             }
 
@@ -237,7 +238,10 @@ public sealed class PromotionCalculationService : IPromotionCalculationService
     /// A free months entitlement may never exceed the purchased term it is attached to.
     /// A "5 free months" benefit on a 3-month contract is a configuration error, not a discount.
     /// </summary>
-    private static Result<EntitlementResolution> ValidateFreeMonths(int freeMonths, int durationMonths)
+    private static Result<EntitlementResolution> ValidateFreeMonths(
+        int freeMonths,
+        int durationMonths,
+        EligibilityRule? promotionRule)
     {
         if (freeMonths <= 0)
             return Error.Validation("Promotion.FreeMonths_Invalid", "Free months must be greater than 0");
@@ -246,24 +250,22 @@ public sealed class PromotionCalculationService : IPromotionCalculationService
             return Error.Validation("Promotion.FreeMonths_ExceedDuration",
                 $"Free months ({freeMonths}) cannot exceed the contract duration ({durationMonths})");
 
+        // A missing rule cannot be repaired here: no default is invented. Promotion.Create/Update
+        // already reject a benefit-bearing promotion without a rule, so reaching this point with a
+        // null rule means the row predates the rule column or was written outside the aggregate.
+        // Failing loudly is the only safe outcome — silently dropping the rule would produce a
+        // FreeMonthsBenefit with no gate.
+        if (promotionRule is null)
+            return Error.Validation("Promotion.BenefitEligibilityRule_Missing",
+                "The promotion has no configured benefit eligibility rule; recalculate it " +
+                "from a promotion that defines one");
+
         return new EntitlementResolution
         {
             FreeMonths = freeMonths,
-            EligibilityRule = BuildEntitlementRule(0m)
+            EligibilityRule = promotionRule
         };
     }
-
-    /// <summary>
-    /// Builds the immutable commercial eligibility rule for a granted entitlement.
-    /// Derived purely from the calculated offer — the current Plan catalog is never consulted, so
-    /// the rule stays correct even after the Plan changes.
-    /// </summary>
-    private static EligibilityRule BuildEntitlementRule(decimal requiredPaidAmount) =>
-        requiredPaidAmount > 0
-            ? EligibilityRule.AllOf(
-                EligibilityRule.ContractActive(),
-                EligibilityRule.AmountPaidAtLeast(requiredPaidAmount))
-            : EligibilityRule.ContractActive();
 
     private sealed record EntitlementResolution
     {

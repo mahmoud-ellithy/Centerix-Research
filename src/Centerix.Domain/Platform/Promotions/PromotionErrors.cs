@@ -69,6 +69,16 @@ public static class PromotionErrors
             $"Promotion type '{type}' does not support free months or benefit configuration; " +
             "use FreeMonthsBonus or AdditionalBenefits");
 
+    public static Error BenefitEligibilityRule_Required =>
+        Error.Validation("Promotion.BenefitEligibilityRule_Required",
+            "A promotion that grants a benefit or free months must configure an explicit " +
+            "benefit eligibility rule; no default rule is generated");
+
+    public static Error BenefitEligibilityRule_NotSupportedForType(PromotionType type) =>
+        Error.Validation("Promotion.BenefitEligibilityRule_NotSupportedForType",
+            $"Promotion type '{type}' grants no benefit, so a benefit eligibility rule " +
+            "cannot be configured");
+
     public static Error InvalidStateTransition(PromotionStatus current, string action) =>
         Error.Conflict("Promotion.InvalidStateTransition",
             $"Cannot {action} a promotion in status '{current}'");

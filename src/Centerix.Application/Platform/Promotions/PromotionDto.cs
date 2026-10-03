@@ -1,5 +1,6 @@
 namespace Centerix.Application.Platform.Promotions;
 
+using Centerix.Domain.Platform.Contracts.EligibilityRules;
 using Centerix.Domain.Platform.Contracts.Enums;
 
 /// <summary>
@@ -27,5 +28,12 @@ public class PromotionDto
     public decimal? BenefitValue { get; set; }
     public ContractBenefitType? BenefitType { get; set; }
     public string? BenefitCurrencyCode { get; set; }
+
+    /// <summary>
+    /// Canonical JSON form of <see cref="BenefitEligibilityRule"/>, produced by
+    /// <see cref="EligibilityRuleSerializer"/>. Exposed read-only; it is never a write path.
+    /// </summary>
+    public string? BenefitEligibilityRule { get; set; }
+
     public DateTimeOffset CreatedAtUtc { get; set; }
 }

@@ -1,4 +1,4 @@
-namespace Centerix.Application.Platform.Promotions.Queries;
+﻿namespace Centerix.Application.Platform.Promotions.Queries;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
@@ -45,6 +45,7 @@ public class GetPromotionByIdHandler(IAppDbContext dbContext)
                 BenefitValue = p.BenefitValue,
                 BenefitType = p.BenefitType,
                 BenefitCurrencyCode = p.BenefitCurrencyCode,
+                BenefitEligibilityRule = BenefitEligibilityRuleParser.ToCanonical(p.BenefitEligibilityRule),
                 CreatedAtUtc = p.CreatedAtUtc
             })
             .FirstOrDefaultAsync(cancellationToken);
@@ -86,6 +87,7 @@ public class ListPromotionsHandler(IAppDbContext dbContext)
                 BenefitValue = p.BenefitValue,
                 BenefitType = p.BenefitType,
                 BenefitCurrencyCode = p.BenefitCurrencyCode,
+                BenefitEligibilityRule = BenefitEligibilityRuleParser.ToCanonical(p.BenefitEligibilityRule),
                 CreatedAtUtc = p.CreatedAtUtc
             })
             .ToListAsync(cancellationToken);

@@ -105,6 +105,12 @@ public class Task9_PromotionBenefitsSqlServerTests
         return plan.Id;
     }
 
+    /// <summary>A concrete, explicitly configured benefit rule (no generated default exists).</summary>
+    private static EligibilityRule DefaultBenefitRule() =>
+        EligibilityRule.AllOf(
+            EligibilityRule.ContractActive(),
+            EligibilityRule.AmountPaidAtLeast(1000m));
+
     /// <summary>
     /// Seeds a promotion scoped to a specific plan so parallel/sequential tests can never
     /// observe each other's promotions.
@@ -122,12 +128,21 @@ public class Task9_PromotionBenefitsSqlServerTests
         string? benefitCurrencyCode = null,
         decimal? percentage = null,
         int? chargedMonths = null,
+        EligibilityRule? benefitEligibilityRule = null,
         bool activate = true)
     {
         using var scope = _env.Factory.Services.CreateScope();
         AuthorizeTenant(scope.ServiceProvider, tenantId);
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var promotion = Promotion.Create(
+
+        // Benefit-bearing promotions must carry an explicit rule; there is no generated default.
+        // Discount-only types get none.
+        var grantsBenefit = type is PromotionType.FreeMonthsBonus
+                            or PromotionType.AdditionalBenefits
+                            || (type == PromotionType.PayForXMonths && freeMonthsCount.HasValue);
+        var rule = benefitEligibilityRule ?? (grantsBenefit ? DefaultBenefitRule() : null);
+
+        var promotionResult = Promotion.Create(
             id: 0,
             name: $"T9 {type} {Guid.NewGuid():N}"[..20],
             type: type,
@@ -141,8 +156,12 @@ public class Task9_PromotionBenefitsSqlServerTests
             benefitValue: benefitValue,
             benefitType: benefitType,
             benefitCurrencyCode: benefitCurrencyCode,
+            benefitEligibilityRule: rule,
             percentage: percentage,
-            chargedMonths: chargedMonths).Value;
+            chargedMonths: chargedMonths);
+
+        Assert.True(promotionResult.IsSuccess, FailureOf(promotionResult));
+        var promotion = promotionResult.Value;
 
         if (activate)
             Assert.True(promotion.Activate().IsSuccess);
@@ -218,6 +237,9 @@ public class Task9_PromotionBenefitsSqlServerTests
             ["BenefitValue"] = ("decimal", "YES", null),
             ["BenefitType"] = ("tinyint", "YES", null),
             ["BenefitCurrencyCode"] = ("nvarchar", "YES", 3),
+            // SQL Server reports DATA_TYPE as "nvarchar" with CHARACTER_MAXIMUM_LENGTH = -1 for
+            // an nvarchar(max) column.
+            ["BenefitEligibilityRule"] = ("nvarchar", "YES", -1),
         };
 
         foreach (var (name, spec) in expected)
@@ -226,7 +248,7 @@ public class Task9_PromotionBenefitsSqlServerTests
             Assert.True(column is not null, $"Column Platform.Promotions.{name} is missing after migration.");
             Assert.Equal(spec.DataType, column!.DataType);
             Assert.Equal(spec.IsNullable, column.IsNullable);
-            if (spec.MaxLength.HasValue)
+            if (spec.MaxLength.HasValue && spec.MaxLength.Value != 0)
                 Assert.Equal(spec.MaxLength.Value, column.MaxLength);
         }
     }
@@ -445,7 +467,8 @@ public class Task9_PromotionBenefitsSqlServerTests
                 startsAtUtc: promotion.StartsAtUtc,
                 endsAtUtc: promotion.EndsAtUtc,
                 priority: promotion.Priority,
-                freeMonthsCount: 6).IsSuccess);
+                freeMonthsCount: 6,
+                benefitEligibilityRule: DefaultBenefitRule()).IsSuccess);
             await db.SaveChangesAsync();
         }
 
