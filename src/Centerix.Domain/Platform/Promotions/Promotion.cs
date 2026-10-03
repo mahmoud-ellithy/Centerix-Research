@@ -2,6 +2,7 @@ namespace Centerix.Domain.Platform.Promotions;
 
 using Centerix.Domain.Common;
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Contracts.Enums;
 using Centerix.Domain.Platform.Promotions.Enums;
 
 /// <summary>
@@ -56,6 +57,40 @@ public class Promotion : GlobalAuditableEntity<int>
     /// <summary>Number of months the customer is charged for. Required for PayForXMonths.</summary>
     public int? ChargedMonths { get; private set; }
 
+    // ---- Benefit configuration (optional; only semantically meaningful for the benefit types) ----
+
+    /// <summary>
+    /// Number of free months this promotion grants on top of the purchased term.
+    /// Required for <see cref="PromotionType.FreeMonthsBonus"/>.
+    /// <para>
+    /// For <see cref="PromotionType.PayForXMonths"/> this acts as the opt-in switch: when set, the
+    /// months difference (<c>DurationMonths - ChargedMonths</c>) — NOT this value — is granted as
+    /// free months, so the entitlement can never contradict the commercial "pay X get Y" promise.
+    /// </para>
+    /// </summary>
+    public int? FreeMonthsCount { get; private set; }
+
+    /// <summary>Human-readable name of the additional benefit. Required for <see cref="PromotionType.AdditionalBenefits"/>.</summary>
+    public string? BenefitName { get; private set; }
+
+    /// <summary>Optional description of the additional benefit.</summary>
+    public string? BenefitDescription { get; private set; }
+
+    /// <summary>
+    /// Contractual value of the additional benefit in <see cref="BenefitCurrencyCode"/>.
+    /// Required for <see cref="PromotionType.AdditionalBenefits"/> and must be strictly positive.
+    /// </summary>
+    public decimal? BenefitValue { get; private set; }
+
+    /// <summary>Category of the additional benefit. Required for <see cref="PromotionType.AdditionalBenefits"/>.</summary>
+    public ContractBenefitType? BenefitType { get; private set; }
+
+    /// <summary>
+    /// ISO-4217 currency of <see cref="BenefitValue"/>. Required for
+    /// <see cref="PromotionType.AdditionalBenefits"/> and must be a 3-letter code.
+    /// </summary>
+    public string? BenefitCurrencyCode { get; private set; }
+
     private Promotion() { }
 
     private Promotion(
@@ -72,7 +107,13 @@ public class Promotion : GlobalAuditableEntity<int>
         decimal? percentage,
         decimal? fixedAmount,
         decimal? promotionalPrice,
-        int? chargedMonths)
+        int? chargedMonths,
+        int? freeMonthsCount,
+        string? benefitName,
+        string? benefitDescription,
+        decimal? benefitValue,
+        ContractBenefitType? benefitType,
+        string? benefitCurrencyCode)
         : base(id)
     {
         Name = name;
@@ -88,6 +129,12 @@ public class Promotion : GlobalAuditableEntity<int>
         FixedAmount = fixedAmount;
         PromotionalPrice = promotionalPrice;
         ChargedMonths = chargedMonths;
+        FreeMonthsCount = freeMonthsCount;
+        BenefitName = benefitName;
+        BenefitDescription = benefitDescription;
+        BenefitValue = benefitValue;
+        BenefitType = benefitType;
+        BenefitCurrencyCode = benefitCurrencyCode;
     }
 
     public static Result<Promotion> Create(
@@ -103,7 +150,13 @@ public class Promotion : GlobalAuditableEntity<int>
         decimal? percentage = null,
         decimal? fixedAmount = null,
         decimal? promotionalPrice = null,
-        int? chargedMonths = null)
+        int? chargedMonths = null,
+        int? freeMonthsCount = null,
+        string? benefitName = null,
+        string? benefitDescription = null,
+        decimal? benefitValue = null,
+        ContractBenefitType? benefitType = null,
+        string? benefitCurrencyCode = null)
     {
         if (id < 0)
             return PromotionErrors.InvalidId;
@@ -137,6 +190,16 @@ public class Promotion : GlobalAuditableEntity<int>
         if (!typeValidation.IsSuccess)
             return typeValidation.Errors!;
 
+        var benefitValidation = ValidateBenefitFields(
+            type,
+            freeMonthsCount,
+            benefitName,
+            benefitValue,
+            benefitType,
+            benefitCurrencyCode);
+        if (!benefitValidation.IsSuccess)
+            return benefitValidation.Errors!;
+
         return new Promotion(
             id,
             name.Trim(),
@@ -151,7 +214,13 @@ public class Promotion : GlobalAuditableEntity<int>
             percentage,
             fixedAmount,
             promotionalPrice,
-            chargedMonths);
+            chargedMonths,
+            freeMonthsCount,
+            benefitName?.Trim(),
+            benefitDescription?.Trim(),
+            benefitValue,
+            benefitType,
+            benefitCurrencyCode?.Trim().ToUpperInvariant());
     }
 
     /// <summary>
@@ -212,7 +281,13 @@ public class Promotion : GlobalAuditableEntity<int>
         decimal? percentage = null,
         decimal? fixedAmount = null,
         decimal? promotionalPrice = null,
-        int? chargedMonths = null)
+        int? chargedMonths = null,
+        int? freeMonthsCount = null,
+        string? benefitName = null,
+        string? benefitDescription = null,
+        decimal? benefitValue = null,
+        ContractBenefitType? benefitType = null,
+        string? benefitCurrencyCode = null)
     {
         if (Status is PromotionStatus.Expired or PromotionStatus.Disabled)
             return PromotionErrors.InvalidStateTransition(Status, "update");
@@ -245,6 +320,16 @@ public class Promotion : GlobalAuditableEntity<int>
         if (!typeValidation.IsSuccess)
             return typeValidation.Errors!;
 
+        var benefitValidation = ValidateBenefitFields(
+            type,
+            freeMonthsCount,
+            benefitName,
+            benefitValue,
+            benefitType,
+            benefitCurrencyCode);
+        if (!benefitValidation.IsSuccess)
+            return benefitValidation.Errors!;
+
         Name = name.Trim();
         Type = type;
         PlanId = planId;
@@ -257,6 +342,12 @@ public class Promotion : GlobalAuditableEntity<int>
         FixedAmount = fixedAmount;
         PromotionalPrice = promotionalPrice;
         ChargedMonths = chargedMonths;
+        FreeMonthsCount = freeMonthsCount;
+        BenefitName = benefitName?.Trim();
+        BenefitDescription = benefitDescription?.Trim();
+        BenefitValue = benefitValue;
+        BenefitType = benefitType;
+        BenefitCurrencyCode = benefitCurrencyCode?.Trim().ToUpperInvariant();
 
         return Result.Updated;
     }
@@ -290,6 +381,72 @@ public class Promotion : GlobalAuditableEntity<int>
                     return PromotionErrors.InvalidChargedMonths;
                 break;
         }
+
+        return Result.Updated;
+    }
+
+    /// <summary>
+    /// Validates the optional benefit configuration of a promotion.
+    /// <para>
+    /// A promotion grants EITHER free months OR an additional benefit — never both. Rejecting the
+    /// mixed configuration keeps the calculated Offer unambiguous and prevents a single promotion
+    /// from silently producing two different entitlement kinds at once.
+    /// </para>
+    /// </summary>
+    private static Result<Updated> ValidateBenefitFields(
+        PromotionType type,
+        int? freeMonthsCount,
+        string? benefitName,
+        decimal? benefitValue,
+        ContractBenefitType? benefitType,
+        string? benefitCurrencyCode)
+    {
+        var grantsFreeMonths = type == PromotionType.FreeMonthsBonus || freeMonthsCount.HasValue;
+        var grantsBenefit = type == PromotionType.AdditionalBenefits
+                            || benefitName is not null
+                            || benefitValue.HasValue
+                            || benefitType.HasValue
+                            || benefitCurrencyCode is not null;
+
+        if (grantsFreeMonths && grantsBenefit)
+            return PromotionErrors.BenefitConfig_Conflicting;
+
+        switch (type)
+        {
+            case PromotionType.FreeMonthsBonus:
+                if (freeMonthsCount is null || freeMonthsCount <= 0)
+                    return PromotionErrors.InvalidFreeMonthsCount;
+                break;
+
+            case PromotionType.AdditionalBenefits:
+                if (string.IsNullOrWhiteSpace(benefitName))
+                    return PromotionErrors.BenefitName_Required;
+                if (benefitValue is null || benefitValue <= 0)
+                    return PromotionErrors.InvalidBenefitValue;
+                if (benefitType is null || !Enum.IsDefined(typeof(ContractBenefitType), benefitType.Value))
+                    return PromotionErrors.InvalidBenefitType;
+                if (string.IsNullOrWhiteSpace(benefitCurrencyCode) || benefitCurrencyCode.Trim().Length != 3)
+                    return PromotionErrors.InvalidBenefitCurrencyCode;
+                break;
+        }
+
+        // A benefit configuration attached to a discount-only promotion is a data-entry error:
+        // the operator meant one of the dedicated benefit types. PayForXMonths is the one
+        // discount type that may opt in to the free months path.
+        if (type is not (PromotionType.FreeMonthsBonus or PromotionType.AdditionalBenefits or PromotionType.PayForXMonths)
+            && (freeMonthsCount.HasValue
+                || benefitName is not null
+                || benefitValue.HasValue
+                || benefitType.HasValue
+                || benefitCurrencyCode is not null))
+        {
+            return PromotionErrors.BenefitConfig_NotSupportedForType(type);
+        }
+
+        // On AdditionalBenefits the configured benefit fields are required and validated above;
+        // on every other type a stray non-positive free months count is still a data-entry error.
+        if (type != PromotionType.FreeMonthsBonus && freeMonthsCount is <= 0)
+            return PromotionErrors.InvalidFreeMonthsCount;
 
         return Result.Updated;
     }

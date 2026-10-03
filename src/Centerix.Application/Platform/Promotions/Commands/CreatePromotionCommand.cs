@@ -2,6 +2,7 @@ namespace Centerix.Application.Platform.Promotions.Commands;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Contracts.Enums;
 using Centerix.Domain.Platform.Promotions;
 using Centerix.Domain.Platform.Promotions.Enums;
 using MediatR;
@@ -18,7 +19,13 @@ public record CreatePromotionCommand(
     decimal? Percentage = null,
     decimal? FixedAmount = null,
     decimal? PromotionalPrice = null,
-    int? ChargedMonths = null) : IRequest<Result<int>>;
+    int? ChargedMonths = null,
+    int? FreeMonthsCount = null,
+    string? BenefitName = null,
+    string? BenefitDescription = null,
+    decimal? BenefitValue = null,
+    ContractBenefitType? BenefitType = null,
+    string? BenefitCurrencyCode = null) : IRequest<Result<int>>;
 
 public class CreatePromotionHandler(
     IAppDbContext dbContext,
@@ -44,7 +51,13 @@ public class CreatePromotionHandler(
             percentage: request.Percentage,
             fixedAmount: request.FixedAmount,
             promotionalPrice: request.PromotionalPrice,
-            chargedMonths: request.ChargedMonths);
+            chargedMonths: request.ChargedMonths,
+            freeMonthsCount: request.FreeMonthsCount,
+            benefitName: request.BenefitName,
+            benefitDescription: request.BenefitDescription,
+            benefitValue: request.BenefitValue,
+            benefitType: request.BenefitType,
+            benefitCurrencyCode: request.BenefitCurrencyCode);
 
         if (!promotionResult.IsSuccess)
             return promotionResult.Errors!;
@@ -70,7 +83,13 @@ public class CreatePromotionHandler(
                 promotionResult.Value.Percentage,
                 promotionResult.Value.FixedAmount,
                 promotionResult.Value.PromotionalPrice,
-                promotionResult.Value.ChargedMonths
+                promotionResult.Value.ChargedMonths,
+                promotionResult.Value.FreeMonthsCount,
+                promotionResult.Value.BenefitName,
+                promotionResult.Value.BenefitDescription,
+                promotionResult.Value.BenefitValue,
+                BenefitType = promotionResult.Value.BenefitType?.ToString(),
+                promotionResult.Value.BenefitCurrencyCode
             }),
             cancellationToken: cancellationToken);
 

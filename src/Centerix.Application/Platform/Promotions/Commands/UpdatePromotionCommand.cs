@@ -2,6 +2,7 @@ namespace Centerix.Application.Platform.Promotions.Commands;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Contracts.Enums;
 using Centerix.Domain.Platform.Promotions;
 using Centerix.Domain.Platform.Promotions.Enums;
 using MediatR;
@@ -20,7 +21,13 @@ public record UpdatePromotionCommand(
     decimal? Percentage = null,
     decimal? FixedAmount = null,
     decimal? PromotionalPrice = null,
-    int? ChargedMonths = null) : IRequest<Result<Updated>>;
+    int? ChargedMonths = null,
+    int? FreeMonthsCount = null,
+    string? BenefitName = null,
+    string? BenefitDescription = null,
+    decimal? BenefitValue = null,
+    ContractBenefitType? BenefitType = null,
+    string? BenefitCurrencyCode = null) : IRequest<Result<Updated>>;
 
 public class UpdatePromotionHandler(
     IAppDbContext dbContext,
@@ -51,7 +58,13 @@ public class UpdatePromotionHandler(
             percentage: request.Percentage,
             fixedAmount: request.FixedAmount,
             promotionalPrice: request.PromotionalPrice,
-            chargedMonths: request.ChargedMonths);
+            chargedMonths: request.ChargedMonths,
+            freeMonthsCount: request.FreeMonthsCount,
+            benefitName: request.BenefitName,
+            benefitDescription: request.BenefitDescription,
+            benefitValue: request.BenefitValue,
+            benefitType: request.BenefitType,
+            benefitCurrencyCode: request.BenefitCurrencyCode);
 
         if (!updateResult.IsSuccess)
             return updateResult.Errors!;
@@ -76,7 +89,13 @@ public class UpdatePromotionHandler(
                 promotion.Percentage,
                 promotion.FixedAmount,
                 promotion.PromotionalPrice,
-                promotion.ChargedMonths
+                promotion.ChargedMonths,
+                promotion.FreeMonthsCount,
+                promotion.BenefitName,
+                promotion.BenefitDescription,
+                promotion.BenefitValue,
+                BenefitType = promotion.BenefitType?.ToString(),
+                promotion.BenefitCurrencyCode
             }),
             cancellationToken: cancellationToken);
 

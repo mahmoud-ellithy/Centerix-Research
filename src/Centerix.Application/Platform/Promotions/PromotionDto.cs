@@ -1,5 +1,7 @@
 namespace Centerix.Application.Platform.Promotions;
 
+using Centerix.Domain.Platform.Contracts.Enums;
+
 /// <summary>
 /// DTO for Promotion data returned to API clients.
 /// </summary>
@@ -19,5 +21,11 @@ public class PromotionDto
     public decimal? FixedAmount { get; set; }
     public decimal? PromotionalPrice { get; set; }
     public int? ChargedMonths { get; set; }
+    public int? FreeMonthsCount { get; set; }
+    public string? BenefitName { get; set; }
+    public string? BenefitDescription { get; set; }
+    public decimal? BenefitValue { get; set; }
+    public ContractBenefitType? BenefitType { get; set; }
+    public string? BenefitCurrencyCode { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
 }

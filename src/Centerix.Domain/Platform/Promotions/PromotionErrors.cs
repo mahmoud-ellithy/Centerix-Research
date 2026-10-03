@@ -44,6 +44,31 @@ public static class PromotionErrors
     public static Error InvalidChargedMonths =>
         Error.Validation("Promotion.ChargedMonths_Invalid", "Charged months must be greater than 0");
 
+    public static Error InvalidFreeMonthsCount =>
+        Error.Validation("Promotion.FreeMonthsCount_Invalid", "Free months count must be greater than 0");
+
+    public static Error BenefitName_Required =>
+        Error.Validation("Promotion.BenefitName_Required", "A promotion benefit name is required");
+
+    public static Error InvalidBenefitValue =>
+        Error.Validation("Promotion.BenefitValue_Invalid", "A promotion benefit value must be greater than 0");
+
+    public static Error InvalidBenefitType =>
+        Error.Validation("Promotion.BenefitType_Invalid", "A defined promotion benefit type is required");
+
+    public static Error InvalidBenefitCurrencyCode =>
+        Error.Validation("Promotion.BenefitCurrencyCode_Invalid",
+            "A promotion benefit currency must be a 3-letter ISO-4217 code");
+
+    public static Error BenefitConfig_Conflicting =>
+        Error.Validation("Promotion.BenefitConfig_Conflicting",
+            "A promotion cannot grant free months and an additional benefit at the same time");
+
+    public static Error BenefitConfig_NotSupportedForType(PromotionType type) =>
+        Error.Validation("Promotion.BenefitConfig_NotSupportedForType",
+            $"Promotion type '{type}' does not support free months or benefit configuration; " +
+            "use FreeMonthsBonus or AdditionalBenefits");
+
     public static Error InvalidStateTransition(PromotionStatus current, string action) =>
         Error.Conflict("Promotion.InvalidStateTransition",
             $"Cannot {action} a promotion in status '{current}'");

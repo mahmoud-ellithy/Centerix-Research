@@ -39,6 +39,12 @@ public class GetPromotionByIdHandler(IAppDbContext dbContext)
                 FixedAmount = p.FixedAmount,
                 PromotionalPrice = p.PromotionalPrice,
                 ChargedMonths = p.ChargedMonths,
+                FreeMonthsCount = p.FreeMonthsCount,
+                BenefitName = p.BenefitName,
+                BenefitDescription = p.BenefitDescription,
+                BenefitValue = p.BenefitValue,
+                BenefitType = p.BenefitType,
+                BenefitCurrencyCode = p.BenefitCurrencyCode,
                 CreatedAtUtc = p.CreatedAtUtc
             })
             .FirstOrDefaultAsync(cancellationToken);
@@ -74,6 +80,12 @@ public class ListPromotionsHandler(IAppDbContext dbContext)
                 FixedAmount = p.FixedAmount,
                 PromotionalPrice = p.PromotionalPrice,
                 ChargedMonths = p.ChargedMonths,
+                FreeMonthsCount = p.FreeMonthsCount,
+                BenefitName = p.BenefitName,
+                BenefitDescription = p.BenefitDescription,
+                BenefitValue = p.BenefitValue,
+                BenefitType = p.BenefitType,
+                BenefitCurrencyCode = p.BenefitCurrencyCode,
                 CreatedAtUtc = p.CreatedAtUtc
             })
             .ToListAsync(cancellationToken);

@@ -134,6 +134,53 @@ public class CalculateAndPersistOfferHandler(
             offer.Value.AddPricingTier(tierResult.Value);
         }
 
+        // Snapshot the promotion-granted free months entitlement onto the Offer.
+        // The Offer snapshot is the authoritative source at Contract creation — the current
+        // Promotion and the current Plan are never consulted then.
+        if (calculated.HasFreeMonths)
+        {
+            // Design invariant 26: every OfferFreeMonthsBenefit MUST carry exactly one
+            // EligibilityRule. A missing rule is a corrupt commercial snapshot and must fail
+            // loudly rather than silently drop the entitlement.
+            if (calculated.EntitlementEligibilityRule is null)
+                return Error.Validation(
+                    "Offer.IncompleteFreeMonthsBenefit",
+                    "Promotion free months entitlement is missing its eligibility rule");
+
+            var freeMonthsResult = OfferFreeMonthsBenefit.Create(
+                id: Guid.NewGuid(),
+                offerId: offer.Value.Id,
+                entitlementMonths: calculated.FreeMonths!.Value,
+                currencyCode: calculated.CurrencyCode,
+                eligibilityRule: calculated.EntitlementEligibilityRule);
+            if (!freeMonthsResult.IsSuccess)
+                return freeMonthsResult.Errors!;
+
+            var addFreeMonthsResult = offer.Value.AddFreeMonthsBenefit(freeMonthsResult.Value);
+            if (!addFreeMonthsResult.IsSuccess)
+                return addFreeMonthsResult.Errors!;
+        }
+
+        // Snapshot the promotion-granted additional benefit onto the Offer.
+        if (calculated.HasAdditionalBenefit)
+        {
+            var offerBenefitResult = OfferBenefit.Create(
+                id: Guid.NewGuid(),
+                offerId: offer.Value.Id,
+                benefitType: calculated.BenefitType!.Value,
+                name: calculated.BenefitName!,
+                description: calculated.BenefitDescription,
+                contractualValue: calculated.BenefitValue!.Value,
+                currencyCode: calculated.BenefitCurrencyCode!,
+                eligibilityRule: calculated.EntitlementEligibilityRule);
+            if (!offerBenefitResult.IsSuccess)
+                return offerBenefitResult.Errors!;
+
+            var addBenefitResult = offer.Value.AddBenefit(offerBenefitResult.Value);
+            if (!addBenefitResult.IsSuccess)
+                return addBenefitResult.Errors!;
+        }
+
         dbContext.StampAddedTenantIds(tenantId);
         dbContext.Offers.Add(offer.Value);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -172,6 +219,12 @@ public class CalculateAndPersistOfferHandler(
             Description = b.Description,
             ContractualValue = b.ContractualValue,
             CurrencyCode = b.CurrencyCode
+        }).ToList(),
+        FreeMonthsBenefits = offer.FreeMonthsBenefits.Select(f => new OfferFreeMonthsBenefitDto
+        {
+            Id = f.Id,
+            EntitlementMonths = f.EntitlementMonths,
+            CurrencyCode = f.CurrencyCode
         }).ToList()
     };
 }

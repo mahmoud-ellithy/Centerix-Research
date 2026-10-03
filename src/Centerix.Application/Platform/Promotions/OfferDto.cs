@@ -30,6 +30,7 @@ public class OfferDto
     public DateTime? ConvertedAtUtc { get; set; }
     public Guid? ContractId { get; set; }
     public List<OfferBenefitDto> Benefits { get; set; } = [];
+    public List<OfferFreeMonthsBenefitDto> FreeMonthsBenefits { get; set; } = [];
 }
 
 /// <summary>
@@ -42,5 +43,15 @@ public class OfferBenefitDto
     public string Name { get; set; } = default!;
     public string? Description { get; set; }
     public decimal ContractualValue { get; set; }
+    public string CurrencyCode { get; set; } = default!;
+}
+
+/// <summary>
+/// DTO for a free months entitlement snapshot attached to an Offer.
+/// </summary>
+public class OfferFreeMonthsBenefitDto
+{
+    public Guid Id { get; set; }
+    public int EntitlementMonths { get; set; }
     public string CurrencyCode { get; set; } = default!;
 }

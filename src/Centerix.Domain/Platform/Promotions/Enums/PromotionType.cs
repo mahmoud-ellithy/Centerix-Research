@@ -16,5 +16,20 @@ public enum PromotionType : byte
     PayForXMonths = 2,
 
     /// <summary>Explicit promotional final price (e.g., normal 5220 → promotional 4900).</summary>
-    PromotionalPrice = 3
+    PromotionalPrice = 3,
+
+    /// <summary>
+    /// Grants extra free months on top of the purchased term. The number of free months is
+    /// configured per promotion (<c>Promotion.FreeMonthsCount</c>) and is snapshotted onto the
+    /// calculated Offer as a gated <c>OfferFreeMonthsBenefit</c>. Does not change the charged amount.
+    /// </summary>
+    FreeMonthsBonus = 4,
+
+    /// <summary>
+    /// Grants an additional benefit/gift (e.g. physical gift, service) on top of the purchased
+    /// subscription. The benefit is configured per promotion (name, description, value, currency,
+    /// type) and is snapshotted onto the calculated Offer as a gated <c>OfferBenefit</c>.
+    /// Does not change the charged amount.
+    /// </summary>
+    AdditionalBenefits = 5
 }

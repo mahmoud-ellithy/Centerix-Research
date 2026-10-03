@@ -1,6 +1,8 @@
 namespace Centerix.Domain.Platform.Promotions;
 
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Contracts.Enums;
+using Centerix.Domain.Platform.Contracts.EligibilityRules;
 using Centerix.Domain.Platform.Promotions.Enums;
 using Centerix.Domain.Platform.Plans;
 
@@ -119,12 +121,28 @@ public sealed class PromotionCalculationService : IPromotionCalculationService
                     discountPercentage = Math.Round(discountAmount / baseAmount * 100m, 2, MidpointRounding.AwayFromZero);
                 break;
 
+            case PromotionType.FreeMonthsBonus:
+            case PromotionType.AdditionalBenefits:
+                // Entitlement-only promotions: the customer pays the full amount and receives an
+                // additional entitlement. They never reduce the charged amount.
+                finalAmount = baseAmount;
+                discountAmount = 0;
+                break;
+
             default:
                 return Error.Failure("Promotion.UnknownType", $"Unknown promotion type: {promotion.Type}");
         }
 
         if (discountAmount < 0) discountAmount = 0;
         if (finalAmount < 0) finalAmount = 0;
+
+        // ---- Entitlement resolution (granted on top of the charged amount) ----
+        // The granted entitlement is a pure function of the promotion configuration and the
+        // calculated offer. It is NEVER derived from the Plan's BonusMonths, the current Plan
+        // catalog, or any runtime environment value.
+        var entitlement = ResolveEntitlement(plan, durationMonths, promotion, finalAmount);
+        if (!entitlement.IsSuccess)
+            return entitlement.Errors!;
 
         return new CalculatedOffer
         {
@@ -141,7 +159,122 @@ public sealed class PromotionCalculationService : IPromotionCalculationService
             ChargedMonths = chargedMonths,
             MonthlyListPrice = plan.MonthlyPrice,
             CurrencyCode = plan.CurrencyCode,
-            CalculatedAtUtc = now
+            CalculatedAtUtc = now,
+            FreeMonths = entitlement.Value.FreeMonths,
+            BenefitName = entitlement.Value.BenefitName,
+            BenefitDescription = entitlement.Value.BenefitDescription,
+            BenefitValue = entitlement.Value.BenefitValue,
+            BenefitType = entitlement.Value.BenefitType,
+            BenefitCurrencyCode = entitlement.Value.BenefitCurrencyCode,
+            EntitlementEligibilityRule = entitlement.Value.EligibilityRule
         };
+    }
+
+    /// <summary>
+    /// Resolves the entitlement granted by a promotion, independently of the charged amount.
+    /// </summary>
+    private static Result<EntitlementResolution> ResolveEntitlement(
+        Plan plan,
+        int durationMonths,
+        Promotion promotion,
+        decimal finalAmount)
+    {
+        switch (promotion.Type)
+        {
+            case PromotionType.FreeMonthsBonus:
+            {
+                var freeMonths = promotion.FreeMonthsCount!.Value;
+                return ValidateFreeMonths(freeMonths, durationMonths);
+            }
+
+            case PromotionType.PayForXMonths:
+            {
+                // Opt-in: PayForXMonths only grants free months when the promotion is explicitly
+                // configured to do so (FreeMonthsCount set). The granted amount is the real
+                // difference (DurationMonths - ChargedMonths), never the configured counter, so the
+                // entitlement can never contradict the "pay X get Y" commercial promise.
+                if (!promotion.FreeMonthsCount.HasValue)
+                    return EntitlementResolution.Empty();
+
+                var extraMonths = durationMonths - promotion.ChargedMonths!.Value;
+                if (extraMonths <= 0)
+                    return EntitlementResolution.Empty();
+
+                return ValidateFreeMonths(extraMonths, durationMonths);
+            }
+
+            case PromotionType.AdditionalBenefits:
+            {
+                var benefitValue = promotion.BenefitValue!.Value;
+
+                // The benefit value must fit the Contract gift invariant: total benefits may never
+                // exceed three months of the subscription value. Enforced here because this is the
+                // only place the Plan's monthly price is known.
+                var threeMonthsValue = plan.MonthlyPrice * 3m;
+                if (benefitValue > threeMonthsValue)
+                    return Error.Validation("Promotion.BenefitValue_ExceedsMaximum",
+                        $"Promotion benefit value ({benefitValue}) cannot exceed three months of the " +
+                        $"plan's monthly value ({threeMonthsValue})");
+
+                return new EntitlementResolution
+                {
+                    BenefitName = promotion.BenefitName,
+                    BenefitDescription = promotion.BenefitDescription,
+                    BenefitValue = benefitValue,
+                    BenefitType = promotion.BenefitType,
+                    BenefitCurrencyCode = promotion.BenefitCurrencyCode,
+                    EligibilityRule = BuildEntitlementRule(finalAmount)
+                };
+            }
+
+            default:
+                // Discount-only promotions grant no entitlement.
+                return EntitlementResolution.Empty();
+        }
+    }
+
+    /// <summary>
+    /// A free months entitlement may never exceed the purchased term it is attached to.
+    /// A "5 free months" benefit on a 3-month contract is a configuration error, not a discount.
+    /// </summary>
+    private static Result<EntitlementResolution> ValidateFreeMonths(int freeMonths, int durationMonths)
+    {
+        if (freeMonths <= 0)
+            return Error.Validation("Promotion.FreeMonths_Invalid", "Free months must be greater than 0");
+
+        if (freeMonths > durationMonths)
+            return Error.Validation("Promotion.FreeMonths_ExceedDuration",
+                $"Free months ({freeMonths}) cannot exceed the contract duration ({durationMonths})");
+
+        return new EntitlementResolution
+        {
+            FreeMonths = freeMonths,
+            EligibilityRule = BuildEntitlementRule(0m)
+        };
+    }
+
+    /// <summary>
+    /// Builds the immutable commercial eligibility rule for a granted entitlement.
+    /// Derived purely from the calculated offer — the current Plan catalog is never consulted, so
+    /// the rule stays correct even after the Plan changes.
+    /// </summary>
+    private static EligibilityRule BuildEntitlementRule(decimal requiredPaidAmount) =>
+        requiredPaidAmount > 0
+            ? EligibilityRule.AllOf(
+                EligibilityRule.ContractActive(),
+                EligibilityRule.AmountPaidAtLeast(requiredPaidAmount))
+            : EligibilityRule.ContractActive();
+
+    private sealed record EntitlementResolution
+    {
+        public int? FreeMonths { get; init; }
+        public string? BenefitName { get; init; }
+        public string? BenefitDescription { get; init; }
+        public decimal? BenefitValue { get; init; }
+        public ContractBenefitType? BenefitType { get; init; }
+        public string? BenefitCurrencyCode { get; init; }
+        public EligibilityRule? EligibilityRule { get; init; }
+
+        public static EntitlementResolution Empty() => new();
     }
 }

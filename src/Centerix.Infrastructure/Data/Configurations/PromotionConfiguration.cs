@@ -66,6 +66,24 @@ public class PromotionConfiguration : IEntityTypeConfiguration<Promotion>
 
         builder.Property(p => p.ChargedMonths);
 
+        // Benefit configuration (all optional — only meaningful for the benefit promotion types)
+        builder.Property(p => p.FreeMonthsCount);
+
+        builder.Property(p => p.BenefitName)
+            .HasMaxLength(200);
+
+        builder.Property(p => p.BenefitDescription)
+            .HasMaxLength(500);
+
+        builder.Property(p => p.BenefitValue)
+            .HasPrecision(18, 2);
+
+        builder.Property(p => p.BenefitType)
+            .HasConversion<byte?>();
+
+        builder.Property(p => p.BenefitCurrencyCode)
+            .HasMaxLength(3);
+
         // Indexes for common query patterns
         builder.HasIndex(p => p.Status)
             .HasDatabaseName("IX_Promotions_Status");
