@@ -273,6 +273,61 @@ public class Task9C_PromotionBenefitRuleDomainTests
     }
 
     // ─────────────────────────────────────────────────────────────────
+    // T9-C08..C10 — Strict canonicality of the rule representation
+    // ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void T9_C08_Serializer_ProducesDeterministicCanonicalJson()
+    {
+        var rule = EligibilityRule.AllOf(
+            EligibilityRule.ContractActive(),
+            EligibilityRule.AmountPaidAtLeast(4321m));
+
+        var canonical = EligibilityRuleSerializer.Serialize(rule);
+
+        // The canonical form is compact, discriminator first, with the fixed property order.
+        Assert.Equal(
+            "{\"type\":\"all_of\",\"rules\":[{\"type\":\"contract_active\"},"
+            + "{\"type\":\"amount_paid_at_least\",\"amount\":4321}]}",
+            canonical);
+
+        // Deterministic: repeated serialization is byte-identical.
+        Assert.Equal(canonical, EligibilityRuleSerializer.Serialize(rule));
+        Assert.Equal(canonical, EligibilityRuleSerializer.Serialize(
+            EligibilityRuleSerializer.Deserialize(canonical)));
+    }
+
+    [Fact]
+    public void T9_C09_ExtraProperty_IsSemanticallyDeserializable_ButIsNotCanonical()
+    {
+        const string nonCanonical = "{\"type\":\"contract_active\",\"extra\":\"ignored\"}";
+
+        // The serializer itself tolerates it (this is exactly the leak being closed at the
+        // Promotion boundary), which is why canonicality cannot be assumed from deserialization.
+        var rule = EligibilityRuleSerializer.Deserialize(nonCanonical);
+        Assert.Equal(EligibilityRule.ContractActive(), rule);
+
+        // Its canonical representation is materially different, so it is not canonical.
+        Assert.Equal("{\"type\":\"contract_active\"}", EligibilityRuleSerializer.Serialize(rule));
+        Assert.NotEqual(nonCanonical, EligibilityRuleSerializer.Serialize(rule));
+    }
+
+    [Fact]
+    public void T9_C10_UnknownDiscriminator_And_ClrTypePayloads_AreRejectedByTheAlgebra()
+    {
+        // The closed algebra rejects unknown discriminators outright...
+        Assert.Throws<ArgumentException>(() =>
+            EligibilityRuleSerializer.Deserialize("{\"type\":\"unknown_rule\"}"));
+
+        // ...and never resolves CLR types from client JSON.
+        Assert.Throws<ArgumentException>(() =>
+            EligibilityRuleSerializer.Deserialize(
+                "{\"$type\":\"System.Exception, mscorlib\",\"assembly\":\"mscorlib\"}"));
+        Assert.Throws<ArgumentException>(() =>
+            EligibilityRuleSerializer.Deserialize("{\"typeName\":\"Some.Rule\",\"clrType\":\"Rule\"}"));
+    }
+
+    // ─────────────────────────────────────────────────────────────────
     // T9-C07 — The rule travels unchanged into both snapshot children
     // ─────────────────────────────────────────────────────────────────
 

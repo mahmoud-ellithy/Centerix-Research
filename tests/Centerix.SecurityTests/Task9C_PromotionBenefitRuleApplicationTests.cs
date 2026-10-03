@@ -159,7 +159,187 @@ public class Task9C_PromotionBenefitRuleApplicationTests : IClassFixture<Task9CP
     }
 
     // ─────────────────────────────────────────────────────────────────
-    // T9-C-A04 — A malformed / non-canonical payload is rejected, never stored
+    // T9-C-A04a/b/c/d — Canonicality of the accepted rule JSON
+    // ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task T9_C_A04a_Create_MalformedJson_IsRejected()
+    {
+        var (db, mediator, scope) = NewScope();
+        using var _ = scope;
+
+        var planId = await SeedPlanAsync(db);
+        var created = await mediator.Send(BenefitCreate(planId, "not json at all"));
+
+        Assert.False(created.IsSuccess);
+        Assert.Contains(created.Errors!, e => e.Code == "Promotion.BenefitEligibilityRule_Invalid");
+
+        var db2 = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        Assert.Equal(0, await db2.Promotions.CountAsync(p => p.PlanId == planId));
+    }
+
+    [Fact]
+    public async Task T9_C_A04b_Create_UnknownDiscriminator_IsRejected()
+    {
+        var (db, mediator, scope) = NewScope();
+        using var _ = scope;
+
+        var planId = await SeedPlanAsync(db);
+        var created = await mediator.Send(BenefitCreate(planId, "{\"type\":\"unknown_rule\"}"));
+
+        Assert.False(created.IsSuccess);
+        Assert.Contains(created.Errors!, e => e.Code == "Promotion.BenefitEligibilityRule_Invalid");
+
+        var db2 = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        Assert.Equal(0, await db2.Promotions.CountAsync(p => p.PlanId == planId));
+    }
+
+    [Fact]
+    public async Task T9_C_A04c_Create_ValidRuleWithUnknownProperty_IsRejected()
+    {
+        // THE CRITICAL REGRESSION TEST.
+        // The serializer happily deserializes this into ContractActiveRule while silently
+        // dropping "extra". Accepting it would mean normalizing non-canonical rule JSON.
+        var (db, mediator, scope) = NewScope();
+        using var _ = scope;
+
+        var planId = await SeedPlanAsync(db);
+        var created = await mediator.Send(
+            BenefitCreate(planId, "{\"type\":\"contract_active\",\"extra\":\"ignored\"}"));
+
+        Assert.False(created.IsSuccess, "A non-canonical rule payload must be rejected.");
+        Assert.Contains(created.Errors!, e => e.Code == "Promotion.BenefitEligibilityRule_Invalid");
+
+        var db2 = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        Assert.Equal(0, await db2.Promotions.CountAsync(p => p.PlanId == planId));
+    }
+
+    [Fact]
+    public async Task T9_C_A04d_Create_NonCanonicalCompositeRepresentation_IsRejected()
+    {
+        // Build a real rule through the domain, take its canonical JSON, and alter the
+        // representation without changing the intended semantics.
+        var (db, mediator, scope) = NewScope();
+        using var _ = scope;
+
+        var rule = EligibilityRule.AllOf(
+            EligibilityRule.ContractActive(),
+            EligibilityRule.AmountPaidAtLeast(4321m));
+        var canonical = EligibilityRuleSerializer.Serialize(rule);
+
+        var planId = await SeedPlanAsync(db);
+
+        // (i) extra whitespace — semantically identical, not the canonical string
+        var spaced = canonical.Replace(":", " : ");
+        var spacedResult = await mediator.Send(BenefitCreate(planId, spaced));
+        Assert.False(spacedResult.IsSuccess, "A non-canonical composite payload must be rejected.");
+
+        // (ii) discriminator not first — same semantics, different property order
+        var reordered = "{\"rules\":[{\"type\":\"contract_active\"},"
+            + "{\"type\":\"amount_paid_at_least\",\"amount\":4321}],\"type\":\"all_of\"}";
+        var reorderedResult = await mediator.Send(BenefitCreate(planId, reordered));
+        Assert.False(reorderedResult.IsSuccess, "A reordered composite payload must be rejected.");
+
+        // (iii) nested child carrying an unknown property
+        var childWithExtra = "{\"type\":\"all_of\",\"rules\":"
+            + "[{\"type\":\"contract_active\",\"extra\":\"ignored\"},"
+            + "{\"type\":\"amount_paid_at_least\",\"amount\":4321}]}";
+        var childResult = await mediator.Send(BenefitCreate(planId, childWithExtra));
+        Assert.False(childResult.IsSuccess, "A nested non-canonical child must be rejected.");
+
+        // The canonical form of that very same rule is still accepted.
+        var canonicalResult = await mediator.Send(BenefitCreate(planId, canonical));
+        Assert.True(canonicalResult.IsSuccess);
+
+        var db2 = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        Assert.Equal(1, await db2.Promotions.CountAsync(p => p.PlanId == planId));
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // T9-C-A04e — Canonical JSON is accepted end to end
+    // ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task T9_C_A04e_Create_CanonicalJson_IsAccepted_AndStaysCanonical()
+    {
+        var (db, mediator, scope) = NewScope();
+        using var _ = scope;
+
+        var canonical = EligibilityRuleSerializer.Serialize(
+            EligibilityRule.AllOf(EligibilityRule.ContractActive(), EligibilityRule.AmountPaidAtLeast(4321m)));
+
+        var planId = await SeedPlanAsync(db);
+        var created = await mediator.Send(BenefitCreate(planId, canonical));
+
+        // The Promotion is created.
+        Assert.True(created.IsSuccess);
+
+        // The stored rule is canonical.
+        var db2 = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        var stored = await db2.Promotions.AsNoTracking().FirstAsync(p => p.Id == created.Value);
+        Assert.Equal(canonical, EligibilityRuleSerializer.Serialize(stored.BenefitEligibilityRule!));
+
+        // The query returns exactly the canonical JSON.
+        var read = await mediator.Send(new GetPromotionByIdQuery(created.Value));
+        Assert.True(read.IsSuccess);
+        Assert.Equal(canonical, read.Value.BenefitEligibilityRule);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // T9-C-A04f — Canonical round trip is stable
+    // ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task T9_C_A04f_CanonicalJson_RoundTripsUnchanged()
+    {
+        var (db, mediator, scope) = NewScope();
+        using var _ = scope;
+
+        var rule = EligibilityRule.AllOf(
+            EligibilityRule.ContractActive(),
+            EligibilityRule.PaymentTermsEquals(PaymentTerms.FullUpfront),
+            EligibilityRule.NoOverdueInstallment());
+
+        var canonical = EligibilityRuleSerializer.Serialize(rule);
+
+        var planId = await SeedPlanAsync(db);
+        var created = await mediator.Send(BenefitCreate(planId, canonical));
+        Assert.True(created.IsSuccess);
+
+        // rule -> Serialize -> Parse -> Serialize must be byte-identical.
+        var db2 = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        var stored = await db2.Promotions.AsNoTracking().FirstAsync(p => p.Id == created.Value);
+        var reSerialized = EligibilityRuleSerializer.Serialize(stored.BenefitEligibilityRule!);
+        Assert.Equal(canonical, reSerialized);
+
+        var read = await mediator.Send(new GetPromotionByIdQuery(created.Value));
+        Assert.Equal(canonical, read.Value.BenefitEligibilityRule);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // T9-C-A04g — Unknown / polymorphic CLR-resolution payloads are rejected
+    // ─────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("{\"$type\":\"System.Exception, mscorlib\",\"assembly\":\"mscorlib\"}")]
+    [InlineData("{\"typeName\":\"Centerix.Domain.SomeRule\",\"clrType\":\"SomeRule\"}")]
+    public async Task T9_C_A04g_ClrTypeResolutionPayloads_AreRejected(string payload)
+    {
+        var (db, mediator, scope) = NewScope();
+        using var _ = scope;
+
+        var planId = await SeedPlanAsync(db);
+        var created = await mediator.Send(BenefitCreate(planId, payload));
+
+        Assert.False(created.IsSuccess);
+        Assert.Contains(created.Errors!, e => e.Code == "Promotion.BenefitEligibilityRule_Invalid");
+
+        var db2 = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        Assert.Equal(0, await db2.Promotions.CountAsync(p => p.PlanId == planId));
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // T9-C-A04 — malformed / non-canonical payloads are rejected, never stored
     // ─────────────────────────────────────────────────────────────────
 
     [Theory]

@@ -373,4 +373,40 @@ Commit:  fix(commerce): make promotion benefit eligibility rule configured data
 
 ---
 
+## 13. Canonical enforcement of `BenefitEligibilityRule` (final correction)
+
+`EligibilityRuleSerializer.Deserialize` accepts any *semantically equivalent* payload and silently
+drops properties it does not know. That means canonicality cannot be inferred from a successful
+deserialization.
+
+`BenefitEligibilityRuleParser` — the single boundary shared by `CreatePromotionHandler` and
+`UpdatePromotionHandler` — now requires the input to be byte-identical to the canonical
+serialization of the rule it deserializes to:
+
+```csharp
+var rule      = EligibilityRuleSerializer.Deserialize(json);
+var canonical = EligibilityRuleSerializer.Serialize(rule);
+if (!string.Equals(json, canonical, StringComparison.Ordinal))
+    return Error.Validation("Promotion.BenefitEligibilityRule_Invalid", …);
+```
+
+| Input | Result |
+|---|---|
+| `{"type":"contract_active"}` | **accepted** (exactly canonical) |
+| `{"type":"contract_active","extra":"ignored"}` | **rejected** — deserializes fine, canonical form differs |
+| `{"type":"all_of","rules":[…]}` with any other spacing, member order, or nested extra property | **rejected** |
+| `{"type":"unknown_rule"}` | rejected (unknown discriminator) |
+| `$type` / `assembly` / `typeName` / `clrType` payloads | rejected — the closed algebra never resolves CLR types |
+
+No semantic normalization is performed, so arbitrary rule JSON is never quietly rewritten into
+canonical JSON. The single error code `Promotion.BenefitEligibilityRule_Invalid` covers malformed,
+unknown-discriminator and non-canonical input for this boundary; the message names the specific
+cause. `Promotion.BenefitEligibilityRule` still stores canonical JSON in the same `nvarchar` column
+— no schema change, no new migration, and the database representation is unchanged.
+
+Verification counts for this correction: domain 29/29, application 28/28, SQL Server 27/27,
+Task 9 total 84/84, full regression 2006 total / 2005 passed / 0 failed / 1 skipped / exit code 0.
+
+---
+
 **TASK 9 CORRECTION — READY FOR REVIEW**

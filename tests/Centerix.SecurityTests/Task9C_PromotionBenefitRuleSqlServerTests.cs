@@ -133,7 +133,7 @@ public class Task9C_PromotionBenefitRuleSqlServerTests
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task SqlT9_C01_Promotions_Table_HasNullableBenefitEligibilityRuleColumn()
+    public async Task SqlT9_C07_Promotions_Table_HasNullableBenefitEligibilityRuleColumn()
     {
         var tenantId = $"T9C-01-{Guid.NewGuid():N}"[..16];
         await SeedTenantAsync(tenantId);
@@ -173,9 +173,9 @@ public class Task9C_PromotionBenefitRuleSqlServerTests
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task SqlT9_C02_ConfiguredRule_PersistsAndReloadsUnchanged()
+    public async Task SqlT9_C01_CanonicalRule_PersistsAndTheRawColumnHoldsCanonicalJson()
     {
-        var tenantId = $"T9C-02-{Guid.NewGuid():N}"[..16];
+        var tenantId = $"T9C-01-{Guid.NewGuid():N}"[..16];
         await SeedTenantAsync(tenantId);
         var planId = await SeedPlanAsync(tenantId);
 
@@ -195,16 +195,147 @@ public class Task9C_PromotionBenefitRuleSqlServerTests
             await db.SaveChangesAsync();
         }
 
-        // Read back through a brand new context.
+        // Read the RAW column: the database itself must hold canonical JSON, not merely a value
+        // that EF can round-trip.
         using (var read = _env.Factory.Services.CreateScope())
         {
             AuthorizeTenant(read.ServiceProvider, tenantId);
             var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
+            var raw = await db.Database
+                .SqlQuery<string>(
+                    $"""
+                    SELECT BenefitEligibilityRule AS Value
+                    FROM Platform.Promotions
+                    WHERE PlanId = {planId} AND Name = 'T9C benefit'
+                    """)
+                .SingleAsync();
+
+            Assert.Equal(expected, raw);
+
+            // And through EF the rule is still exactly the configured one.
             var stored = await db.Promotions.AsNoTracking()
                 .FirstAsync(p => p.PlanId == planId && p.Name == "T9C benefit");
-
             Assert.NotNull(stored.BenefitEligibilityRule);
             Assert.Equal(expected, EligibilityRuleSerializer.Serialize(stored.BenefitEligibilityRule!));
+        }
+    }
+
+    [Fact]
+    public async Task SqlT9_C02_SamePromotionType_TwoDifferentCanonicalRules_PersistIndependently()
+    {
+        var tenantId = $"T9C-02b-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantId);
+        var planId = await SeedPlanAsync(tenantId);
+
+        var simple = EligibilityRule.ContractActive();
+        var strict = EligibilityRule.AllOf(
+            EligibilityRule.ContractActive(),
+            EligibilityRule.PaymentTermsEquals(PaymentTerms.FullUpfront),
+            EligibilityRule.NoOverdueInstallment());
+
+        var simpleJson = EligibilityRuleSerializer.Serialize(simple);
+        var strictJson = EligibilityRuleSerializer.Serialize(strict);
+        Assert.NotEqual(simpleJson, strictJson);
+
+        using (var write = _env.Factory.Services.CreateScope())
+        {
+            AuthorizeTenant(write.ServiceProvider, tenantId);
+            var db = write.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            foreach (var (name, rule) in new[] { ("simple", simple), ("strict", strict) })
+            {
+                var created = Promotion.Create(
+                    id: 0, name: $"T9C {name}", type: PromotionType.AdditionalBenefits, planId: planId,
+                    durationMonths: 12, startsAtUtc: PromotionStart, endsAtUtc: PromotionEnd,
+                    benefitName: "Barcode Printer", benefitValue: 500m,
+                    benefitType: ContractBenefitType.PhysicalGift, benefitCurrencyCode: "EGP",
+                    benefitEligibilityRule: rule).Value;
+                db.Promotions.Add(created);
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        using (var read = _env.Factory.Services.CreateScope())
+        {
+            AuthorizeTenant(read.ServiceProvider, tenantId);
+            var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.Equal(2, await db.Promotions.AsNoTracking().CountAsync(p => p.PlanId == planId));
+
+            var simpleStored = await db.Promotions.AsNoTracking()
+                .FirstAsync(p => p.PlanId == planId && p.Name == "T9C simple");
+            var strictStored = await db.Promotions.AsNoTracking()
+                .FirstAsync(p => p.PlanId == planId && p.Name == "T9C strict");
+
+            Assert.Equal(simpleJson, EligibilityRuleSerializer.Serialize(simpleStored.BenefitEligibilityRule!));
+            Assert.Equal(strictJson, EligibilityRuleSerializer.Serialize(strictStored.BenefitEligibilityRule!));
+            Assert.NotEqual(simpleStored.BenefitEligibilityRule, strictStored.BenefitEligibilityRule);
+        }
+    }
+
+    [Fact]
+    public async Task SqlT9_C03_NonCanonicalButSemanticallyValidJson_IsRejectedAndNoRowIsCreated()
+    {
+        var tenantId = $"T9C-03b-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantId);
+        var planId = await SeedPlanAsync(tenantId);
+
+        // Deserializes fine, but is not the canonical representation.
+        const string nonCanonical = "{\"type\":\"contract_active\",\"extra\":\"ignored\"}";
+        Assert.Equal(
+            EligibilityRule.ContractActive(),
+            EligibilityRuleSerializer.Deserialize(nonCanonical));
+
+        using var scope = _env.Factory.Services.CreateScope();
+        AuthorizeTenant(scope.ServiceProvider, tenantId);
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var handler = CreateHandler(db);
+
+        var result = await handler.Handle(BenefitCreate(planId, nonCanonical), CancellationToken.None);
+
+        Assert.False(result.IsSuccess, FailureOf(result));
+        Assert.Contains(result.Errors!, e => e.Code == "Promotion.BenefitEligibilityRule_Invalid");
+
+        var count = await db.Promotions.IgnoreQueryFilters().CountAsync(p => p.PlanId == planId);
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
+    public async Task SqlT9_C04_CanonicalJson_RoundTripsThroughSqlUnchanged()
+    {
+        var tenantId = $"T9C-04b-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantId);
+        var planId = await SeedPlanAsync(tenantId);
+
+        var rule = EligibilityRule.AllOf(
+            EligibilityRule.ContractActive(),
+            EligibilityRule.AmountPaidAtLeast(4321m));
+        var canonical = EligibilityRuleSerializer.Serialize(rule);
+
+        int promotionId;
+        using (var create = _env.Factory.Services.CreateScope())
+        {
+            AuthorizeTenant(create.ServiceProvider, tenantId);
+            var db = create.ServiceProvider.GetRequiredService<AppDbContext>();
+            var result = await CreateHandler(db).Handle(
+                BenefitCreate(planId, canonical), CancellationToken.None);
+            Assert.True(result.IsSuccess, FailureOf(result));
+            promotionId = result.Value;
+        }
+
+        // Create -> SQL persistence -> Query must return exactly the canonical JSON.
+        using (var query = _env.Factory.Services.CreateScope())
+        {
+            AuthorizeTenant(query.ServiceProvider, tenantId);
+            var mediator = query.ServiceProvider.GetRequiredService<IMediator>();
+            var dto = await mediator.Send(new GetPromotionByIdQuery(promotionId));
+            Assert.True(dto.IsSuccess, FailureOf(dto));
+            Assert.Equal(canonical, dto.Value.BenefitEligibilityRule);
+
+            // Round-tripping the returned JSON must be a fixed point.
+            var reSerialized = EligibilityRuleSerializer.Serialize(
+                EligibilityRuleSerializer.Deserialize(dto.Value.BenefitEligibilityRule!));
+            Assert.Equal(canonical, reSerialized);
         }
     }
 
@@ -217,7 +348,7 @@ public class Task9C_PromotionBenefitRuleSqlServerTests
     [InlineData("{\"kind\":\"TotallyUnknownRule\",\"value\":1}")]
     [InlineData("{\"kind\":\"AmountPaidAtLeastRule\",\"value\":-5}")]
     [InlineData("{\"kind\":\"PaymentTermsEqualsRule\",\"terms\":999}")]
-    public async Task SqlT9_C03_MalformedRulePayload_IsRejectedAndNeverPersisted(string payload)
+    public async Task SqlT9_C08_MalformedRulePayload_IsRejectedAndNeverPersisted(string payload)
     {
         var tenantId = $"T9C-03-{Guid.NewGuid():N}"[..16];
         await SeedTenantAsync(tenantId);
@@ -243,7 +374,7 @@ public class Task9C_PromotionBenefitRuleSqlServerTests
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task SqlT9_C04_BenefitPromotionWithoutRule_IsRejected()
+    public async Task SqlT9_C09_BenefitPromotionWithoutRule_IsRejected()
     {
         var tenantId = $"T9C-04-{Guid.NewGuid():N}"[..16];
         await SeedTenantAsync(tenantId);
@@ -266,7 +397,7 @@ public class Task9C_PromotionBenefitRuleSqlServerTests
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task SqlT9_C05_RuleOnDiscountOnlyPromotion_IsRejected()
+    public async Task SqlT9_C10_RuleOnDiscountOnlyPromotion_IsRejected()
     {
         var tenantId = $"T9C-05-{Guid.NewGuid():N}"[..16];
         await SeedTenantAsync(tenantId);
@@ -298,7 +429,7 @@ public class Task9C_PromotionBenefitRuleSqlServerTests
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task SqlT9_C06_ConfiguredRule_ReachesTheOfferFreeMonthsRow()
+    public async Task SqlT9_C05_ConfiguredRule_ReachesTheOfferFreeMonthsSnapshot()
     {
         var tenantId = $"T9C-06-{Guid.NewGuid():N}"[..16];
         await SeedTenantAsync(tenantId);
@@ -347,7 +478,7 @@ public class Task9C_PromotionBenefitRuleSqlServerTests
     }
 
     [Fact]
-    public async Task SqlT9_C07_ConfiguredRule_ReachesTheOfferBenefitRow()
+    public async Task SqlT9_C11_ConfiguredRule_ReachesTheOfferBenefitRow()
     {
         var tenantId = $"T9C-07-{Guid.NewGuid():N}"[..16];
         await SeedTenantAsync(tenantId);
@@ -402,7 +533,7 @@ public class Task9C_PromotionBenefitRuleSqlServerTests
     // ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task SqlT9_C08_RuleChange_AppliesToNewOffersOnly()
+    public async Task SqlT9_C12_RuleChange_AppliesToNewOffersOnly()
     {
         var tenantId = $"T9C-08-{Guid.NewGuid():N}"[..16];
         await SeedTenantAsync(tenantId);
@@ -458,6 +589,87 @@ public class Task9C_PromotionBenefitRuleSqlServerTests
         // A new offer picks up the new rule.
         var secondOfferId = await CalculateAsync(tenantId, planId);
         Assert.Equal(replacementJson, await ReadFreeMonthsRuleAsync(tenantId, secondOfferId));
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // SQL-T9-C06 — The Contract snapshot rule is identical to the Offer rule
+    // ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task SqlT9_C06_ContractSnapshot_KeepsTheConfiguredRuleIdentical()
+    {
+        var tenantId = $"T9C-06b-{Guid.NewGuid():N}"[..16];
+        await SeedTenantAsync(tenantId);
+        var planId = await SeedPlanAsync(tenantId);
+
+        var rule = EligibilityRule.AllOf(
+            EligibilityRule.ContractActive(),
+            EligibilityRule.PaymentTermsEquals(PaymentTerms.FullUpfront),
+            EligibilityRule.NoOverdueInstallment());
+        var canonical = EligibilityRuleSerializer.Serialize(rule);
+
+        using (var setup = _env.Factory.Services.CreateScope())
+        {
+            AuthorizeTenant(setup.ServiceProvider, tenantId);
+            var db = setup.ServiceProvider.GetRequiredService<AppDbContext>();
+            var promotion = Promotion.Create(
+                id: 0, name: "T9C contract gift", type: PromotionType.AdditionalBenefits, planId: planId,
+                durationMonths: 12, startsAtUtc: PromotionStart, endsAtUtc: PromotionEnd,
+                benefitName: "Barcode Printer", benefitValue: 500m,
+                benefitType: ContractBenefitType.PhysicalGift, benefitCurrencyCode: "EGP",
+                benefitEligibilityRule: rule).Value;
+            Assert.True(promotion.Activate().IsSuccess);
+            db.Promotions.Add(promotion);
+            await db.SaveChangesAsync();
+        }
+
+        Guid offerId;
+        Guid contractId;
+        string offerRule;
+        using (var flow = _env.Factory.Services.CreateScope())
+        {
+            AuthorizeTenant(flow.ServiceProvider, tenantId);
+            var mediator = flow.ServiceProvider.GetRequiredService<IMediator>();
+
+            var offer = await mediator.Send(
+                new CalculateAndPersistOfferCommand(planId, 12, PaymentTerms.FullUpfront));
+            Assert.True(offer.IsSuccess, FailureOf(offer));
+            offerId = offer.Value.Id;
+
+            var db = flow.ServiceProvider.GetRequiredService<AppDbContext>();
+            var offerRow = await db.Offers
+                .IgnoreQueryFilters()
+                .Include(o => o.Benefits)
+                .AsNoTracking()
+                .FirstAsync(o => o.Id == offerId);
+            offerRule = EligibilityRuleSerializer.Serialize(
+                Assert.Single(offerRow.Benefits).EligibilityRule!);
+
+            Assert.True((await mediator.Send(new AcceptOfferCommand(offerId))).IsSuccess);
+            var contract = await mediator.Send(new CreateContractFromOfferCommand(
+                offerId, $"CNT-T9C-{Guid.NewGuid():N}"[..16]));
+            Assert.True(contract.IsSuccess, FailureOf(contract));
+            contractId = contract.Value;
+        }
+
+        using (var read = _env.Factory.Services.CreateScope())
+        {
+            AuthorizeTenant(read.ServiceProvider, tenantId);
+            var db = read.ServiceProvider.GetRequiredService<AppDbContext>();
+            var contract = await db.Contracts
+                .IgnoreQueryFilters()
+                .Include(c => c.Benefits)
+                .AsNoTracking()
+                .FirstAsync(c => c.Id == contractId);
+
+            var benefit = Assert.Single(contract.Benefits);
+            Assert.Equal("Barcode Printer", benefit.Name);
+            Assert.NotNull(benefit.EligibilityRule);
+
+            // Promotion rule == Offer snapshot rule == Contract snapshot rule, byte for byte.
+            Assert.Equal(canonical, offerRule);
+            Assert.Equal(offerRule, EligibilityRuleSerializer.Serialize(benefit.EligibilityRule!));
+        }
     }
 
     private async Task<Guid> CalculateAsync(string tenantId, int planId)
