@@ -188,7 +188,7 @@ No new aggregate, entity, DbSet or table. The grant reuses `OfferFreeMonthsBenef
 
 ## 5. Tests
 
-### 5.1 Correction tests — domain (`Task9C_PromotionBenefitRuleDomainTests`, 8 tests)
+### 5.1 Correction tests — domain (`Task9C_PromotionBenefitRuleDomainTests`, 11 tests)
 
 | ID | Guarantees |
 |---|---|
@@ -200,8 +200,11 @@ No new aggregate, entity, DbSet or table. The grant reuses `OfferFreeMonthsBenef
 | T9-C05 | A rule on a discount-only promotion is rejected |
 | T9-C06 | A new rule applies to the next calculation only; the earlier offer object is unchanged |
 | T9-C07 | The configured rule reaches both Offer snapshot children unchanged, and the Offer accepts them |
+| T9-C08 | The serializer emits a deterministic, compact, discriminator-first canonical form |
+| T9-C09 | An extra property deserializes semantically but is provably NOT canonical |
+| T9-C10 | Unknown discriminators and `$type`/`typeName`/`clrType` payloads are rejected by the closed algebra |
 
-### 5.2 Correction tests — application (`Task9C_PromotionBenefitRuleApplicationTests`, 10 tests)
+### 5.2 Correction tests — application (`Task9C_PromotionBenefitRuleApplicationTests`, 18 tests)
 
 | ID | Guarantees |
 |---|---|
@@ -211,25 +214,56 @@ No new aggregate, entity, DbSet or table. The grant reuses `OfferFreeMonthsBenef
 | T9-C-A04 | 5 malformed / non-canonical payloads are all rejected and never stored |
 | T9-C-A05 | Update changes the rule for future offers; the existing offer snapshot keeps its own rule |
 | T9-C-A06 | The configured rule reaches the persisted `OfferBenefit` row unchanged |
+| T9-C-A04a | Malformed JSON is rejected with `..._Invalid` |
+| T9-C-A04b | An unknown discriminator is rejected with `..._Invalid` |
+| T9-C-A04c | **Critical:** a semantically valid rule carrying an unknown property is rejected |
+| T9-C-A04d | A non-canonical composite (reordered members, extra whitespace, nested extra property) is rejected, while the canonical form of the same rule is accepted |
+| T9-C-A04e | Canonical JSON is accepted; the stored rule and the query result are exactly canonical |
+| T9-C-A04f | Canonical round trip is byte-stable (rule → Serialize → Parse → Serialize) |
+| T9-C-A04g | `$type` / `assembly` / `typeName` / `clrType` payloads are rejected and never stored |
 
-### 5.3 Correction tests — SQL Server (`Task9C_PromotionBenefitRuleSqlServerTests`, 11 tests)
+### 5.3 Correction tests — SQL Server (`Task9C_PromotionBenefitRuleSqlServerTests`, 15 tests)
 
 | ID | Guarantees |
 |---|---|
-| SQL-T9-C01 | The additive rule column exists, is nullable, and is `nvarchar(max)` |
-| SQL-T9-C02 | A configured rule persists and reloads byte-identically through a new context |
-| SQL-T9-C03 | 4 malformed rule payloads are rejected and nothing is persisted |
-| SQL-T9-C04 | A benefit-bearing promotion without a rule is rejected and nothing is persisted |
-| SQL-T9-C05 | A rule on a discount-only promotion is rejected and nothing is persisted |
-| SQL-T9-C06 | The configured rule reaches the persisted `OfferFreeMonthsBenefit` row |
-| SQL-T9-C07 | The configured rule reaches the persisted `OfferBenefit` row |
-| SQL-T9-C08 | A later rule change applies to new offers only, never to existing snapshots |
+| SQL-T9-C01 | A canonical rule persists and the RAW column holds canonical JSON |
+| SQL-T9-C02 | The same PromotionType with two different canonical rules persists independently |
+| SQL-T9-C03 | Non-canonical but semantically valid JSON is rejected; no Promotion row is created |
+| SQL-T9-C04 | Canonical JSON survives Create → SQL persistence → Query unchanged, and is a fixed point |
+| SQL-T9-C05 | Promotion rule → Offer rule snapshot is byte-identical |
+| SQL-T9-C06 | Offer rule → Contract benefit rule is byte-identical |
+| SQL-T9-C07 | The additive rule column exists, is nullable, and is `nvarchar(max)` |
+| SQL-T9-C08 | 4 malformed rule payloads are rejected and nothing is persisted |
+| SQL-T9-C09 | A benefit-bearing promotion without a rule is rejected and nothing is persisted |
+| SQL-T9-C10 | A rule on a discount-only promotion is rejected and nothing is persisted |
+| SQL-T9-C11 | The configured rule reaches the persisted `OfferBenefit` row |
+| SQL-T9-C12 | A later rule change applies to new offers only, never to existing snapshots |
 
 The SQL create-paths construct the **real** `CreatePromotionHandler` against the **real** SQL
 Server context, substituting only the platform authorization boundary and the audit sink — the
 established pattern in this repository's SQL tests, so a failure cannot be attributed to the harness.
 
-### 5.4 First-revision tests (retained)
+### 5.4 Correction tests — real HTTP API boundary (`Task9C_PromotionRuleHttpApiTests`, 4 tests)
+
+Every test drives the genuine ASP.NET Core pipeline:
+
+```text
+HttpClient → HTTP endpoint → PromotionsController → MediatR → Handler
+           → BenefitEligibilityRuleParser → Promotion aggregate → SQL Server persistence
+```
+
+No handler, controller or parser is called directly, mocked or bypassed. The client carries a real
+signed bearer token whose `PlatformAdmin` role claim satisfies both the `[HasPermission]` policy
+and the handler's `IPlatformAdminGuard`, exactly as production does.
+
+| ID | Endpoint | Guarantees |
+|---|---|---|
+| HTTP-C01 | `POST /api/promotions` | Non-canonical rule → `400`, body carries `Promotion.BenefitEligibilityRule_Invalid`, **and** `before count = N (0)` → `after count = N (0)` |
+| HTTP-C02 | `POST /api/promotions` | Canonical rule → `201` + id, promotion persisted, RAW column byte-for-byte identical, `GET` returns exactly the canonical JSON |
+| HTTP-C03 | `PUT /api/promotions/{id}` | Non-canonical rule → `400`, **and** the persisted rule still equals the original canonical string |
+| HTTP-C04 | `PUT /api/promotions/{id}` | Canonical replacement rule → `204 No Content`, reloaded rule equals the new canonical string |
+
+### 5.5 First-revision tests (retained)
 
 `T9-D01..D17` (18), `T9-A01..A10` (10) and `SQL-T9-01..12` (12) all still pass. No assertion was
 weakened: each benefit-bearing seed now supplies an explicit rule through its helper, and the
@@ -242,12 +276,19 @@ assertions are unchanged. One obsolete claim was corrected rather than deleted �
 
 ## 6. Verification run
 
+All figures below were produced by re-running the suites against the committed tree
+(`a2749de`), not copied from an earlier run.
+
 ### Build
 
 ```text
 dotnet build Centerix.slnx --no-restore
-→ 0 Errors
+→ 0 Error(s)
 ```
+
+The solution build reports 13 678 warnings, all pre-existing StyleCop/analyzer noise across the
+repository. **Warnings attributable to any T9 file: 0** (verified by filtering the build output
+for `Task9`). `PendingModelChangesWarning` is not suppressed.
 
 ### Task 9 suites (all levels)
 
@@ -256,41 +297,77 @@ dotnet build Centerix.slnx --no-restore
 | `Task9_PromotionBenefitsDomainTests` | 18 | 18 | 0 | 0 | 0 | 0 |
 | `Task9_PromotionBenefitsApplicationTests` | 10 | 10 | 0 | 0 | 0 | 0 |
 | `Task9_PromotionBenefitsSqlServerTests` | 12 | 12 | 0 | 0 | 0 | 0 |
-| `Task9C_PromotionBenefitRuleDomainTests` | 8 | 8 | 0 | 0 | 0 | 0 |
-| `Task9C_PromotionBenefitRuleApplicationTests` | 10 | 10 | 0 | 0 | 0 | 0 |
-| `Task9C_PromotionBenefitRuleSqlServerTests` | 11 | 11 | 0 | 0 | 0 | 0 |
-| **Task 9 total** | **69** | **69** | **0** | **0** | **0** | **0** |
+| `Task9C_PromotionBenefitRuleDomainTests` | 11 | 11 | 0 | 0 | 0 | 0 |
+| `Task9C_PromotionBenefitRuleApplicationTests` | 18 | 18 | 0 | 0 | 0 | 0 |
+| `Task9C_PromotionBenefitRuleSqlServerTests` | 15 | 15 | 0 | 0 | 0 | 0 |
+| `Task9C_PromotionRuleHttpApiTests` | 4 | 4 | 0 | 0 | 0 | 0 |
+| **Task 9 total** | **88** | **88** | **0** | **0** | **0** | **0** |
+
+Rolled up by layer:
+
+| Layer | Total | Passed | Failed | Skipped | Not Executed | Exit Code |
+|---|---|---|---|---|---|---|
+| Domain | 29 | 29 | 0 | 0 | 0 | 0 |
+| Application | 28 | 28 | 0 | 0 | 0 | 0 |
+| SQL Server | 27 | 27 | 0 | 0 | 0 | 0 |
+| HTTP API | 4 | 4 | 0 | 0 | 0 | 0 |
 
 ### Full regression
 
+```text
+dotnet test Centerix.slnx --no-build
+```
+
 | Metric | Value |
 |---|---|
-| Total | 1991 |
-| Passed | 1990 |
+| Total | 2010 |
+| Passed | 2009 |
 | Failed | 0 |
 | Skipped | 1 |
 | Not Executed | 0 |
 | Exit Code | 0 |
 
-The baseline before this correction was 1962 total / 1961 passed / 1 skipped; the 29 new
-correction tests account for the difference. The single skip is pre-existing and unrelated
-(`Task18_5CreditEconomicOriginSqlServerTests.Test15_Task1851_MixedLineageProportionalTransferredOrigin`).
-No infrastructure failure was reported as a skip.
+Duration: 14 m 30 s.
+
+The single skip is **pre-existing and unrelated to T9**:
+`Task18_5CreditEconomicOriginSqlServerTests.Test15_Task1851_MixedLineageProportionalTransferredOrigin`.
+No T9 test was skipped or not executed, and no infrastructure failure was reported as a skip.
 
 ---
 
 ## 7. SQL Server
 
 ```text
-Server:        .            (local SQL Server, explicitly pinned via
-                            CENTERIX_SQLTEST_CONNECTION="Server=.;Trusted_Connection=True;
-                            TrustServerCertificate=True;Encrypt=False")
-Docker:                  NOT USED
+Server:        .            (local SQL Server on this machine)
+Connection:    CENTERIX_SQLTEST_CONNECTION="Server=.;Trusted_Connection=True;
+               TrustServerCertificate=True;Encrypt=False;Connect Timeout=15"
+Docker:                  NOT USED  (no docker/com.docker.backend process present during the run)
 Testcontainers:          NOT USED
+Local service check:     MSSQLSERVER = Running
 In-memory substitution:  used only for the T9-A* / T9-C-A* application suites, which are
-                         explicitly InMemory suites by design; every SQL guarantee runs
+                         explicitly InMemory suites by design; every SQL and HTTP guarantee runs
                          against real SQL Server
 ```
+
+### 7.1 Provenance of the local-server claim (stated precisely)
+
+`SqlServerDatabaseFixture.ResolveMasterConnectionStringAsync` checks
+`CENTERIX_SQLTEST_CONNECTION` **first** and only falls back to a Testcontainers MsSql builder when
+that variable is absent. The variable was explicitly set for every run above, so the container
+branch was never reached. Supporting observations from this run:
+
+- Every SQL/HTTP suite completed in 4–8 seconds — far below the time a Testcontainers MsSql start
+  requires.
+- No `docker` or `com.docker.backend` process was running.
+- The fixture log (`%TEMP%\centerix-sqltest.log`) records the freshly created database name
+  (e.g. `CenterixSec_<guid>`) and the real migration chain execution.
+
+**Known limitation, stated rather than hidden:** the fixture log does **not** record which
+connection source was chosen, because `ResolveMasterConnectionStringAsync` reports it with
+`Console.WriteLine` instead of the file-mirrored `Log(...)` helper. The claim above therefore rests
+on the resolution order plus the circumstantial evidence listed, not on a durable log line. A
+follow-up could mirror that message through `Log(...)` to make the provenance directly auditable.
+No test was skipped or weakened in order to satisfy it.
 
 ---
 
@@ -335,7 +412,9 @@ dotnet ef migrations has-pending-model-changes --context TenantDbContext
 | `PaymentTerms` still an explicit operator decision | not derived from any promotion field |
 | Tenant isolation | offers/benefits stamped and queried per tenant; SQL tests use isolated tenants |
 | Currency isolation | benefit carries explicit ISO-4217; Contract-side check unchanged |
-| No no-op or duplicated test cases | 69 distinct tests, no duplicate method names |
+| No no-op or duplicated test cases | 88 distinct tests, no duplicate method names |
+| Canonical validation is not bypassable | `Promotion.Create` has exactly one production call site (`CreatePromotionCommand.cs:46`, preceded by `Parse` at line 42) and `promotion.Update` exactly one (`UpdatePromotionCommand.cs:54`, preceded by `Parse` at line 50); no production code constructs the commands directly — the controller model-binds them |
+| API boundary proven end to end | HTTP-C01..C04 drive the real controller/MediatR/parser/SQL path with a genuine PlatformAdmin bearer token |
 
 ---
 
@@ -360,16 +439,23 @@ tests/Centerix.SecurityTests/Task9_PromotionBenefitsSqlServerTests.cs
 tests/Centerix.SecurityTests/Task9C_PromotionBenefitRuleDomainTests.cs              (new)
 tests/Centerix.SecurityTests/Task9C_PromotionBenefitRuleApplicationTests.cs         (new)
 tests/Centerix.SecurityTests/Task9C_PromotionBenefitRuleSqlServerTests.cs           (new)
+tests/Centerix.SecurityTests/Task9C_PromotionRuleHttpApiTests.cs                    (new, §5.4)
 docs/TASK-9-PROMOTION-FREE-MONTHS-AND-BENEFITS-VERIFICATION-REPORT.md
 ```
 
 ---
 
-## 12. Commit
+## 12. Commit history for T9
 
-```text
-Commit:  fix(commerce): make promotion benefit eligibility rule configured data
-```
+| SHA | Subject |
+|---|---|
+| `9d957fc` | `feat(commerce): add promotion free months and additional benefits` |
+| `e514303` | `fix(commerce): make promotion benefit eligibility rule configured data` |
+| `57075f6` | `fix(commerce): enforce canonical promotion eligibility rules` |
+| `a2749de` | `test(commerce): prove canonical promotion rule at api boundary` |
+
+The verification figures in this document were produced by re-running every suite against
+`a2749de`, which is the tip verified in §6.
 
 ---
 
@@ -404,8 +490,27 @@ unknown-discriminator and non-canonical input for this boundary; the message nam
 cause. `Promotion.BenefitEligibilityRule` still stores canonical JSON in the same `nvarchar` column
 — no schema change, no new migration, and the database representation is unchanged.
 
-Verification counts for this correction: domain 29/29, application 28/28, SQL Server 27/27,
-Task 9 total 84/84, full regression 2006 total / 2005 passed / 0 failed / 1 skipped / exit code 0.
+Verification counts for this correction, as re-run against `a2749de`: domain 29/29, application
+28/28, SQL Server 27/27, HTTP 4/4, Task 9 total 88/88, full regression 2010 total / 2009 passed /
+0 failed / 1 skipped / 0 not executed / exit code 0.
+
+---
+
+## 14. Verification of this document
+
+The counts in §6 were produced by executing the suites after the implementation was committed, not
+copied forward from an earlier run:
+
+```text
+dotnet build Centerix.slnx --no-restore                → 0 Error(s)
+dotnet test … --filter "…~Task9C_PromotionRuleHttpApiTests" → 4 total / 4 passed / 0 failed / exit 0
+dotnet test … --filter "…~Task9*  (7 suites, individually)" → 88 total / 88 passed / 0 failed / exit 0
+dotnet test Centerix.slnx --no-build                    → 2010 total / 2009 passed / 0 failed / 1 skipped / exit 0
+dotnet ef migrations has-pending-model-changes --context AppDbContext    → no pending changes
+dotnet ef migrations has-pending-model-changes --context TenantDbContext → no pending changes
+```
+
+No production code was modified during this verification pass. The only change is this document.
 
 ---
 
