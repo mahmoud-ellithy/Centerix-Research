@@ -111,7 +111,7 @@ public class Phase9_4CancellationTests
     private static CancelSubscriptionHandler CreateHandler(AppDbContext db)
     {
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         var sync = Substitute.For<ITenantRegistrySync>();
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns("admin-1");
@@ -125,7 +125,7 @@ public class Phase9_4CancellationTests
     private static CancelSubscriptionHandler CreateForbiddenHandler(AppDbContext db)
     {
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Error.Forbidden("Platform.AdminRequired", "No."));
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Error.Forbidden("Platform.AdminRequired", "No."));
         var sync = Substitute.For<ITenantRegistrySync>();
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns("u1");
@@ -441,7 +441,7 @@ public class Phase9_4CancellationTests
         using var db = CreateDbContext();
         var audit = Substitute.For<IAuditWriter>();
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         var sync = Substitute.For<ITenantRegistrySync>();
         var user = Substitute.For<ICurrentUser>(); user.UserId.Returns("a1");
         var tp = Substitute.For<TimeProvider>(); tp.GetUtcNow().Returns(DateTimeOffset.UtcNow);
@@ -523,7 +523,7 @@ public class Phase9_4CancellationTests
         var tp = Substitute.For<TimeProvider>();
         tp.GetUtcNow().Returns(new DateTimeOffset(now, TimeSpan.Zero));
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         var sync = Substitute.For<ITenantRegistrySync>();
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns("admin-1");
@@ -715,7 +715,7 @@ public class Phase9_4CancellationTests
     {
         using var db = CreateDbContext();
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         var sync = Substitute.For<ITenantRegistrySync>();
         var audit = Substitute.For<IAuditWriter>();
         var tp = Substitute.For<TimeProvider>();
@@ -804,7 +804,7 @@ public class Phase9_4CancellationTests
         using var db = CreateDbContext(tid);
         var sync = Substitute.For<ITenantRegistrySync>();
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns("admin-1");
         var audit = Substitute.For<IAuditWriter>();

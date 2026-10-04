@@ -31,7 +31,7 @@ public class CreatePlanHandler(
         CreatePlanCommand request,
         CancellationToken cancellationToken)
     {
-        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        var guardResult = await platformAdminGuard.EnsurePlatformAdminAsync(cancellationToken);
         if (!guardResult.IsSuccess)
             return guardResult.Errors!;
         var planResult = Plan.Create(

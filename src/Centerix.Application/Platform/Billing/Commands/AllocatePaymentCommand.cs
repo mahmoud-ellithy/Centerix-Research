@@ -39,7 +39,7 @@ public class AllocatePaymentHandler(
         // Task 20.1 — PLATFORM authorization boundary. Allocation/settlement is a platform-side
         // commercial operation. A tenant admin holding an over-broad tenant permission must not
         // reach this handler regardless of controller attribute configuration.
-        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        var guardResult = await platformAdminGuard.EnsurePlatformAdminAsync(cancellationToken);
         if (!guardResult.IsSuccess)
             return guardResult.Errors!;
         // Retry loop for deadlock resilience. Under Serializable isolation, concurrent

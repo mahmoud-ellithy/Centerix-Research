@@ -123,7 +123,7 @@ public class Task9C_PromotionBenefitRuleSqlServerTests
     private static CreatePromotionHandler CreateHandler(IAppDbContext db)
     {
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         var audit = Substitute.For<IAuditWriter>();
         return new CreatePromotionHandler(db, guard, audit);
     }

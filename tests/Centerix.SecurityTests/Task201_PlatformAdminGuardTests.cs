@@ -5,6 +5,7 @@ using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform.Billing.Commands;
 using Centerix.Domain.Common.Results;
 using Centerix.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
 using Xunit;
@@ -12,39 +13,47 @@ using Xunit;
 /// <summary>
 /// Task 20.1 — Dedicated unit tests for PlatformAdminGuard.
 /// Verifies all four authorization outcomes: PlatformAdmin, TenantAdmin, TenantUser, Unauthenticated.
+/// T22: the guard now delegates the effective decision to IPlatformAdminVerifier (DB-backed);
+/// the JWT role claim alone is never sufficient.
 /// </summary>
 public class Task201_PlatformAdminGuardTests
 {
     // ==================================================================
-    // Outcome 1: Platform Admin → allowed
+    // Outcome 1: Platform Admin (DB-verified) → allowed
     // ==================================================================
 
     [Fact]
-    public void PlatformAdmin_IsAllowed()
+    public async Task PlatformAdmin_IsAllowed()
     {
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.IsAuthenticated.Returns(true);
-        currentUser.IsPlatformAdmin.Returns(true);
 
-        var guard = new Centerix.Infrastructure.Common.PlatformAdminGuard(currentUser);
-        var result = guard.EnsurePlatformAdmin();
+        var httpContext = new DefaultHttpContext();
+        var httpContextAccessor = Substitute.For<IHttpContextAccessor>();
+        httpContextAccessor.HttpContext.Returns(httpContext);
+
+        var verifier = Substitute.For<IPlatformAdminVerifier>();
+        verifier.IsPlatformAdminAsync(Arg.Any<System.Security.Claims.ClaimsPrincipal>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var guard = new Centerix.Infrastructure.Common.PlatformAdminGuard(currentUser, httpContextAccessor, verifier);
+        var result = await guard.EnsurePlatformAdminAsync();
 
         Assert.True(result.IsSuccess);
     }
 
     // ==================================================================
-    // Outcome 2: Authenticated but NOT Platform Admin → forbidden
+    // Outcome 2: Authenticated but verifier denies (TenantAdmin) → forbidden
     // ==================================================================
 
     [Fact]
-    public void TenantAdmin_IsForbidden()
+    public async Task TenantAdmin_IsForbidden()
     {
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.IsAuthenticated.Returns(true);
-        currentUser.IsPlatformAdmin.Returns(false);
 
-        var guard = new Centerix.Infrastructure.Common.PlatformAdminGuard(currentUser);
-        var result = guard.EnsurePlatformAdmin();
+        var guard = CreateDeniedGuard(currentUser);
+        var result = await guard.EnsurePlatformAdminAsync();
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Platform.AdminRequired", result.Errors!.First().Code);
@@ -52,18 +61,17 @@ public class Task201_PlatformAdminGuardTests
     }
 
     // ==================================================================
-    // Outcome 3: Authenticated Tenant User (not admin) → forbidden
+    // Outcome 3: Authenticated but verifier denies (TenantUser) → forbidden
     // ==================================================================
 
     [Fact]
-    public void TenantUser_IsForbidden()
+    public async Task TenantUser_IsForbidden()
     {
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.IsAuthenticated.Returns(true);
-        currentUser.IsPlatformAdmin.Returns(false);
 
-        var guard = new Centerix.Infrastructure.Common.PlatformAdminGuard(currentUser);
-        var result = guard.EnsurePlatformAdmin();
+        var guard = CreateDeniedGuard(currentUser);
+        var result = await guard.EnsurePlatformAdminAsync();
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Platform.AdminRequired", result.Errors!.First().Code);
@@ -71,21 +79,57 @@ public class Task201_PlatformAdminGuardTests
     }
 
     // ==================================================================
-    // Outcome 4: Unauthenticated → unauthorized
+    // Outcome 4: Unauthenticated → unauthorized (verifier never consulted)
     // ==================================================================
 
     [Fact]
-    public void Unauthenticated_IsUnauthorized()
+    public async Task Unauthenticated_IsUnauthorized()
     {
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.IsAuthenticated.Returns(false);
 
-        var guard = new Centerix.Infrastructure.Common.PlatformAdminGuard(currentUser);
-        var result = guard.EnsurePlatformAdmin();
+        var guard = CreateDeniedGuard(currentUser);
+        var result = await guard.EnsurePlatformAdminAsync();
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Platform.AdminRequired", result.Errors!.First().Code);
         Assert.Equal(Centerix.Domain.Common.Results.ErrorKind.Unauthorized, result.Errors!.First().Type);
+    }
+
+    // ==================================================================
+    // Outcome 5: no HttpContext principal at all → forbidden (fail-closed)
+    // ==================================================================
+
+    [Fact]
+    public async Task NoHttpContext_IsForbidden()
+    {
+        var currentUser = Substitute.For<ICurrentUser>();
+        currentUser.IsAuthenticated.Returns(true);
+
+        var httpContextAccessor = Substitute.For<IHttpContextAccessor>();
+        httpContextAccessor.HttpContext.Returns((HttpContext?)null);
+
+        var verifier = Substitute.For<IPlatformAdminVerifier>();
+
+        var guard = new Centerix.Infrastructure.Common.PlatformAdminGuard(currentUser, httpContextAccessor, verifier);
+        var result = await guard.EnsurePlatformAdminAsync();
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(Centerix.Domain.Common.Results.ErrorKind.Forbidden, result.Errors!.First().Type);
+        await verifier.DidNotReceiveWithAnyArgs().IsPlatformAdminAsync(default!, default);
+    }
+
+    private static Centerix.Infrastructure.Common.PlatformAdminGuard CreateDeniedGuard(ICurrentUser currentUser)
+    {
+        var httpContext = new DefaultHttpContext();
+        var httpContextAccessor = Substitute.For<IHttpContextAccessor>();
+        httpContextAccessor.HttpContext.Returns(httpContext);
+
+        var verifier = Substitute.For<IPlatformAdminVerifier>();
+        verifier.IsPlatformAdminAsync(Arg.Any<System.Security.Claims.ClaimsPrincipal>(), Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        return new Centerix.Infrastructure.Common.PlatformAdminGuard(currentUser, httpContextAccessor, verifier);
     }
 
     // ==================================================================
@@ -101,7 +145,7 @@ public class Task201_PlatformAdminGuardTests
         var reconciliation = NullSubscriptionReconciliationService.Instance;
 
         var platformGuard = Substitute.For<IPlatformAdminGuard>();
-        platformGuard.EnsurePlatformAdmin().Returns(
+        platformGuard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(
             Centerix.Domain.Common.Results.Error.Forbidden("Platform.AdminRequired",
                 "This operation is restricted to platform administrators."));
 
@@ -125,7 +169,7 @@ public class Task201_PlatformAdminGuardTests
         var reconciliation = NullSubscriptionReconciliationService.Instance;
 
         var platformGuard = Substitute.For<IPlatformAdminGuard>();
-        platformGuard.EnsurePlatformAdmin().Returns(Centerix.Domain.Common.Results.Result.Updated);
+        platformGuard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Centerix.Domain.Common.Results.Result.Updated);
 
         var handler = new AllocatePaymentHandler(
             db, auditWriter, reconciliation, platformGuard);

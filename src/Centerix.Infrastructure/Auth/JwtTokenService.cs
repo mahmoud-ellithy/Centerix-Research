@@ -57,6 +57,9 @@ public class JwtTokenService(IOptions<JwtSettings> jwtSettings) : ITokenService
         // TenantPermissionResolver from: Membership → Role → RolePermission → Permission.
         // This ensures permissions cannot leak between tenants and removes the need to
         // invalidate/reissue tokens when tenant-scoped permissions change.
+        // T22: The PlatformAdmin role claim embedded here is a HINT, not an authority — every
+        // PlatformAdmin decision is re-validated against the identity store per request by
+        // IPlatformAdminVerifier, so revocation/lockout takes effect before token expiry.
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, user.Id),

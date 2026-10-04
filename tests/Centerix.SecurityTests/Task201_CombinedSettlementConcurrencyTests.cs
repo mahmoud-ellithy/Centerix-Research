@@ -182,7 +182,7 @@ public class Task201_CombinedSettlementConcurrencyTests
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 AuthorizeTenant(scope.ServiceProvider, tenantId);
                 var guard = Substitute.For<IPlatformAdminGuard>();
-                guard.EnsurePlatformAdmin().Returns(Result.Updated);
+                guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
                 var handler = new AllocatePaymentHandler(
                     db,
                     Substitute.For<IAuditWriter>(),
@@ -272,7 +272,7 @@ public class Task201_CombinedSettlementConcurrencyTests
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 AuthorizeTenant(scope.ServiceProvider, tenantId);
                 var guard = Substitute.For<IPlatformAdminGuard>();
-                guard.EnsurePlatformAdmin().Returns(Result.Updated);
+                guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
                 var handler = new AllocatePaymentHandler(
                     db,
                     Substitute.For<IAuditWriter>(),
@@ -363,7 +363,7 @@ public class Task201_CombinedSettlementConcurrencyTests
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 AuthorizeTenant(scope.ServiceProvider, tenantId);
                 var guard = Substitute.For<IPlatformAdminGuard>();
-                guard.EnsurePlatformAdmin().Returns(Result.Updated);
+                guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
                 var handler = new AllocatePaymentHandler(
                     db,
                     Substitute.For<IAuditWriter>(),

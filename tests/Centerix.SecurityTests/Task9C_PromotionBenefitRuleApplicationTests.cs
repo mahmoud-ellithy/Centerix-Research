@@ -492,6 +492,7 @@ public sealed class Task9CPlatformAdminTestFactory : TaskCFakeTenantTestFactory
 
     private sealed class AllowingPlatformAdminGuard : IPlatformAdminGuard
     {
-        public Result<Updated> EnsurePlatformAdmin() => Result.Updated;
+        public Task<Result<Updated>> EnsurePlatformAdminAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<Result<Updated>>(Result.Updated);
     }
 }

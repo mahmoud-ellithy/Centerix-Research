@@ -66,6 +66,7 @@ public class PermissionRequirement(string permission) : IAuthorizationRequiremen
 /// </summary>
 public class PermissionAuthorizationHandler(
     IHttpContextAccessor httpContextAccessor,
+    IPlatformAdminVerifier platformAdminVerifier,
     ILogger<PermissionAuthorizationHandler> logger) : AuthorizationHandler<PermissionRequirement>
 {
     private readonly ILogger<PermissionAuthorizationHandler> _logger = logger;
@@ -73,8 +74,12 @@ public class PermissionAuthorizationHandler(
         AuthorizationHandlerContext context,
         PermissionRequirement requirement)
     {
-        var isPlatformAdmin = context.User.IsInRole("PlatformAdmin");
-        if (isPlatformAdmin)
+        // PlatformAdmin bypass is DB-VERIFIED (T22): the JWT role claim alone is never sufficient.
+        // Revocation/lockout takes effect immediately; a forged claim without a matching identity
+        // store role is denied. This is the single authoritative PlatformAdmin decision.
+        if (await platformAdminVerifier.IsPlatformAdminAsync(
+                context.User,
+                httpContextAccessor.HttpContext?.RequestAborted ?? CancellationToken.None))
         {
             context.Succeed(requirement);
             return;

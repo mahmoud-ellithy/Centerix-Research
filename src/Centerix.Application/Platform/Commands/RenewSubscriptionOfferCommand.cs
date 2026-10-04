@@ -76,7 +76,7 @@ public class RenewSubscriptionOfferHandler(
 
     public async Task<Result<Guid>> Handle(RenewSubscriptionOfferCommand request, CancellationToken cancellationToken)
     {
-        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        var guardResult = await platformAdminGuard.EnsurePlatformAdminAsync(cancellationToken);
         if (!guardResult.IsSuccess)
             return guardResult.Errors!;
 

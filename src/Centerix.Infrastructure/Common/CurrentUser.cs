@@ -26,8 +26,6 @@ public class CurrentUser(
 
     public bool IsAuthenticated => _httpContextAccessor.HttpContext?.User?.Identity?.IsAuthenticated ?? false;
 
-    public bool IsPlatformAdmin => _httpContextAccessor.HttpContext?.User?.IsInRole("PlatformAdmin") ?? false;
-
     public IEnumerable<string> Roles => _httpContextAccessor.HttpContext?.User?.Claims
         .Where(c => c.Type == ClaimTypes.Role)
         .Select(c => c.Value) ?? [];

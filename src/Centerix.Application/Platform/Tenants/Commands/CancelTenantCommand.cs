@@ -16,7 +16,7 @@ public class CancelTenantHandler(
 {
     public async Task<Result<Updated>> Handle(CancelTenantCommand request, CancellationToken cancellationToken)
     {
-        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        var guardResult = await platformAdminGuard.EnsurePlatformAdminAsync(cancellationToken);
         if (!guardResult.IsSuccess)
             return guardResult.Errors!;
 

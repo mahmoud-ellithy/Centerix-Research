@@ -128,7 +128,7 @@ public class Phase9FinancialConcurrencySqlServerTests
     {
         var auditWriter = Substitute.For<IAuditWriter>();
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         return new AllocatePaymentHandler(db, auditWriter, NullSubscriptionReconciliationService.Instance, guard);
     }
 
@@ -1703,7 +1703,7 @@ public class Phase9FinancialConcurrencySqlServerTests
                 currentUser.UserId.Returns("test-user-1");
                 currentUser.IsAuthenticated.Returns(true);
                 var platformAdminGuard = Substitute.For<IPlatformAdminGuard>();
-                platformAdminGuard.EnsurePlatformAdmin().Returns(Result.Updated);
+                platformAdminGuard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
                 var handler = new ExecuteRefundHandler(db, currentUser, platformAdminGuard, auditWriter);
                 return await handler.Handle(new ExecuteRefundCommand(refundId), ct);
             },
@@ -1718,7 +1718,7 @@ public class Phase9FinancialConcurrencySqlServerTests
                 currentUser.UserId.Returns("test-user-1");
                 currentUser.IsAuthenticated.Returns(true);
                 var platformAdminGuard2 = Substitute.For<IPlatformAdminGuard>();
-                platformAdminGuard2.EnsurePlatformAdmin().Returns(Result.Updated);
+                platformAdminGuard2.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
                 var handler = new ExecuteRefundHandler(db, currentUser, platformAdminGuard2, auditWriter);
                 return await handler.Handle(new ExecuteRefundCommand(refundId), ct);
             },

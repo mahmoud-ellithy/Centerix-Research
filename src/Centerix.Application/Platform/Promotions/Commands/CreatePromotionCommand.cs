@@ -35,7 +35,7 @@ public class CreatePromotionHandler(
 {
     public async Task<Result<int>> Handle(CreatePromotionCommand request, CancellationToken cancellationToken)
     {
-        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        var guardResult = await platformAdminGuard.EnsurePlatformAdminAsync(cancellationToken);
         if (!guardResult.IsSuccess)
             return guardResult.Errors!;
 

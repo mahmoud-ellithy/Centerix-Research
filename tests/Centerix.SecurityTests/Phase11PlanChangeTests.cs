@@ -806,22 +806,22 @@ public class Phase11PlanChangeTests
     // ==================================================================
 
     [Fact]
-    public void Test32_PlatformAdmin_Required()
+    public async Task Test32_PlatformAdmin_Required()
     {
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Error.Forbidden("Auth.PlatformAdminRequired", "Platform admin required"));
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Error.Forbidden("Auth.PlatformAdminRequired", "Platform admin required"));
 
-        var result = guard.EnsurePlatformAdmin();
+        var result = await guard.EnsurePlatformAdminAsync();
         Assert.False(result.IsSuccess);
     }
 
     [Fact]
-    public void Test33_PlatformAdmin_Allowed()
+    public async Task Test33_PlatformAdmin_Allowed()
     {
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
 
-        var result = guard.EnsurePlatformAdmin();
+        var result = await guard.EnsurePlatformAdminAsync();
         Assert.True(result.IsSuccess);
     }
 
@@ -946,23 +946,23 @@ public class Phase11PlanChangeTests
     // ==================================================================
 
     [Fact]
-    public void Test40_PlatformAdminGuard_Enforced()
+    public async Task Test40_PlatformAdminGuard_Enforced()
     {
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Error.Forbidden("Auth.Forbidden", "Not platform admin"));
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Error.Forbidden("Auth.Forbidden", "Not platform admin"));
 
-        var result = guard.EnsurePlatformAdmin();
+        var result = await guard.EnsurePlatformAdminAsync();
         Assert.False(result.IsSuccess);
         Assert.Equal("Auth.Forbidden", result.Errors!.First().Code);
     }
 
     [Fact]
-    public void Test41_PlatformAdminGuard_Passes()
+    public async Task Test41_PlatformAdminGuard_Passes()
     {
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
 
-        var result = guard.EnsurePlatformAdmin();
+        var result = await guard.EnsurePlatformAdminAsync();
         Assert.True(result.IsSuccess);
     }
 }
@@ -989,7 +989,7 @@ public class Phase11PlanChangeSqlServerTests
     private static ChangeSubscriptionPlanHandler CreateHandler(IAppDbContext db)
     {
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
 
         var subscriptionFactory = new SubscriptionFactory(db);
 

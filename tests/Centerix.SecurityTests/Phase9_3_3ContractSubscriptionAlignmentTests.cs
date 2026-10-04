@@ -470,7 +470,7 @@ public class Phase9_3_3ContractSubscriptionAlignmentSqlServerTests
     private static RenewSubscriptionOfferHandler CreateHandler(IAppDbContext db, DateTime? fixedTime = null)
     {
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
 
         var subscriptionFactory = new SubscriptionFactory(db);
 

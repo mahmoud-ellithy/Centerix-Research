@@ -37,7 +37,7 @@ public class CreateSubscriptionFromContractHandler(
         CreateSubscriptionFromContractCommand request,
         CancellationToken cancellationToken)
     {
-        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        var guardResult = await platformAdminGuard.EnsurePlatformAdminAsync(cancellationToken);
         if (!guardResult.IsSuccess)
             return guardResult.Errors!;
 

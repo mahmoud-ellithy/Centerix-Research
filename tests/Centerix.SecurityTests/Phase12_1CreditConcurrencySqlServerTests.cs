@@ -63,7 +63,7 @@ public class Phase12_1CreditConcurrencySqlServerTests
     {
         var auditWriter = Substitute.For<IAuditWriter>();
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         return new AllocatePaymentHandler(db, auditWriter, NullSubscriptionReconciliationService.Instance, guard);
     }
 

@@ -290,7 +290,7 @@ public class Task18_5CreditEconomicOriginSqlServerTests
         AuthorizeTenant(scope.ServiceProvider, tenantId);
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         var timeProvider = Substitute.For<TimeProvider>();
         timeProvider.GetUtcNow().Returns(at);
         var handler = new ChangeSubscriptionPlanHandler(
@@ -1076,7 +1076,7 @@ public class Task18_5CreditEconomicOriginSqlServerTests
             AuthorizeTenant(scope.ServiceProvider, tenantId);
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var guard = Substitute.For<IPlatformAdminGuard>();
-            guard.EnsurePlatformAdmin().Returns(Result.Updated);
+            guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
             var timeProvider = Substitute.For<TimeProvider>();
             timeProvider.GetUtcNow().Returns(t0);
             var handler = new ChangeSubscriptionPlanHandler(
@@ -1795,7 +1795,7 @@ public class Task18_5CreditEconomicOriginSqlServerTests
             AuthorizeTenant(scope.ServiceProvider, tenantId);
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var guard = Substitute.For<IPlatformAdminGuard>();
-            guard.EnsurePlatformAdmin().Returns(Result.Updated);
+            guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
             var timeProvider = Substitute.For<TimeProvider>();
             timeProvider.GetUtcNow().Returns(t0);
             var handler = new ChangeSubscriptionPlanHandler(

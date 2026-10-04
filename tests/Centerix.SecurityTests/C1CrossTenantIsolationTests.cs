@@ -468,7 +468,25 @@ public class C1CrossTenantIsolationTests : IClassFixture<TestWebApplicationFacto
 
         using var scope = _factory.Services.CreateScope();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
         var user = await userManager.FindByEmailAsync("user-a@test.com");
+
+        // T22: the PlatformAdmin claim must be backed by the authoritative identity store,
+        // so provision the Identity role and grant it to the user before minting the token.
+        if (!await roleManager.RoleExistsAsync("PlatformAdmin"))
+        {
+            await roleManager.CreateAsync(new ApplicationRole("PlatformAdmin")
+            {
+                Code = "PlatformAdmin",
+                DisplayName = "Platform Administrator",
+                IsSystem = true,
+                NormalizedName = "PLATFORMADMIN"
+            });
+        }
+        if (!await userManager.IsInRoleAsync(user!, "PlatformAdmin"))
+        {
+            await userManager.AddToRoleAsync(user!, "PlatformAdmin");
+        }
 
         // PlatformAdmin can access platform-scoped endpoints without tenant
         var token = GenerateTokenForUser(user!.Id, user.Email!, ["PlatformAdmin"], [Permissions.Tenants.Read]);

@@ -526,12 +526,12 @@ public class Phase9_3_1RenewalHardeningTests
     // ==================================================================
 
     [Fact]
-    public void Test25_PlatformAuthorization_Enforced()
+    public async Task Test25_PlatformAuthorization_Enforced()
     {
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Error.Forbidden("Auth.Required", "Platform admin required"));
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Error.Forbidden("Auth.Required", "Platform admin required"));
 
-        var result = guard.EnsurePlatformAdmin();
+        var result = await guard.EnsurePlatformAdminAsync();
         Assert.False(result.IsSuccess);
     }
 
@@ -822,7 +822,7 @@ public class Phase9_3_1RenewalSqlServerTests
     private static RenewSubscriptionOfferHandler CreateHandler(IAppDbContext db)
     {
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
 
         var subscriptionFactory = new SubscriptionFactory(db);
 

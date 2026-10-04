@@ -16,7 +16,7 @@ public class SuspendTenantHandler(
 {
     public async Task<Result<Updated>> Handle(SuspendTenantCommand request, CancellationToken cancellationToken)
     {
-        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        var guardResult = await platformAdminGuard.EnsurePlatformAdminAsync(cancellationToken);
         if (!guardResult.IsSuccess)
             return guardResult.Errors!;
 

@@ -133,7 +133,7 @@ public class Phase9_4_2CancellationConcurrencySqlServerTests
     private static CancelSubscriptionHandler CreateHandler(AppDbContext db)
     {
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         var sync = Substitute.For<ITenantRegistrySync>();
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns("admin-sql-1");

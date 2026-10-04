@@ -276,7 +276,7 @@ public class TASK_21_2_1_BonusMonthsBillingPrecisionTests
     private static IPlatformAdminGuard AdminGuard()
     {
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         return guard;
     }
 

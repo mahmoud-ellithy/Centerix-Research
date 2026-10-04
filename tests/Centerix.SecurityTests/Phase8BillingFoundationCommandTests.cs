@@ -107,7 +107,7 @@ public class Phase8BillingFoundationCommandTests
         CreateSubscriptionHandler(AppDbContext dbContext)
     {
         var platformAdminGuard = Substitute.For<IPlatformAdminGuard>();
-        platformAdminGuard.EnsurePlatformAdmin().Returns(Result.Updated);
+        platformAdminGuard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
 
         var subscriptionFactory = Substitute.For<ISubscriptionFactory>();
         var auditWriter = Substitute.For<IAuditWriter>();
@@ -241,7 +241,7 @@ public class Phase8BillingFoundationCommandTests
         await dbContext.SaveChangesAsync();
 
         var platformAdminGuard = Substitute.For<IPlatformAdminGuard>();
-        platformAdminGuard.EnsurePlatformAdmin().Returns(Result.Updated);
+        platformAdminGuard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
 
         var subscriptionFactory = Substitute.For<ISubscriptionFactory>();
         var mockSubscription = TenantPlan.Create(
@@ -299,7 +299,7 @@ public class Phase8BillingFoundationCommandTests
         await dbContext.SaveChangesAsync();
 
         var platformAdminGuard = Substitute.For<IPlatformAdminGuard>();
-        platformAdminGuard.EnsurePlatformAdmin().Returns(Result.Updated);
+        platformAdminGuard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
 
         var subscriptionFactory = Substitute.For<ISubscriptionFactory>();
         var auditWriter = Substitute.For<IAuditWriter>();
@@ -331,7 +331,7 @@ public class Phase8BillingFoundationCommandTests
         dbContext.StampAddedTenantIds(tenantId);
 
         var platformAdminGuard = Substitute.For<IPlatformAdminGuard>();
-        platformAdminGuard.EnsurePlatformAdmin().Returns(Result.Updated);
+        platformAdminGuard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
 
         var subscriptionFactory = Substitute.For<ISubscriptionFactory>();
         var auditWriter = Substitute.For<IAuditWriter>();
@@ -363,7 +363,7 @@ public class Phase8BillingFoundationCommandTests
         dbContext.StampAddedTenantIds(tenantId);
 
         var platformAdminGuard = Substitute.For<IPlatformAdminGuard>();
-        platformAdminGuard.EnsurePlatformAdmin().Returns(Error.Failure("Auth.Forbidden", "Not a platform admin"));
+        platformAdminGuard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Error.Failure("Auth.Forbidden", "Not a platform admin"));
 
         var subscriptionFactory = Substitute.For<ISubscriptionFactory>();
         var auditWriter = Substitute.For<IAuditWriter>();

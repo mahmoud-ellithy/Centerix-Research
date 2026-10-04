@@ -16,7 +16,7 @@ public class ReactivateTenantHandler(
 {
     public async Task<Result<Updated>> Handle(ReactivateTenantCommand request, CancellationToken cancellationToken)
     {
-        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        var guardResult = await platformAdminGuard.EnsurePlatformAdminAsync(cancellationToken);
         if (!guardResult.IsSuccess)
             return guardResult.Errors!;
 

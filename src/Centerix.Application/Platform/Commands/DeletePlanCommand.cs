@@ -20,7 +20,7 @@ public class DeletePlanHandler(
 {
     public async Task<Result<Deleted>> Handle(DeletePlanCommand request, CancellationToken cancellationToken)
     {
-        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        var guardResult = await platformAdminGuard.EnsurePlatformAdminAsync(cancellationToken);
         if (!guardResult.IsSuccess)
             return guardResult.Errors!;
         var plan = await dbContext.Plans.FindAsync([request.Id], cancellationToken: cancellationToken);

@@ -93,7 +93,7 @@ public class Phase9FinancialLedgerHardeningTests
     private static IPlatformAdminGuard AllowPlatformAdmin()
     {
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         return guard;
     }
 

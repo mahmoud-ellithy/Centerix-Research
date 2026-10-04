@@ -110,7 +110,7 @@ public class Phase8_1_3InstallmentRehydrationTests
     {
         var auditWriter = Substitute.For<IAuditWriter>();
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         return new AllocatePaymentHandler(db, auditWriter, NullSubscriptionReconciliationService.Instance, guard);
     }
 
@@ -989,7 +989,7 @@ public class Phase8_1_3RehydrationSqlServerTests
     {
         var auditWriter = Substitute.For<IAuditWriter>();
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         return new AllocatePaymentHandler(db, auditWriter, NullSubscriptionReconciliationService.Instance, guard);
     }
 

@@ -21,7 +21,7 @@ public class ActivateSubscriptionHandler(
 {
     public async Task<Result<Updated>> Handle(ActivateSubscriptionCommand request, CancellationToken cancellationToken)
     {
-        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        var guardResult = await platformAdminGuard.EnsurePlatformAdminAsync(cancellationToken);
         if (!guardResult.IsSuccess)
             return guardResult.Errors!;
 

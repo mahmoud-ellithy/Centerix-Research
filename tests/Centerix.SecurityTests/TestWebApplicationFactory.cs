@@ -153,42 +153,38 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
         await EnsureRoleAsync(roleManager, "TenantAdmin", "Tenant Administrator");
         await EnsureRoleAsync(roleManager, "TenantUser", "Tenant User");
 
-        // Assign all permissions to TenantAdmin
-        var adminRole = await roleManager.FindByNameAsync("TenantAdmin");
-        if (adminRole != null)
-        {
-            var allPermissions = context.Permissions.ToList();
-            var existingRolePermissions = context.RolePermissions.Where(rp => rp.RoleId == adminRole.Id).ToList();
-            var existingPermissionIds = new HashSet<int>(existingRolePermissions.Select(rp => rp.PermissionId));
-
-            foreach (var permission in allPermissions)
-            {
-                if (!existingPermissionIds.Contains(permission.Id))
-                {
-                    context.RolePermissions.Add(RolePermission.Create(adminRole.Id, permission.Id).Value);
-                }
-            }
-        }
-
-        // Assign read permissions to TenantUser
-        var userRole = await roleManager.FindByNameAsync("TenantUser");
-        if (userRole != null)
-        {
-            var readPermissions = context.Permissions
-                .Where(p => p.Action == "Read" || p.Action == "Manage")
-                .ToList();
-            var existingRolePermissions = context.RolePermissions.Where(rp => rp.RoleId == userRole.Id).ToList();
-            var existingPermissionIds = new HashSet<int>(existingRolePermissions.Select(rp => rp.PermissionId));
-
-            foreach (var permission in readPermissions)
-            {
-                if (!existingPermissionIds.Contains(permission.Id))
-                {
-                    context.RolePermissions.Add(RolePermission.Create(userRole.Id, permission.Id).Value);
-                }
-            }
-        }
+        // T22: mirror PRODUCTION role-permission assignments exactly (Permissions.GetTenantAdminPermissions /
+        // GetTenantUserPermissions). The previous "TenantAdmin gets ALL permissions" convenience masked
+        // production seeding gaps and made HTTP authorization tests prove nothing about the real role matrix.
+        await AssignPermissionsAsync(context, roleManager, "TenantAdmin", Permissions.GetTenantAdminPermissions());
+        await AssignPermissionsAsync(context, roleManager, "TenantUser", Permissions.GetTenantUserPermissions());
         await context.SaveChangesAsync();
+    }
+
+    private static async Task AssignPermissionsAsync(
+        AppDbContext context,
+        RoleManager<ApplicationRole> roleManager,
+        string roleName,
+        string[] permissionCodes)
+    {
+        var role = await roleManager.FindByNameAsync(roleName);
+        if (role is null)
+            return;
+
+        var codeSet = new HashSet<string>(permissionCodes, StringComparer.Ordinal);
+        var permissions = context.Permissions.Where(p => codeSet.Contains(p.Code)).ToList();
+        var existingPermissionIds = context.RolePermissions
+            .Where(rp => rp.RoleId == role.Id)
+            .Select(rp => rp.PermissionId)
+            .ToHashSet();
+
+        foreach (var permission in permissions)
+        {
+            if (!existingPermissionIds.Contains(permission.Id))
+            {
+                context.RolePermissions.Add(RolePermission.Create(role.Id, permission.Id).Value);
+            }
+        }
     }
 
     private static async Task EnsureRoleAsync(RoleManager<ApplicationRole> roleManager, string code, string displayName)

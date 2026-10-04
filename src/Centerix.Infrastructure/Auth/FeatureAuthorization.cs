@@ -23,6 +23,7 @@ public class FeatureRequirement(string featureCode) : IAuthorizationRequirement
 /// </summary>
 public class FeatureAuthorizationHandler(
     IHttpContextAccessor httpContextAccessor,
+    IPlatformAdminVerifier platformAdminVerifier,
     IFeatureAccessService featureAccess) : AuthorizationHandler<FeatureRequirement>
 {
     protected override async Task HandleRequirementAsync(
@@ -30,8 +31,11 @@ public class FeatureAuthorizationHandler(
         FeatureRequirement requirement)
     {
         // Platform staff manage tenants regardless of their commercial state; feature gates are
-        // a COMMERCIAL constraint on tenants, not on platform administrators.
-        if (context.User.IsInRole("PlatformAdmin"))
+        // a COMMERCIAL constraint on tenants, not on platform administrators. The bypass is
+        // DB-VERIFIED (T22): a role claim alone never suffices.
+        if (await platformAdminVerifier.IsPlatformAdminAsync(
+                context.User,
+                httpContextAccessor.HttpContext?.RequestAborted ?? CancellationToken.None))
         {
             context.Succeed(requirement);
             return;

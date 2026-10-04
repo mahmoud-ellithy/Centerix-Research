@@ -134,6 +134,9 @@ public static class DependencyInjection
         services.AddScoped<IFeatureAccessService, FeatureAccessService>();
         services.AddScoped<ILimitService, LimitService>();
         services.AddScoped<IPlatformAdminGuard, PlatformAdminGuard>();
+        // T22: single authoritative, DB-backed PlatformAdmin decision used by the permission
+        // handler, the feature handler and the platform guard.
+        services.AddScoped<IPlatformAdminVerifier, PlatformAdminVerifier>();
         services.AddScoped<ISubscriptionFactory, SubscriptionFactory>();
 
         // Phase 7: Contract Benefits eligibility service

@@ -28,7 +28,7 @@ public class ApproveRefundHandler(
         // tenant-side operation. Controller-level HasPermission is necessary but not
         // sufficient: a tenant admin holding an over-broad tenant permission must not
         // be able to approve a refund by reaching the handler through a different route.
-        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        var guardResult = await platformAdminGuard.EnsurePlatformAdminAsync(cancellationToken);
         if (!guardResult.IsSuccess)
             return guardResult.Errors!;
 

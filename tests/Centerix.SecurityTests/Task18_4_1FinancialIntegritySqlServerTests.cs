@@ -205,7 +205,7 @@ public class Task18_4_1FinancialIntegritySqlServerTests
         AuthorizeTenant(scope.ServiceProvider, tenantId);
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         var timeProvider = Substitute.For<TimeProvider>();
         timeProvider.GetUtcNow().Returns(DateTimeOffset.UtcNow);
         var handler = new ChangeSubscriptionPlanHandler(
@@ -225,7 +225,7 @@ public class Task18_4_1FinancialIntegritySqlServerTests
         currentUser.UserId.Returns("test-admin");
         currentUser.IsAuthenticated.Returns(true);
         var platformAdminGuard = Substitute.For<IPlatformAdminGuard>();
-        platformAdminGuard.EnsurePlatformAdmin().Returns(Result.Updated);
+        platformAdminGuard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         var handler = new ExecuteRefundHandler(db, currentUser, platformAdminGuard, Substitute.For<IAuditWriter>());
         using var cts = new CancellationTokenSource(TestTimeout);
         return await handler.Handle(new ExecuteRefundCommand(refundId, idempotencyKey), cts.Token);

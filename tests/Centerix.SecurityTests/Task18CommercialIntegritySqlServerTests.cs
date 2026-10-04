@@ -58,7 +58,7 @@ public class Task18CommercialIntegritySqlServerTests
     private static ChangeSubscriptionPlanHandler CreateHandler(IAppDbContext db)
     {
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin().Returns(Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
 
         var timeProvider = Substitute.For<TimeProvider>();
         timeProvider.GetUtcNow().Returns(DateTimeOffset.UtcNow);

@@ -337,6 +337,23 @@ public static class Permissions
         Contracts.Read,
         Installments.Read,
 
+        // T22: Tenant-partitioned academic/operational modules. TenantAdmin is the intended
+        // manager of these (proven by the Phase 3 HTTP authorization tests and the feature-gating
+        // design: FeatureCodes.StudentManagement/TeacherManagement gate tenant writes, which
+        // presumes tenant-side actors). Their absence here was a seeding gap masked by the test
+        // factory granting ALL permissions to TenantAdmin.
+        Branches.Create, Branches.Read, Branches.Update, Branches.Delete,
+        AcademicStages.Create, AcademicStages.Read, AcademicStages.Update,
+        AcademicYears.Create, AcademicYears.Read, AcademicYears.Update,
+        Students.Create, Students.Read, Students.Update, Students.Delete,
+        AttendanceLogs.Create, AttendanceLogs.Read,
+
+        // T22: Tenant-scoped commercial self-service modules (tenant-partitioned entities;
+        // MODULE-INVENTORY classifies them "T", handlers carry no platform guard).
+        TenantAddOns.Create, TenantAddOns.Read, TenantAddOns.Update,
+        TenantReferralCodes.Create, TenantReferralCodes.Read,
+        TenantReferrals.Create, TenantReferrals.Read,
+
         // D-01: Hybrid billing authorization — TenantAdmin MAY view own billing data and request actions.
         // TenantAdmin MUST NOT modify issued invoices, payments, or approve/execute refunds.
         Invoices.Read,
@@ -357,6 +374,14 @@ public static class Permissions
         TeacherSalaryConfigs.Read,
         SalaryPayments.Read,
         TeacherRatings.Read,
+
+        // T22: read-only visibility of the tenant-partitioned academic modules, consistent with
+        // the existing read-only grants (Subjects/Teachers/...). No write access.
+        Branches.Read,
+        AcademicStages.Read,
+        AcademicYears.Read,
+        Students.Read,
+        AttendanceLogs.Read,
     ];
 
     /// <summary>

@@ -50,7 +50,7 @@ public class ExecuteRefundHandler(
         // Refund execution moves real money out of the platform's payment sources.
         // Controller-level HasPermission is necessary but not sufficient: tenant admins
         // must not be able to execute refunds through any alternative path.
-        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        var guardResult = await platformAdminGuard.EnsurePlatformAdminAsync(cancellationToken);
         if (!guardResult.IsSuccess)
             return guardResult.Errors!;
 

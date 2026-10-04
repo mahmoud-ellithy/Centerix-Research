@@ -1,4 +1,4 @@
-﻿using Centerix.Application.Common.Interfaces;
+using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform.Tenants.Commands;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Tenants;
@@ -32,16 +32,15 @@ public class C2TenantRegistrySyncTests
     private static Tenant CreateOperationalTenant(string slug = "ops")
     {
         var tenant = CreatePersistedTenant(slug);
-        Assert.True(tenant.Approve().IsSuccess);   // PendingApproval â†’ Provisioning
-        Assert.True(tenant.Activate().IsSuccess);  // Provisioning â†’ Active
+        Assert.True(tenant.Approve().IsSuccess);   // PendingApproval → Provisioning
+        Assert.True(tenant.Activate().IsSuccess);  // Provisioning → Active
         return tenant;
     }
 
     private static IPlatformAdminGuard CreatePlatformAdminGuard()
     {
         var guard = Substitute.For<IPlatformAdminGuard>();
-        guard.EnsurePlatformAdmin()
-            .Returns(Centerix.Domain.Common.Results.Result.Updated);
+        guard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Centerix.Domain.Common.Results.Result.Updated);
         return guard;
     }
 

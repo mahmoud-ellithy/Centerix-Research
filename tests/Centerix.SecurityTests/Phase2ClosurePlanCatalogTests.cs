@@ -415,14 +415,14 @@ public class Phase2ClosurePlanCatalogTests : IClassFixture<TestWebApplicationFac
     private static IPlatformAdminGuard ForbiddenGuard()
     {
         var g = Substitute.For<IPlatformAdminGuard>();
-        g.EnsurePlatformAdmin().Returns(Error.Forbidden("Platform.AdminRequired", "restricted"));
+        g.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Error.Forbidden("Platform.AdminRequired", "restricted"));
         return g;
     }
 
     private static IPlatformAdminGuard AllowedGuard()
     {
         var g = Substitute.For<IPlatformAdminGuard>();
-        g.EnsurePlatformAdmin().Returns(Result.Updated);
+        g.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         return g;
     }
 

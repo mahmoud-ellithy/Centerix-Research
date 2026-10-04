@@ -216,7 +216,7 @@ public class Phase13RefundAllocationTests
         currentUser.UserId.Returns(userId);
         var auditWriter = Substitute.For<IAuditWriter>();
         var platformAdminGuard = Substitute.For<IPlatformAdminGuard>();
-        platformAdminGuard.EnsurePlatformAdmin().Returns(Result.Updated);
+        platformAdminGuard.EnsurePlatformAdminAsync(Arg.Any<CancellationToken>()).Returns(Result.Updated);
         return new ExecuteRefundHandler(db, currentUser, platformAdminGuard, auditWriter);
     }
 

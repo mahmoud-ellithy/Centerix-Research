@@ -40,7 +40,7 @@ public class ApproveTenantHandler(
 {
     public async Task<Result<Created>> Handle(ApproveTenantCommand request, CancellationToken cancellationToken)
     {
-        var guardResult = platformAdminGuard.EnsurePlatformAdmin();
+        var guardResult = await platformAdminGuard.EnsurePlatformAdminAsync(cancellationToken);
         if (!guardResult.IsSuccess)
             return guardResult.Errors!;
 
