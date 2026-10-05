@@ -59,10 +59,25 @@ public class PermissionRequirement(string permission) : IAuthorizationRequiremen
 }
 
 /// <summary>
-/// Authorization handler that checks if the current user has the required permission
-/// in the current tenant context. Resolves permissions on-demand from the DB via
-/// TenantMembership → RoleName → Role → RolePermission → Permission, reading
-/// ICurrentTenant for the current tenant context.
+/// Authorization handler that decides a <see cref="PermissionRequirement"/> across the two
+/// authorization domains of the system.
+/// <para>
+/// SECURITY BOUNDARY (T22 correction). The permission SCOPE is resolved first, through the single
+/// authoritative <see cref="PermissionScopes"/> classifier, and the scope then decides which — and
+/// only which — grant sources may authorize the request:
+/// </para>
+/// <list type="bullet">
+///   <item><description><b>Platform scope</b>: the ONLY acceptable grant is
+///   <see cref="IPlatformAdminVerifier"/>, whose decision is re-validated against the server-side
+///   Identity store. There is NO tenant fallback for platform permissions: a
+///   <c>TenantMembership</c>, a tenant role, a tenant <c>RolePermission</c> row or a pre-computed
+///   permission list can never authorize them, even if the database is misconfigured or corrupted.</description></item>
+///   <item><description><b>Tenant scope</b>: requires an AUTHORIZED tenant context
+///   (<see cref="ICurrentTenant.IsAuthorized"/>), never merely a resolved one, and then evaluates
+///   TenantMembership → Role → RolePermission.</description></item>
+///   <item><description><b>Unknown scope</b>: DENIED. An unclassifiable permission is a
+///   configuration fault and must never widen access.</description></item>
+/// </list>
 /// </summary>
 public class PermissionAuthorizationHandler(
     IHttpContextAccessor httpContextAccessor,
@@ -74,21 +89,78 @@ public class PermissionAuthorizationHandler(
         AuthorizationHandlerContext context,
         PermissionRequirement requirement)
     {
+        var httpContext = httpContextAccessor.HttpContext;
+        var cancellationToken = httpContext?.RequestAborted ?? CancellationToken.None;
+
+        // STEP 1 — the single authoritative scope decision. Resolved BEFORE any grant source is
+        // consulted, so no tenant-derived data can influence a platform authorization decision.
+        var scope = PermissionScopes.Resolve(requirement.Permission);
+
         // PlatformAdmin bypass is DB-VERIFIED (T22): the JWT role claim alone is never sufficient.
         // Revocation/lockout takes effect immediately; a forged claim without a matching identity
         // store role is denied. This is the single authoritative PlatformAdmin decision.
-        if (await platformAdminVerifier.IsPlatformAdminAsync(
-                context.User,
-                httpContextAccessor.HttpContext?.RequestAborted ?? CancellationToken.None))
+        var isPlatformAdmin = await platformAdminVerifier.IsPlatformAdminAsync(
+            context.User, cancellationToken);
+
+        if (isPlatformAdmin)
         {
             context.Succeed(requirement);
             return;
         }
 
-        // Primary path: read permissions resolved by TenantGuardMiddleware from HttpContext.Items.
-        var httpContext = httpContextAccessor.HttpContext;
+        // STEP 2 — PLATFORM scope without an authoritative PlatformAdmin decision: DENY.
+        // This is the corrected trust boundary. It holds even when the request carries a tenant
+        // header, an authorized tenant context, or a deliberately injected platform RolePermission
+        // row: none of those may ever produce platform authorization.
+        if (scope == PermissionScope.Platform)
+        {
+            _logger.LogWarning(
+                "Denied platform-scoped permission '{Permission}' for user {UserId}: " +
+                "tenant-derived permission sources are not valid for platform scope.",
+                requirement.Permission,
+                context.User.FindFirstValue(ClaimTypes.NameIdentifier));
+            return;
+        }
 
-        if (httpContext?.Items["TenantPermissions"] is IEnumerable<string> permissions)
+        // STEP 3 — UNKNOWN scope: fail closed. An unclassifiable permission (not in the canonical
+        // catalog and not explicitly platform-scoped) is never authorized from any source.
+        if (scope == PermissionScope.Unknown)
+        {
+            _logger.LogWarning(
+                "Denied permission '{Permission}' for user {UserId}: unknown permission scope (fail-closed).",
+                requirement.Permission,
+                context.User.FindFirstValue(ClaimTypes.NameIdentifier));
+            return;
+        }
+
+        // ---- TENANT scope from here on. Only authorized tenant context may grant it. ----
+
+        if (httpContext is null)
+            return;
+
+        var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(userId))
+            return;
+
+        var scopedServices = httpContext.RequestServices;
+        var currentTenant = scopedServices.GetRequiredService<ICurrentTenant>();
+
+        // IsAuthorized — NOT IsResolved. A resolved tenant is only a client-selected input
+        // (Finbuckle read it from a request header/host); it proves nothing about whether the
+        // authenticated principal may act in that tenant. TenantId stays empty until
+        // AuthorizeTenant() is called, so both conditions are required.
+        //
+        // This is checked for EVERY tenant-scope grant source, including the pre-computed
+        // HttpContext.Items list: that list is an optimization populated by the guard, not an
+        // independent proof of authorization, so it is never honoured outside an authorized
+        // tenant context.
+        if (!currentTenant.IsAuthorized || string.IsNullOrEmpty(currentTenant.TenantId))
+            return;
+
+        var dbContext = scopedServices.GetRequiredService<IAppDbContext>();
+
+        // Primary path: read permissions resolved by TenantGuardMiddleware from HttpContext.Items.
+        if (httpContext.Items["TenantPermissions"] is IEnumerable<string> permissions)
         {
             if (permissions.Any(p => string.Equals(p, requirement.Permission, StringComparison.OrdinalIgnoreCase)))
             {
@@ -98,24 +170,9 @@ public class PermissionAuthorizationHandler(
         }
 
         // Fallback: DB lookup
-        if (httpContext is null)
-            return;
-
-        var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (string.IsNullOrEmpty(userId))
-            return;
-
         try
         {
-            var scopedServices = httpContext.RequestServices;
-            var currentTenant = scopedServices.GetRequiredService<ICurrentTenant>();
-
-            if (!currentTenant.IsResolved || string.IsNullOrEmpty(currentTenant.TenantId))
-                return;
-
-            var dbContext = scopedServices.GetRequiredService<IAppDbContext>();
             var tenantId = currentTenant.TenantId;
-            var cancellationToken = httpContext.RequestAborted;
 
             var membership = await dbContext.TenantMemberships
                 .AsNoTracking()

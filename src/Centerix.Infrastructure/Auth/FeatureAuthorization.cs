@@ -46,8 +46,13 @@ public class FeatureAuthorizationHandler(
             return; // No request context → fail closed.
 
         var currentTenant = httpContext.RequestServices.GetService(typeof(ICurrentTenant)) as ICurrentTenant;
-        if (currentTenant is null || !currentTenant.IsResolved || string.IsNullOrEmpty(currentTenant.TenantId))
-            return; // No verified tenant → fail closed.
+
+        // IsAuthorized — NOT IsResolved (T22). A resolved tenant is only a client-selected input
+        // (read from a request header/host by Finbuckle); it does not prove the principal may act in
+        // that tenant. Feature entitlement is commercial, tenant-scoped state, so it is evaluated
+        // exclusively inside an authorized tenant context.
+        if (currentTenant is null || !currentTenant.IsAuthorized || string.IsNullOrEmpty(currentTenant.TenantId))
+            return; // No authorized tenant → fail closed.
 
         var hasFeature = await featureAccess.HasFeatureAsync(
             currentTenant.TenantId,

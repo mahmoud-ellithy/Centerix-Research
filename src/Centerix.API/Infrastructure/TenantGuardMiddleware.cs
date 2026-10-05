@@ -154,15 +154,35 @@ public class TenantGuardMiddleware(RequestDelegate next)
         if (role is null)
             return [];
 
-        // Resolve permissions from RolePermission → Permission
-        return await (
+        // Resolve permissions from RolePermission → Permission.
+        //
+        // DEFENSE IN DEPTH (T22): a tenant role may legitimately hold rows for PLATFORM-scoped
+        // permissions after a misconfiguration or a corrupted/hostile database. Those codes are
+        // filtered out here so a PLATFORM permission can never be published as a tenant-derived
+        // grant in HttpContext.Items. The authoritative enforcement lives in
+        // PermissionAuthorizationHandler (which denies platform scope outright); this filter
+        // ensures the same invariant holds for every other consumer of the published list, such as
+        // CurrentUser.TenantPermissions, without duplicating a second allow-path.
+        var grantedCodes = await (
             from rp in dbContext.RolePermissions.AsNoTracking()
             join p in dbContext.Permissions.AsNoTracking() on rp.PermissionId equals p.Id
             where rp.RoleId == role.Id
             select p.Code
         ).Distinct().ToListAsync(cancellationToken);
+
+        return grantedCodes
+            .Where(code => PermissionScopes.Resolve(code) == PermissionScope.Tenant)
+            .ToList();
     }
 
+    /// <summary>
+    /// Platform-scoped endpoints deliberately bypass tenant authorization: they act on cross-tenant
+    /// platform resources, so requiring a tenant membership would be meaningless. This is safe only
+    /// because the downstream <c>PermissionAuthorizationHandler</c> allows a platform permission
+    /// exclusively through the authoritative PlatformAdmin decision and denies it to every
+    /// tenant-derived source. Both components resolve the scope through the same
+    /// <see cref="PermissionScopes"/> classifier, so the two layers cannot disagree.
+    /// </summary>
     private static bool IsPlatformScopedRequest(HttpContext context)
     {
         var endpoint = context.GetEndpoint();
@@ -176,7 +196,7 @@ public class TenantGuardMiddleware(RequestDelegate next)
             .FirstOrDefault()?
             .Permission;
 
-        return Permissions.PlatformScope.IsPlatformScoped(permission);
+        return PermissionScopes.IsPlatformScoped(permission);
     }
 
     /// <summary>
