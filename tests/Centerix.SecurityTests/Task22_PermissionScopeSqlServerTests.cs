@@ -63,6 +63,30 @@ public class Task22_PermissionScopeSqlServerTests
     }
 
     [Fact]
+    public async Task Sql_PlatformPermission_GrantedToTenantUserRoleViaDbCorruption_StillDenied()
+    {
+        // The same dangerous configuration, but for the LOWEST tenant role. Authorization must not
+        // depend on how privileged the tenant role is: ANY TenantMembership-derived grant is an
+        // invalid source for a platform permission, so TenantUser is denied exactly like
+        // TenantAdmin. This guards against a future "except roles below Admin" shortcut.
+        var tenantId = $"t22_scope_user_{Guid.NewGuid():N}";
+        const string tenantUserRole = "TenantUser";
+
+        var user = await CreateUserAsync("sql_escalate_user");
+        await EnsureRoleAsync(tenantUserRole);
+        await AddToRoleAsync(user, tenantUserRole);
+        await CreateTenantWithMembershipAsync(tenantId, user.Id, tenantUserRole);
+
+        // CORRUPT THE DATABASE for the TenantUser role as well.
+        await GrantPlatformPermissionToTenantRoleAsync(tenantUserRole, Permissions.Plans.Read);
+
+        // A fully valid tenant request: active membership, authorized tenant, explicit grant.
+        var response = await SendAsync("/api/plans", user, tenantUserRole, tenantId);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Sql_PlatformPermission_GrantedToTenantRole_AllPlatformCodesDenied()
     {
         var tenantId = $"t22_scope_all_{Guid.NewGuid():N}";

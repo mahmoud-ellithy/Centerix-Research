@@ -127,6 +127,68 @@ public class Task22_PermissionScopeBoundaryTests
     }
 
     [Fact]
+    public void Scope_Classifier_PlatformModules_AreFullyPlatformScoped()
+    {
+        // DRIFT GUARD for the one residual way the boundary could erode over time.
+        //
+        // Fail-closed only covers codes that are in NEITHER the platform list NOR the catalog. A
+        // PLATFORM permission that is added to PermissionCatalog but forgotten in
+        // Permissions.PlatformScope.PermissionCodes would resolve to Tenant and therefore become
+        // tenant-authorizable — precisely the "future platform permission accidentally omitted"
+        // defect. Nothing in the runtime path can detect that, so it is pinned here.
+        //
+        // These modules operate on cross-tenant platform resources only, so EVERY code they contain
+        // must be platform-scoped. If this test ever fails, the new code must be added to
+        // Permissions.PlatformScope.PermissionCodes — never reclassified as tenant.
+        var platformOnlyModules = new[]
+        {
+            "Tenants", "Subscriptions", "Plans", "Features", "AddOnCatalogs", "Promotions"
+        };
+
+        var misclassified = PermissionCatalog.All
+            .Where(e => platformOnlyModules.Contains(e.Module, StringComparer.Ordinal))
+            .Where(e => PermissionScopes.Resolve(e.Code) != PermissionScope.Platform)
+            .Select(e => e.Code)
+            .ToList();
+
+        Assert.Empty(misclassified);
+    }
+
+    [Fact]
+    public void Scope_Classifier_PlatformModuleCoverage_IsCompleteAndNoTenantModuleLeaksIn()
+    {
+        // The same partition seen from the other side: the platform code list must not be missing a
+        // code that the catalog already knows, and no TENANT-partitioned module may appear among the
+        // platform-scoped codes (which would over-block legitimate tenant permissions).
+        var platform = Permissions.PlatformScope.PermissionCodes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var catalog = PermissionCatalog.All.Select(e => e.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Every catalog code that the platform list claims must actually exist in the catalog
+        // (PlatformUsers.*/PlatformRoles.*/PlatformPermissions.Read are controller-enforced and are
+        // deliberately not catalog rows, so they are excluded from this equality requirement).
+        var unrecognisedPlatformCodes = platform
+            .Where(code => !code.StartsWith("Platform", StringComparison.Ordinal)
+                           && !catalog.Contains(code))
+            .ToList();
+        Assert.Empty(unrecognisedPlatformCodes);
+
+        // A platform code must never belong to a module that holds tenant-partitioned data.
+        var tenantPartitionedModules = new[]
+        {
+            "Invoices", "Payments", "Receipts", "Ledger", "Contracts", "Installments", "Refunds",
+            "TenantAddOns", "TenantCredits", "TenantCRMLeads", "TenantLimitOverrides", "TenantPlans",
+            "TenantProvisioningJobs", "TenantReferralCodes", "TenantReferrals", "Offers", "Benefits"
+        };
+        var catalogModules = PermissionCatalog.All.ToDictionary(e => e.Code, e => e.Module, StringComparer.OrdinalIgnoreCase);
+
+        var leaked = platform
+            .Where(code => catalogModules.TryGetValue(code, out var module)
+                           && tenantPartitionedModules.Contains(module, StringComparer.Ordinal))
+            .ToList();
+        Assert.Empty(leaked);
+    }
+
+    [Fact]
     public void Scope_Classifier_IsTotal_NoUnknownScopeForAnyCatalogPermission()
     {
         // Section 20: every permission must have a determinate scope. An Unknown scope for a

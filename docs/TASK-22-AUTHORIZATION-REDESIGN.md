@@ -121,10 +121,18 @@ verified by temporarily disabling the scope gate:
 
 | Suite | With the fix | With the platform-scope gate disabled |
 | --- | --- | --- |
-| `Task22_PermissionScopeBoundaryTests` (16 tests) | 16 passed | **`Handler_PlatformPermission_NotPlatformAdmin_Denied_EvenWithTenantRoleGrantAndAuthorizedTenant` FAILS** |
-| `Task22_PermissionScopeSqlServerTests` (10 tests) | 10 passed | **`Sql_TenantRole_HoldingBothScopes_TenantWorks_PlatformDenied` FAILS** |
+| `Task22_PermissionScopeBoundaryTests` (18 tests) | 18 passed | **`Handler_PlatformPermission_NotPlatformAdmin_Denied_EvenWithTenantRoleGrantAndAuthorizedTenant` FAILS** |
+| `Task22_PermissionScopeSqlServerTests` (11 tests) | 11 passed | **`Sql_TenantRole_HoldingBothScopes_TenantWorks_PlatformDenied` FAILS** |
 
 The gate was restored immediately afterwards; the committed code contains no such bypass.
+
+A third negative control covers the classification drift guard. Removing `Plans.Read` from
+`Permissions.PlatformScope.PermissionCodes` — i.e. simulating a *future* platform permission that is
+added to the catalog but forgotten in the platform list — makes
+**`Scope_Classifier_PlatformModules_AreFullyPlatformScoped` FAIL** (verified: 2 of 6 classifier tests
+failed, then the code was restored and `git diff` confirmed `Permissions.cs` is byte-identical to
+`HEAD`). Without that guard the omission would silently reclassify a platform permission as
+tenant-authorizable, which is the only remaining way the boundary can erode.
 
 ## 5. Test coverage
 
@@ -142,18 +150,56 @@ verifier) over an EF context, deliberately corrupting the permission database:
   resolved-but-unauthorized all deny.
 - Classification totality, disjointness, case-insensitivity, and platform codes absent from the
   catalog still resolving to `Platform`.
+- **Drift guard:** every catalog code in a platform-only module (`Tenants`, `Subscriptions`, `Plans`,
+  `Features`, `AddOnCatalogs`, `Promotions`) must classify as `Platform`, and no platform code may
+  belong to a tenant-partitioned module. This is what prevents a future, forgotten platform
+  permission from becoming tenant-authorizable.
 
-`Task22_PermissionScopeSqlServerTests` proves all five mandatory cases end-to-end against real SQL
-Server through the complete production pipeline:
+`Task22_PermissionScopeSqlServerTests` proves the mandatory cases end-to-end against real SQL
+Server through the complete production pipeline
+(`HttpClient → middleware → authentication → tenant resolution → authorization → controller`):
 
 1. Platform permission granted to a tenant role via DB corruption → **403** (and with *all* platform
    codes granted to the tenant role).
-2. Valid PlatformAdmin → **200**.
-3. Tenant permission with an active membership → **200**; no membership → **403**; suspended
+2. The same corruption applied to the **TenantUser** role (the least-privileged tenant role) →
+   **403**, proving the boundary does not depend on how privileged the tenant role is and cannot
+   grow a "except roles below Admin" shortcut.
+3. Valid PlatformAdmin → **200**.
+4. Tenant permission with an active membership → **200**; no membership → **403**; suspended
    membership → **403**; **cross-tenant** access with a real second tenant → **403**.
-4. Forged PlatformAdmin claim → **403**.
-5. A tenant role holding both scopes: tenant endpoint **200**, platform endpoint **403**, and the
+5. Forged PlatformAdmin claim → **403**.
+6. A tenant role holding both scopes: tenant endpoint **200**, platform endpoint **403**, and the
    published tenant permission list never contains platform codes.
+
+`Task22_PlatformAdminSqlServerTests` additionally proves, over the same real SQL Server pipeline, that
+PlatformAdmin authority is DB-authoritative rather than claim-authoritative: a revoked role, a locked
+account, and a forged claim each yield **403** on a previously valid token, while a live DB role
+yields **200**.
+
+## 5.1 Second source review — is there any other way to reach Success?
+
+Every `context.Succeed(...)` call site in the solution was enumerated. There are five, and none can
+authorize a platform permission from a tenant-derived source:
+
+| Site | Guard |
+| --- | --- |
+| `PermissionPolicyProvider.cs:107` | DB-revalidated `IPlatformAdminVerifier` only |
+| `PermissionPolicyProvider.cs:167` | pre-published tenant list — reached only after `PermissionScopes.Resolve == Tenant` **and** `IsAuthorized` |
+| `PermissionPolicyProvider.cs:209` | tenant DB fallback — same scope + `IsAuthorized` gate, then active-membership → role → `RolePermission` |
+| `FeatureAuthorization.cs:40` | DB-revalidated `IPlatformAdminVerifier` only |
+| `FeatureAuthorization.cs:64` | `FeatureRequirement` (a subscription entitlement, not a permission), gated on `IsAuthorized` |
+
+The scope decision is made at line 97 of `PermissionPolicyProvider.cs`, *before* any grant source is
+consulted, and both the `Platform` and `Unknown` branches `return` without reaching tenant
+authorization. `PlatformAdminGuard` is an independent application-layer boundary that delegates to
+the same verifier and has no tenant fallback. `CurrentTenant.TenantId` returns `string.Empty` until
+`AuthorizeTenant()` runs, so tenant authorization is impossible before authorization. No
+`IAuthorizationService.AuthorizeAsync` call site exists in `src/` that could evaluate a policy
+outside the registered handlers.
+
+**Answer: No. A tenant role can never make the authorization system return Success for a
+Platform-scoped permission.**
+
 
 ## 6. No schema change
 
@@ -175,8 +221,22 @@ issue left out of this behavioral change.
 
 | Check | Result |
 | --- | --- |
-| `dotnet build Centerix.slnx` | 0 errors |
-| Task 22 tests (HTTP + handler + SQL) | 68 passed, 0 failed |
-| Full solution test suite | passed (see commit message for final count) |
+| `dotnet build Centerix.slnx --no-restore` | 0 errors |
+| Task 22 tests (HTTP + handler + SQL) | 71 passed, 0 failed |
+| Full solution test suite | 2082 total / 2081 passed / 0 failed / 1 skipped |
 | EF pending model changes (both contexts) | none |
 | Regression detection (fix removed) | both new suites fail as expected |
+| Drift-guard sensitivity (platform code removed) | guard fails as expected |
+
+**The single skipped test is not a security test and is pre-existing:**
+`Task18_5CreditEconomicOriginSqlServerTests` — *"Complex overlapping subscription scenario -
+covered by Test16 and other tests"* (`[Fact(Skip = ...)]`, line 1172). It belongs to the Task 18.5
+credit-economic-origin suite, is skipped by an explicit attribute in source, and was already skipped
+before this correction. No Task 22 security test is skipped, hidden or conditionally excluded, and no
+test was reported as not executed.
+
+**Infrastructure:** the SQL Server suite ran against the local instance at `Server=.` (confirmed
+reachable, SQL Server 16.00.1000) via the existing `CENTERIX_SQLTEST_CONNECTION` resolution order in
+`SqlServerDatabaseFixture`. No Docker and no Testcontainers were used, and no InMemory or SQLite
+substitution was made for the SQL proofs.
+
