@@ -5,6 +5,7 @@ using Centerix.Infrastructure.Auth;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Centerix.API.Controllers;
 
@@ -54,6 +55,7 @@ public class InvitationsController(ILocalizer localizer, IMediator mediator) : A
     // The controller-wide fallback policy (RequireAuthenticatedUser) must not apply here,
     // otherwise brand-new invited users can never register.
     [AllowAnonymous]
+    [EnableRateLimiting("RegisterPolicy")]
     public async Task<IActionResult> RegisterFromInvitation(RegisterFromInvitationCommand command, CancellationToken cancellationToken)
     {
         var result = await mediator.Send(command, cancellationToken);

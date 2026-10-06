@@ -24,12 +24,52 @@ public record CreateTenantCreditCommand(
 
 public class CreateTenantCreditHandler(
     IAppDbContext dbContext,
+    ICurrentTenant currentTenant,
+    IPlatformAdminGuard platformAdminGuard,
     IAuditWriter auditWriter) : IRequestHandler<CreateTenantCreditCommand, Result<Created>>
 {
     public async Task<Result<Created>> Handle(
         CreateTenantCreditCommand request,
         CancellationToken cancellationToken)
     {
+        // ===== FIN-001 — PLATFORM AUTHORIZATION BOUNDARY =====
+        // Minting a credit creates balance out of nothing. The row is tenant-partitioned (hence
+        // the tenant-scoped TenantCredits.Create permission + active membership enforced by the
+        // pipeline), but the AUTHORITY to create it is platform authority. This is the first
+        // check so that an unauthorized caller learns nothing about which of the rules below it
+        // violated. The verifier re-validates against the identity store; a JWT role claim alone
+        // is never enough.
+        var authorization = await platformAdminGuard.EnsurePlatformAdminAsync(cancellationToken);
+        if (!authorization.IsSuccess)
+            return authorization.Errors!;
+
+        // ===== FIN-001 — SOURCE INTEGRITY =====
+        var sourceType = (CreditSourceType)request.SourceType;
+
+        if (!Enum.IsDefined(sourceType))
+            return TenantCreditErrors.InvalidSourceType;
+
+        // Overpayment / SubscriptionChange carry customer-paid economic value and are minted only
+        // by their own command handlers. Creating one by hand would forge paid value.
+        if (sourceType is CreditSourceType.Overpayment or CreditSourceType.SubscriptionChange)
+            return TenantCreditErrors.SystemSourceNotCreatable;
+
+        // Discretionary sources have no source entity: the caller must not fabricate a SourceId.
+        if (request.SourceId is not null)
+            return TenantCreditErrors.SourceIdNotAllowed;
+
+        // ===== FIN-001 — IDEMPOTENCY =====
+        // Required for every API-created credit. This is what makes concurrent or retried minting
+        // idempotent in addition to the structural unique indexes.
+        if (string.IsNullOrWhiteSpace(request.IdempotencyKey))
+            return TenantCreditErrors.IdempotencyKeyRequired;
+
+        // ===== FIN-001 — BOUNDS =====
+        // Amount is decimal(10,2) in the persistence layer; reject above the representable
+        // maximum instead of surfacing a database overflow as HTTP 500.
+        if (request.Amount > TenantCredit.MaxCreatableAmount)
+            return TenantCreditErrors.AmountExceedsMaximum;
+
         // Task 19 — IDEMPOTENCY CHECK (key-based, BEFORE insert).
         // The existing UX_TenantCredits_TenantId_SourceType_SourceId filtered unique index
         // is a structural guard (one credit per source). A client-supplied IdempotencyKey
@@ -73,6 +113,12 @@ public class CreateTenantCreditHandler(
         }
 
         dbContext.TenantCredits.Add(creditResult.Value);
+
+        // Stamp the AUTHORIZED tenant at the handler layer (same contract as
+        // ApplyCreditToInvoiceHandler below). The production SaveChanges interceptor does this
+        // too, but relying on it alone would leave the idempotency lookup below unable to see the
+        // row it just wrote whenever the interceptor is not registered.
+        dbContext.StampAddedTenantIds(currentTenant.TenantId);
 
         try
         {

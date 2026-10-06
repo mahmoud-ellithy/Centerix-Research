@@ -101,6 +101,38 @@ public static class DependencyInjection
                         QueueLimit = 0
                     }));
 
+            // Refresh is anonymous and CPU/DB expensive (hashing, a serializable transaction and a
+            // token mint). It is also the endpoint an attacker who has stolen a refresh token would
+            // hammer. A legitimate client refreshes a handful of times a minute; this ceiling is far
+            // above that while still bounding abuse from a single source.
+            options.AddPolicy("RefreshPolicy", httpContext =>
+                System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter(
+                    partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    factory: _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions
+                    {
+                        PermitLimit = 30,
+                        Window = TimeSpan.FromMinutes(1),
+                        SegmentsPerWindow = 4,
+                        QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
+                        QueueLimit = 0
+                    }));
+
+            // Invitation registration is anonymous: the token in the body is the only capability,
+            // so an unauthenticated caller can be pointed at it forever. A generous per-source
+            // ceiling still caps token guessing and account-bombing without affecting real users
+            // (registration is a one-shot flow).
+            options.AddPolicy("RegisterPolicy", httpContext =>
+                System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter(
+                    partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    factory: _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions
+                    {
+                        PermitLimit = 60,
+                        Window = TimeSpan.FromMinutes(1),
+                        SegmentsPerWindow = 4,
+                        QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
+                        QueueLimit = 0
+                    }));
+
             options.OnRejected = async (context, cancellationToken) =>
             {
                 context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;

@@ -51,7 +51,14 @@ public class TenantMembership : Entity
             return Error.Validation("TenantMembership.TenantId_Required", "Tenant ID is required");
 
         if (string.IsNullOrWhiteSpace(roleName))
-            roleName = "TenantUser";
+            roleName = TenantRoleNames.TenantUser;
+
+        // SEC-001 (domain invariant): a TenantMembership is a TENANT-scoped assertion. Binding a
+        // platform-authority role to it would make the tenant permission resolver publish every
+        // permission that role holds as a tenant-derived grant. Platform authority is expressed
+        // through the Identity role + IPlatformAdminVerifier, never through a membership row.
+        if (TenantRoleScopes.IsPlatformScoped(roleName))
+            return TenantMembershipErrors.PlatformRoleNotAllowed;
 
         return new TenantMembership(userId, tenantId, roleName, status);
     }

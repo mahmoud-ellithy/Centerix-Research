@@ -56,6 +56,17 @@ public class TenantGuardMiddleware(RequestDelegate next)
             return;
         }
 
+        // Session-scoped endpoints (AUTH-001): logout only revokes refresh-token rows owned by
+        // the AUTHENTICATED USER (revoke-by-hash, or every token that user holds across tenants).
+        // They touch no tenant-partitioned data, so demanding a resolved tenant plus membership
+        // would make logout impossible for a caller with no tenant header (e.g. signing out after
+        // their last membership was revoked) while buying no isolation.
+        if (IsTenantIndependentSessionEndpoint(context))
+        {
+            await next(context);
+            return;
+        }
+
         if (!currentTenant.IsResolved)
         {
             await WriteForbidden(context,
@@ -144,6 +155,13 @@ public class TenantGuardMiddleware(RequestDelegate next)
         if (membership is null)
             return [];
 
+        // SEC-001 (defense in depth): a membership row written BEFORE the domain invariant existed
+        // could still carry a platform-authority role name. Resolving permissions through it would
+        // publish the whole catalog as a tenant-derived grant, so such a row publishes NOTHING.
+        // Platform authority is only ever honoured by IPlatformAdminVerifier, in the platform branch.
+        if (TenantRoleScopes.IsPlatformScoped(membership.RoleName))
+            return [];
+
         // Find the role by name via Identity's Roles table
         // AppDbContext inherits IdentityDbContext which has the Roles DbSet
         var identityContext = (Microsoft.AspNetCore.Identity.EntityFrameworkCore.IdentityDbContext)dbContext;
@@ -198,6 +216,17 @@ public class TenantGuardMiddleware(RequestDelegate next)
 
         return PermissionScopes.IsPlatformScoped(permission);
     }
+
+    /// <summary>
+    /// Matches POST /api/auth/logout and POST /api/auth/logout-all (compared as whole path
+    /// segments, so "/api/auth/logoutxyz" is NOT matched). Both are authenticated session
+    /// endpoints that only revoke refresh tokens belonging to the caller; they never read or
+    /// write tenant-partitioned rows.
+    /// </summary>
+    private static bool IsTenantIndependentSessionEndpoint(HttpContext context)
+        => HttpMethods.IsPost(context.Request.Method)
+           && (context.Request.Path.StartsWithSegments("/api/auth/logout", StringComparison.OrdinalIgnoreCase)
+               || context.Request.Path.StartsWithSegments("/api/auth/logout-all", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// Matches exactly the two invitation consumption endpoints:

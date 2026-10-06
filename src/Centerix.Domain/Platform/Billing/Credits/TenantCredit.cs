@@ -6,6 +6,14 @@ using Centerix.Domain.Platform.Billing.Credits.Enums;
 
 public class TenantCredit : AuditableEntity<Guid>
 {
+    /// <summary>
+    /// FIN-001: the largest value the persistence layer can hold. <c>Amount</c>,
+    /// <c>RemainingAmount</c> and <c>TransferredPaidAmount</c> are all mapped to
+    /// <c>decimal(10,2)</c> (see <c>TenantCreditConfiguration</c>), so anything above this bound
+    /// is a rejected request rather than a database truncation/overflow at insert time.
+    /// </summary>
+    public const decimal MaxCreatableAmount = 99_999_999.99m;
+
     public decimal Amount { get; private set; }
     public decimal RemainingAmount { get; private set; }
     public CreditSourceType SourceType { get; private set; }

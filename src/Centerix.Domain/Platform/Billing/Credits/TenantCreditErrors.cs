@@ -33,4 +33,42 @@ public static class TenantCreditErrors
         Error.Conflict("CreditApplication.IdempotencyKeyConflict",
             "A credit application with this idempotency key already exists with different parameters. " +
             "Reuse the same key with identical parameters for idempotent retry, or use a new key for a new operation.");
+
+    // ===== FIN-001 — discretionary credit-mint hardening =====
+
+    /// <summary>
+    /// Overpayment and SubscriptionChange credits are SYSTEM-generated, produced by their own
+    /// command handlers (<c>AllocatePaymentCommand</c>, <c>ChangeSubscriptionPlanCommand</c>)
+    /// with a real <c>SourceId</c> and, for SubscriptionChange, an immutable economic-origin
+    /// lineage. Minting them by hand would forge customer-paid value, so no caller may create
+    /// them through the discretionary endpoint.
+    /// </summary>
+    public static Error SystemSourceNotCreatable =>
+        Error.Validation(
+            "TenantCredit.SystemSourceNotCreatable",
+            "Overpayment and SubscriptionChange credits are created by the payment and plan-change flows and cannot be created manually.");
+
+    /// <summary>
+    /// Discretionary sources carry no source entity, so their <c>SourceId</c> must be null. A
+    /// client-supplied id would fabricate lineage and could collide with
+    /// UX_TenantCredits_TenantId_SourceType_SourceId.
+    /// </summary>
+    public static Error SourceIdNotAllowed =>
+        Error.Validation(
+            "TenantCredit.SourceIdNotAllowed",
+            "SourceId is only produced by the system for system-generated credits and cannot be supplied for a discretionary credit.");
+
+    /// <summary>
+    /// Required for every API-created credit: it is the authoritative logical retry token that
+    /// makes concurrent/duplicate minting idempotent on top of the structural unique indexes.
+    /// </summary>
+    public static Error IdempotencyKeyRequired =>
+        Error.Validation(
+            "TenantCredit.IdempotencyKeyRequired",
+            "IdempotencyKey is required when creating a credit.");
+
+    public static Error AmountExceedsMaximum =>
+        Error.Validation(
+            "TenantCredit.AmountExceedsMaximum",
+            $"Credit amount cannot exceed {TenantCredit.MaxCreatableAmount:0.00}.");
 }

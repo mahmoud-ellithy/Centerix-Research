@@ -22,6 +22,19 @@ public static class RefreshTokenErrors
     public static Error Revoked =>
         Error.Unauthorized("RefreshToken.Revoked", "Refresh token has been revoked");
 
+    /// <summary>
+    /// AUTH-003: the account was locked out after this refresh token was minted. Login re-checks
+    /// lockout on every attempt; a refresh must too, otherwise a locked-out account keeps minting
+    /// fresh access tokens until the refresh token itself expires.
+    /// </summary>
+    public static Error AccountLocked =>
+        Error.Unauthorized("RefreshToken.AccountLocked", "The account has been locked out");
+
     public static Error AlreadyRevoked =>
         Error.Validation("RefreshToken.AlreadyRevoked", "Refresh token is already revoked");
+
+    public static Error RotationConflict =>
+        Error.Conflict(
+            "RefreshToken.RotationConflict",
+            "This refresh request conflicted with a concurrent request. Please retry.");
 }

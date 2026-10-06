@@ -39,4 +39,15 @@ public static class TenantMembershipErrors
 
     public static Error RoleNotFound =>
         Error.Validation("TenantInvitation.RoleNotFound", "The specified role does not exist");
+
+    /// <summary>
+    /// SEC-001: a platform-authority role (PlatformAdmin) can never be bound to a tenant
+    /// membership or invitation. Such a row would be readable by the tenant permission resolver
+    /// and would publish every permission that role holds - including platform-scoped codes -
+    /// as a tenant-derived grant.
+    /// </summary>
+    public static Error PlatformRoleNotAllowed =>
+        Error.Forbidden(
+            "TenantMembership.PlatformRoleNotAllowed",
+            "Platform roles cannot be granted a tenant membership or invitation");
 }

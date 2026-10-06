@@ -1,4 +1,5 @@
 using Centerix.Application.Common.Interfaces;
+using Centerix.Domain.Platform.Tenants;
 using Centerix.Domain.Platform.Tenants.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -195,6 +196,21 @@ public class PermissionAuthorizationHandler(
 
             if (membership is null)
                 return;
+
+            // SEC-001 (defense in depth): never resolve a tenant permission through a
+            // platform-authority role name stored on a membership row. Such a row is only
+            // possible if it predates the domain invariant; the membership then contributes NO
+            // permissions instead of the platform role's full permission set.
+            if (TenantRoleScopes.IsPlatformScoped(membership.RoleName))
+            {
+                _logger.LogWarning(
+                    "Denied permission '{Permission}' for user {UserId}: tenant membership carries " +
+                    "platform role '{RoleName}' (SEC-001); no tenant permission may be resolved from it.",
+                    requirement.Permission,
+                    userId,
+                    membership.RoleName);
+                return;
+            }
 
             var permissionId = await dbContext.Permissions
                 .AsNoTracking()

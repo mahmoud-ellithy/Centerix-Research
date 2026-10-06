@@ -66,6 +66,7 @@
   "Auth:AccountLocked": "الحساب مقفل بسبب محاولات تسجيل الدخول الفاشلة المتكررة.",
   "Auth:AccountLockedDueToFailedAttempts": "تم قفل الحساب بسبب محاولات تسجيل الدخول الفاشلة المتكررة. يرجى المحاولة لاحقًا.",
   "Auth:InvalidRefreshToken": "رمز التحديث غير صالح أو منتهي الصلاحية.",
+  "Auth:RefreshConflict": "تعارض طلب التحديث مع طلب آخر متزامن. يرجى المحاولة مرة أخرى.",
   "RefreshToken.UserId_Required": "معرف المستخدم مطلوب",
   "RefreshToken.TokenHash_Required": "هاش الرمز مطلوب",
   "RefreshToken.Expiry_InPast": "يجب أن يكون تاريخ الانتهاء في المستقبل",

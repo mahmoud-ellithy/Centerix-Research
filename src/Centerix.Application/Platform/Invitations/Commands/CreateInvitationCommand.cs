@@ -60,7 +60,14 @@ public class CreateInvitationHandler(
         if (!currentUser.TenantPermissions.Contains(PermissionConstants.Invitations.Create))
             return TenantMembershipErrors.UnauthorizedToInvite;
 
-        // 3. Validate the target role exists
+        // 3. SEC-001: reject a platform-authority target role at the application boundary with an
+        // explicit 403 before any other work happens. Platform authority is never delegated to a
+        // tenant membership, so it can never be granted through an invitation either. (The same
+        // rule is re-enforced as a domain invariant inside TenantInvitation.Create.)
+        if (TenantRoleScopes.IsPlatformScoped(request.RoleName))
+            return TenantMembershipErrors.PlatformRoleNotAllowed;
+
+        // 4. Validate the target role exists
         var roleExists = await roleService.ExistsAsync(request.RoleName);
         if (!roleExists)
             return TenantMembershipErrors.RoleNotFound;

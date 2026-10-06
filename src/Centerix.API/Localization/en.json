@@ -66,6 +66,7 @@
   "Auth:AccountLocked": "Account is locked due to too many failed login attempts.",
   "Auth:AccountLockedDueToFailedAttempts": "Account has been locked due to too many failed login attempts. Please try again later.",
   "Auth:InvalidRefreshToken": "Refresh token is invalid or has expired.",
+  "Auth:RefreshConflict": "This refresh request conflicted with a concurrent request. Please try again.",
   "RefreshToken.UserId_Required": "User ID is required",
   "RefreshToken.TokenHash_Required": "Token hash is required",
   "RefreshToken.Expiry_InPast": "Expiry must be in the future",

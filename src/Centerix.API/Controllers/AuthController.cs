@@ -1,4 +1,5 @@
 using Centerix.Application.Common.Interfaces;
+using Centerix.Domain.Authentication;
 using Centerix.Infrastructure.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -24,6 +25,14 @@ public class AuthController(
         var user = await userManager.FindByEmailAsync(request.Email);
         if (user == null)
         {
+            // Timing / user-enumeration hardening. A miss used to answer 401 immediately while a
+            // hit paid for a PBKDF2 verification first - a gap of tens of milliseconds, which is
+            // more than enough to enumerate registered addresses from outside. Run the SAME
+            // password-hashing work (same hasher, same options) on the miss path so both branches
+            // cost the same, then return the identical response.
+            _ = userManager.PasswordHasher.HashPassword(
+                new IdentityUser(), request.Password ?? string.Empty);
+
             // Don't reveal that user doesn't exist
             return Unauthorized(new
             {
@@ -92,6 +101,7 @@ public class AuthController(
 
     [HttpPost("refresh")]
     [AllowAnonymous]
+    [EnableRateLimiting("RefreshPolicy")]
     public async Task<IActionResult> Refresh(RefreshRequest request)
     {
         var result = await refreshTokenService.RotateAsync(
@@ -101,6 +111,18 @@ public class AuthController(
 
         if (!result.IsSuccess)
         {
+            // A rotation conflict means the serializable transaction was rolled back, so the
+            // PRESENTED token is still valid. Collapsing that into 401 would tell the client to
+            // discard a live credential and force a re-login for what is a transient conflict;
+            // 409 is the honest signal - retry the same token.
+            var isConflict = result.Errors?.Any(
+                e => e.Code == RefreshTokenErrors.RotationConflict.Code) ?? false;
+
+            if (isConflict)
+            {
+                return Conflict(new { error = localizer.Translate("Auth:RefreshConflict") });
+            }
+
             return Unauthorized(new { error = localizer.Translate("Auth:InvalidRefreshToken") });
         }
 

@@ -74,6 +74,13 @@ public class TenantInvitation : Entity
         if (string.IsNullOrWhiteSpace(roleName))
             return Error.Validation("TenantInvitation.RoleName_Required", "Role name is required");
 
+        // SEC-001 (domain invariant): an invitation is the half-finished side of a tenant
+        // membership, so it carries the same restriction. Rejecting here means the invitation can
+        // never be minted with a platform-authority role, even if a future write path bypasses
+        // the application handler's own check.
+        if (TenantRoleScopes.IsPlatformScoped(roleName))
+            return TenantMembershipErrors.PlatformRoleNotAllowed;
+
         if (string.IsNullOrWhiteSpace(tokenHash))
             return Error.Validation("TenantInvitation.TokenHash_Required", "Token hash is required");
 

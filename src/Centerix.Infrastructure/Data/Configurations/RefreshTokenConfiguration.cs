@@ -27,10 +27,6 @@ public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
         builder.Property(rt => rt.IPAddress)
             .HasMaxLength(45);
 
-        builder.Property(rt => rt.TenantId)
-            .HasMaxLength(450)
-            .IsRequired();
-
         builder.Property(rt => rt.CreatedAtUtc)
             .HasColumnName("CreatedAt");
 

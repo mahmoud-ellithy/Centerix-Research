@@ -1,10 +1,13 @@
+using System.Net;
 using System.Text;
 using Centerix.Domain.Platform.Authorization;
 using Centerix.Infrastructure.Auth;
 using Centerix.Infrastructure.Data;
 using Centerix.Infrastructure.Tenancy;
 using Finbuckle.MultiTenant.Abstractions;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -77,6 +80,13 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton(EmailSender);
             services.AddSingleton<Centerix.Application.Common.Interfaces.IEmailSender>(
                 sp => sp.GetRequiredService<CapturingEmailSender>());
+
+            // The TestServer never assigns Connection.RemoteIpAddress, so every request lands in the
+            // SAME "unknown" rate-limit partition (5 requests/minute for LoginPolicy). Real clients
+            // are partitioned by IP. This startup filter lets a test pin a per-test client IP with
+            // the X-Test-Remote-IP header so rate-limit assertions are deterministic and do not
+            // consume the shared partition. It runs outermost, before UseRateLimiter.
+            services.AddSingleton<IStartupFilter, TestRemoteIpStartupFilter>();
         });
     }
 
@@ -255,4 +265,33 @@ public sealed class TestListLoggerProvider(List<string> sink) : ILoggerProvider
             if (exception is not null) sink.Add(exception.ToString());
         }
     }
+}
+
+/// <summary>
+/// Wraps the test pipeline so <c>X-Test-Remote-IP</c> populates
+/// <see cref="Microsoft.AspNetCore.Http.ConnectionInfo.RemoteIpAddress"/>. TestServer leaves that
+/// property null, which would collapse every request into a single rate-limit partition keyed on
+/// "unknown"; tests can now give each scenario its own client IP. Test-host only - never registered
+/// in production.
+/// </summary>
+public sealed class TestRemoteIpStartupFilter : IStartupFilter
+{
+    public const string HeaderName = "X-Test-Remote-IP";
+
+    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next)
+        => app =>
+        {
+            app.Use(async (context, awaitNext) =>
+            {
+                var header = context.Request.Headers[HeaderName].FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(header) && IPAddress.TryParse(header, out var address))
+                {
+                    context.Connection.RemoteIpAddress = address;
+                }
+
+                await awaitNext();
+            });
+
+            next(app);
+        };
 }

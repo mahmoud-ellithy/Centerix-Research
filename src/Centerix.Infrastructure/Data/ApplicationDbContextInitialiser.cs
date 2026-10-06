@@ -199,14 +199,29 @@ public class ApplicationDbContextInitialiser(
         // C1 fix: record the tenant's admin user as an ACTIVE member of this tenant so the
         // TenantGuardMiddleware membership check authorizes legitimate owners. Idempotent:
         // skips when a membership already exists (e.g. migration backfill or re-seeding).
+        //
+        // SEC-001: the Identity role above and the TENANT MEMBERSHIP role are different axes.
+        // The root tenant's administrator still holds the Identity PlatformAdmin role (that is
+        // what satisfies platform-scoped endpoints via IPlatformAdminVerifier), but a
+        // TenantMembership row is a tenant-scoped assertion and must carry a tenant role -
+        // otherwise the tenant permission resolver would publish the platform role's entire
+        // permission set as a tenant-derived grant.
         if (!await _context.TenantMemberships.AnyAsync(
                 m => m.UserId == adminUser.Id && m.TenantId == tenantInfo.Id))
         {
-            var membership = TenantMembership.Create(adminUser.Id, tenantInfo.Id, adminRole, TenantMembershipStatus.Active);
+            var membership = TenantMembership.Create(
+                adminUser.Id, tenantInfo.Id, RoleConstants.TenantAdmin, TenantMembershipStatus.Active);
             if (membership.IsSuccess)
             {
                 await _context.TenantMemberships.AddAsync(membership.Value);
                 await _context.SaveChangesAsync();
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Could not seed tenant membership for {Email} in {TenantId}: {Errors}",
+                    tenantInfo.Email, tenantInfo.Id,
+                    string.Join(", ", membership.Errors!.Select(e => e.Code)));
             }
         }
     }

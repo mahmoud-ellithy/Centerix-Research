@@ -7,8 +7,16 @@ using Centerix.Domain.Common.Results;
 /// Issued refresh token for an <c>IdentityUser</c>. Rotated on every use: a refresh
 /// consumes the current token and mints a new pair (access + refresh). Revocation
 /// can be global (revoke all tokens for a user) or per-token.
+/// <para>
+/// AUTH-001: refresh tokens are authentication artifacts, not tenant-owned rows. They are
+/// created before any tenant context exists (anonymous login), are resolved by SHA-256 hash
+/// uniqueness plus the owning <see cref="UserId"/>, and are revoked per user - never per
+/// tenant. Deriving from <see cref="GlobalAuditableEntity{TId}"/> keeps them outside the
+/// global tenant query filter and the <c>TenantInterceptor</c> stamping path, so issuance
+/// can no longer fail with a NOT NULL violation when no tenant is resolved.
+/// </para>
 /// </summary>
-public class RefreshToken : AuditableEntity<Guid>, IHasTenantId
+public class RefreshToken : GlobalAuditableEntity<Guid>
 {
     public string UserId { get; private set; } = default!;
     public string TokenHash { get; private set; } = default!;

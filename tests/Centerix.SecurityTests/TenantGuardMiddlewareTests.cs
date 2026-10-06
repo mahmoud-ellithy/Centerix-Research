@@ -40,11 +40,12 @@ public class TenantGuardMiddlewareTests : IDisposable
         string path = "/api/students",
         string? tenantHeader = null,
         bool isAuthenticated = true,
-        string? userId = "user-1")
+        string? userId = "user-1",
+        string method = "GET")
     {
         var context = new DefaultHttpContext();
         context.Request.Path = path;
-        context.Request.Method = "GET";
+        context.Request.Method = method;
         context.RequestServices = _serviceProvider;
 
         if (tenantHeader != null)
@@ -179,6 +180,53 @@ public class TenantGuardMiddlewareTests : IDisposable
 
         currentTenant.Received(1).AuthorizeTenant();
         await _next.Received(1)(Arg.Any<HttpContext>());
+    }
+
+    // ============================================================
+    // TEST: Session endpoints are tenant-independent (AUTH-001)
+    // ============================================================
+
+    [Theory]
+    [InlineData("/api/auth/logout")]
+    [InlineData("/api/auth/logout-all")]
+    public async Task InvokeAsync_SessionEndpoint_NoResolvedTenant_CallsNext(string path)
+    {
+        // Logout only revokes refresh-token rows owned by the caller, so it must work for a
+        // principal that has NO resolved tenant (e.g. signing out after the last membership
+        // was revoked). A tenant-scoped endpoint in the same situation still gets 403.
+        var (middleware, context, currentTenant) = CreateSut(path, tenantHeader: null, method: "POST");
+        currentTenant.IsResolved.Returns(false);
+
+        await middleware.InvokeAsync(context, currentTenant, await GetDbContextAsync());
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        await _next.Received(1)(Arg.Any<HttpContext>());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_TenantScopedEndpoint_StillReturns403_WhenTenantNotResolved()
+    {
+        var (middleware, context, currentTenant) = CreateSut("/api/students", tenantHeader: null, method: "POST");
+        currentTenant.IsResolved.Returns(false);
+
+        await middleware.InvokeAsync(context, currentTenant, await GetDbContextAsync());
+
+        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
+        await _next.DidNotReceive()(Arg.Any<HttpContext>());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_LogoutLookalikePath_IsNotATenantIndependentSessionEndpoint()
+    {
+        // Path-segment matching only: a prefix that merely STARTS WITH the logout path must not
+        // inherit the exception.
+        var (middleware, context, currentTenant) = CreateSut("/api/auth/logoutxyz", tenantHeader: null, method: "POST");
+        currentTenant.IsResolved.Returns(false);
+
+        await middleware.InvokeAsync(context, currentTenant, await GetDbContextAsync());
+
+        Assert.Equal(StatusCodes.Status403Forbidden, context.Response.StatusCode);
+        await _next.DidNotReceive()(Arg.Any<HttpContext>());
     }
 
     // ============================================================
