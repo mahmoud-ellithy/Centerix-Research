@@ -67,8 +67,17 @@ public class RefreshTokenService(
     /// </para>
     /// <para>
     /// Serializable isolation plus an UPDLOCK/HOLDLOCK read of the presented row makes the second
-    /// request wait for the first to commit, then re-read the committed state, see the row is
-    /// already revoked and take the reuse path — which revokes the entire chain (HTTP 401).
+    /// request wait for the first to commit, then re-read the committed state and see the row is
+    /// already revoked. Exactly ONE request can therefore ever take the mint path.
+    /// </para>
+    /// <para>
+    /// A request that loses the race is NOT reuse: it presented a token it already legitimately
+    /// held, it just arrived a few milliseconds behind the winner. Revoking the whole chain for it
+    /// would let any loser log the winner out of every session (a two-tab browser, or a mobile
+    /// client retrying after a timeout, would be destroyed by its own retry). Such a loser is
+    /// answered with <see cref="RefreshTokenErrors.RotationConflict"/> (HTTP 409) and NOTHING is
+    /// revoked. Only a presentation outside that bounded window - or one whose successor chain has
+    /// already moved on - is confirmed reuse and takes the family-revocation path.
     /// </para>
     /// </summary>
     public async Task<Result<TokenPair>> RotateAsync(
@@ -82,13 +91,19 @@ public class RefreshTokenService(
 
         var hash = HashToken(refreshToken);
 
+        // Captured BEFORE the transaction opens, so a request that is about to block on the
+        // winner's lock is still measured by when it ARRIVED rather than by when it finally got
+        // to run. This is what lets a slow-but-legitimate loser stay inside the race window while
+        // a genuinely later replay stays outside it.
+        var presentedAtUtc = DateTime.UtcNow;
+
         await using var transaction = dbContext.IsRelational
             ? await dbContext.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
             : null;
 
         try
         {
-            var result = await TryRotateAsync(hash, deviceInfo, ipAddress, cancellationToken);
+            var result = await TryRotateAsync(hash, deviceInfo, ipAddress, presentedAtUtc, cancellationToken);
             if (transaction is not null)
                 await transaction.CommitAsync(cancellationToken);
             return result;
@@ -106,6 +121,7 @@ public class RefreshTokenService(
         string hash,
         string? deviceInfo,
         string? ipAddress,
+        DateTime presentedAtUtc,
         CancellationToken cancellationToken)
     {
         // UPDLOCK + HOLDLOCK (SQL Server): hold an update lock on the presented row for the
@@ -130,10 +146,21 @@ public class RefreshTokenService(
         if (stored is null)
             return RefreshTokenErrors.NotFound;
 
-        // Reuse detection: a token that was already revoked but is being presented again
-        // is a replay attempt. Revoke the entire chain for this user.
         if (stored.IsRevoked)
         {
+            // Race loser vs. genuine replay. Both present a token that is already revoked; only
+            // the database state plus the bounded window below can tell them apart.
+            if (await IsLostRotationRaceAsync(stored, presentedAtUtc, cancellationToken))
+            {
+                logger.LogInformation(
+                    "Refresh token already rotated by a concurrent request for user {UserId}; " +
+                    "answering conflict and leaving the winning successor untouched.",
+                    stored.UserId);
+                return RefreshTokenErrors.RotationConflict;
+            }
+
+            // Reuse detection: a token that was already rotated (or revoked) and is presented
+            // again outside the race window is a replay attempt. Revoke the entire chain.
             logger.LogWarning("Reuse of revoked refresh token detected for user {UserId}. Revoking all tokens.", stored.UserId);
             await RevokeAllAsync(stored.UserId, cancellationToken);
             return RefreshTokenErrors.Revoked;
@@ -200,7 +227,59 @@ public class RefreshTokenService(
         return new TokenPair(accessToken, newToken, accessExpiresAt, newExpiresAt);
     }
 
-    public async Task<Result<Updated>> RevokeAsync(string refreshToken, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Decides whether an already-revoked presentation is a LOSER OF A CONCURRENT ROTATION rather
+    /// than a genuine replay of a consumed token.
+    /// <para>
+    /// All three conditions are required, and every one of them is read from committed database
+    /// state inside the same serializable transaction that holds the UPDLOCK on the presented row,
+    /// so the decision is made by SQL Server's view of the world and is identical on every
+    /// application instance:
+    /// </para>
+    /// <list type="number">
+    ///   <item><description>the token went through ROTATION (it carries a successor link). A plain
+    ///   revoke - logout, logout-all, account lockout - has no successor and always stays on the
+    ///   reuse path;</description></item>
+    ///   <item><description>the successor is STILL ACTIVE. If the chain has already moved past the
+    ///   successor, the presented token is an old link of a completed chain, not a request racing
+    ///   that rotation;</description></item>
+    ///   <item><description>the presentation ARRIVED inside the bounded, server-controlled grace
+    ///   window measured from the winner's commit. Outside it the presentation is a later replay,
+    ///   no matter what the successor looks like.</description></item>
+    /// </list>
+    /// <para>
+    /// The window is deliberately narrow and NEVER mints credentials: a loser (or an attacker who
+    /// replays inside the window) only ever receives HTTP 409 with an empty body, so the grace can
+    /// never become an authentication path. What it buys is that a legitimate race - two tabs, or a
+    /// retry after a timeout - can no longer destroy the successor the winner just minted.
+    /// </para>
+    /// </summary>
+    private async Task<bool> IsLostRotationRaceAsync(
+        RefreshToken stored,
+        DateTime presentedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(stored.ReplacedByTokenHash))
+            return false;
+
+        if (stored.RevokedAtUtc is not { } revokedAtUtc)
+            return false;
+
+        if (presentedAtUtc - revokedAtUtc > RotationGrace)
+            return false;
+
+        var successor = await dbContext.RefreshTokens
+            .AsNoTracking()
+            .FirstOrDefaultAsync(rt => rt.TokenHash == stored.ReplacedByTokenHash, cancellationToken);
+
+        return successor is { IsActive: true };
+    }
+
+    private TimeSpan RotationGrace =>
+        TimeSpan.FromSeconds(Math.Max(0, _jwtSettings.RefreshRotationGraceSeconds));
+
+    public async Task<Result<Updated>> RevokeAsync(
+        string refreshToken, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(refreshToken))
             return RefreshTokenErrors.NotFound;

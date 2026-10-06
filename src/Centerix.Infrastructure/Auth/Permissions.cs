@@ -243,6 +243,17 @@ public static class Permissions
         public const string Apply = "TenantCredits.Apply";
     }
 
+    /// <summary>
+    /// FIN-001 second key. Minting credit balance is authorized by the PlatformAdmin verifier ONLY;
+    /// it can never be satisfied by a tenant membership, a tenant role or a RolePermission row.
+    /// Deliberately a separate module from <see cref="TenantCredits"/> so no tooling can ever pair
+    /// it with the tenant-partitioned credit codes.
+    /// </summary>
+    public static class PlatformCredits
+    {
+        public const string Mint = "PlatformCredits.Mint";
+    }
+
     public static class Invitations
     {
         public const string Create = "Invitations.Create";
@@ -429,6 +440,11 @@ public static class Permissions
             // Promotion / Offer Engine (platform-scoped commercial rules)
             Promotions.View, Promotions.Create, Promotions.Update,
             Promotions.Activate, Promotions.Calculate,
+
+            // FIN-001: minting credit balance requires the PlatformAdmin decision. This code is a
+            // catalog row with an explicit Platform scope, so it appears here too (parity is
+            // enforced by E_ProductionCatalog_PlatformEntriesAlignWithPlatformList).
+            PlatformCredits.Mint,
         };
 
         /// <summary>

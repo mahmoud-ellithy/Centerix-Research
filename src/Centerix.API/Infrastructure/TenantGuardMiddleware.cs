@@ -200,6 +200,14 @@ public class TenantGuardMiddleware(RequestDelegate next)
     /// exclusively through the authoritative PlatformAdmin decision and denies it to every
     /// tenant-derived source. Both components resolve the scope through the same
     /// <see cref="PermissionScopes"/> classifier, so the two layers cannot disagree.
+    /// <para>
+    /// The bypass requires EVERY <see cref="HasPermissionAttribute"/> on the endpoint to be
+    /// platform-scoped — not merely the first one. An endpoint carrying a mixed pair (a tenant key
+    /// plus a platform key, e.g. <c>TenantCredits.Create</c> + <c>PlatformCredits.Mint</c>) must
+    /// still run behind an authorized tenant context, because its tenant key decides WHICH tenant
+    /// it may act in. An empty set is not platform-scoped, so an endpoint with no permission
+    /// attribute is never bypassed here.
+    /// </para>
     /// </summary>
     private static bool IsPlatformScopedRequest(HttpContext context)
     {
@@ -209,12 +217,12 @@ public class TenantGuardMiddleware(RequestDelegate next)
             return false;
         }
 
-        var permission = endpoint.Metadata
+        var permissions = endpoint.Metadata
             .GetOrderedMetadata<HasPermissionAttribute>()
-            .FirstOrDefault()?
-            .Permission;
+            .Select(a => a.Permission)
+            .ToList();
 
-        return PermissionScopes.IsPlatformScoped(permission);
+        return permissions.Count > 0 && permissions.All(PermissionScopes.IsPlatformScoped);
     }
 
     /// <summary>

@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Centerix.API.Controllers;
 using Centerix.Domain.Platform.Billing.Credits;
 using Centerix.Domain.Platform.Billing.Credits.Enums;
 using Centerix.Domain.Platform.Tenants;
@@ -56,6 +57,36 @@ public class FIN001_TenantCreditAuthorizationTests : IClassFixture<TestWebApplic
         // TenantAdmin membership can reach the endpoint), withheld from TenantUser.
         Assert.Contains(Permissions.TenantCredits.Create, Permissions.GetTenantAdminPermissions());
         Assert.DoesNotContain(Permissions.TenantCredits.Create, Permissions.GetTenantUserPermissions());
+    }
+
+    /// <summary>
+    /// Defense in depth: the two keys are declared on the ENDPOINT, so ASP.NET's own policy
+    /// combination denies a caller who holds only the tenant key. The handler's
+    /// <c>IPlatformAdminGuard</c> is a second, independent check — not the only one. Removing it
+    /// must not turn <c>POST /api/tenantcredits</c> into a tenant-permission-only operation.
+    /// </summary>
+    [Fact]
+    public void CreateTenantCredit_EndpointDeclaresBothAuthorizationKeys()
+    {
+        var attributes = typeof(TenantCreditsController)
+            .GetMethod(nameof(TenantCreditsController.CreateTenantCredit))!
+            .GetCustomAttributes(typeof(HasPermissionAttribute), inherit: false)
+            .Cast<HasPermissionAttribute>()
+            .Select(a => a.Permission)
+            .ToList();
+
+        Assert.Contains(Permissions.TenantCredits.Create, attributes);
+        Assert.Contains(Permissions.PlatformCredits.Mint, attributes);
+
+        // The two keys must resolve to OPPOSITE scopes; that opposition is what makes the
+        // combination a genuine two-key operation.
+        Assert.Equal(PermissionScope.Tenant, PermissionScopes.Resolve(Permissions.TenantCredits.Create));
+        Assert.Equal(PermissionScope.Platform, PermissionScopes.Resolve(Permissions.PlatformCredits.Mint));
+
+        // The platform key must never become tenant-authorizable: it is absent from every
+        // tenant-role matrix, so no membership/role/RolePermission row can ever satisfy it.
+        Assert.DoesNotContain(Permissions.PlatformCredits.Mint, Permissions.GetTenantAdminPermissions());
+        Assert.DoesNotContain(Permissions.PlatformCredits.Mint, Permissions.GetTenantUserPermissions());
     }
 
     [Fact]

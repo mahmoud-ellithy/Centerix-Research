@@ -33,6 +33,12 @@ public static class RefreshTokenErrors
     public static Error AlreadyRevoked =>
         Error.Validation("RefreshToken.AlreadyRevoked", "Refresh token is already revoked");
 
+    /// <summary>
+    /// AUTH-002 race/conflict answer (HTTP 409). Returned when the presented refresh token was
+    /// rotated by a concurrent request, or when the rotation transaction lost a lock race.
+    /// Nothing is issued and nothing is revoked: the losing request must not be able to destroy
+    /// the successor the winner just minted, and it must not be handed that successor either.
+    /// </summary>
     public static Error RotationConflict =>
         Error.Conflict(
             "RefreshToken.RotationConflict",

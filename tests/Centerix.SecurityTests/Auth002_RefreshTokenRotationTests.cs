@@ -3,10 +3,12 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Centerix.API.Controllers;
+using Centerix.Infrastructure.Auth;
 using Centerix.Infrastructure.Data;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Centerix.SecurityTests;
@@ -21,9 +23,11 @@ namespace Centerix.SecurityTests;
 /// </para>
 /// <para>
 /// The invariants under test:
-/// a) a burst of concurrent refreshes with the SAME token yields exactly ONE successor row;
-/// b) replaying a rotated token revokes the entire chain (including the successor that the winning
-/// refresh just minted), leaving zero active tokens;
+/// a) a burst of concurrent refreshes with the SAME token yields exactly ONE successor row, the
+/// losers are answered with a conflict instead of a logout, and the successor the winner minted
+/// stays alive and usable;
+/// b) replaying a rotated token OUTSIDE the rotation race window revokes the entire chain
+/// (including the successor that the winning refresh minted), leaving zero active tokens;
 /// c) rotation records the old row as revoked AND points it at the hash of its successor, so the
 /// chain is auditable end-to-end.
 /// </para>
@@ -40,17 +44,24 @@ public class Auth002_RefreshTokenRotationTests
     public Auth002_RefreshTokenRotationTests(SqlServerIntegrationFactory env) => _env = env;
 
     // ==================================================================
-    // (a) Atomic rotation under concurrency
+    // (a) Atomic rotation under concurrency - and the winner SURVIVES
     // ==================================================================
 
     /// <summary>
     /// Five refreshes of the SAME token fired simultaneously. Exactly one may succeed and exactly
     /// one successor row may exist. Without the UPDLOCK/HOLDLOCK read every request observes a
     /// live row and each mints its own successor.
+    /// <para>
+    /// The losers must NOT be allowed to log the winner out. They used to take the reuse path and
+    /// call <c>RevokeAllAsync</c>, which revoked the successor the winner had just minted - so a
+    /// two-tab browser, or a client retrying after a timeout, ended up with ZERO live tokens.
+    /// A loser is now answered with 409 (no credentials, no revocation) and the winner's
+    /// replacement survives and stays usable.
+    /// </para>
     /// </summary>
     [Fact]
     [Trait("Category", "SqlServer")]
-    public async Task ConcurrentRefresh_WithSameToken_ProducesExactlyOneSuccessor()
+    public async Task ConcurrentRefresh_WithSameToken_ProducesExactlyOneSuccessor_AndTheWinnerSurvives()
     {
         var email = UniqueEmail("concurrent");
         var user = await CreateUserAsync(email);
@@ -64,7 +75,7 @@ public class Auth002_RefreshTokenRotationTests
             .Select(_ => _env.Client.SendAsync(RefreshRequest(login.RefreshToken, RemoteIp()))));
 
         var successCount = responses.Count(r => r.StatusCode == HttpStatusCode.OK);
-        var unauthorizedCount = responses.Count(r => r.StatusCode == HttpStatusCode.Unauthorized);
+        var conflictCount = responses.Count(r => r.StatusCode == HttpStatusCode.Conflict);
 
         Assert.True(
             successCount == 1,
@@ -72,9 +83,18 @@ public class Auth002_RefreshTokenRotationTests
             $"(statuses: {string.Join(", ", responses.Select(r => (int)r.StatusCode))}). " +
             "AUTH-002 requires rotation to be atomic.");
         Assert.True(
-            successCount + unauthorizedCount == responses.Length,
-            $"Every concurrent refresh must be either 200 or 401, but got: " +
+            successCount + conflictCount == responses.Length,
+            $"A losing concurrent refresh must be answered with 409 Conflict, but got: " +
             $"{string.Join(", ", responses.Select(r => (int)r.StatusCode))}.");
+
+        // No loser may ever receive a token pair.
+        foreach (var response in responses.Where(r => r.StatusCode != HttpStatusCode.OK))
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            Assert.True(
+                !body.Contains("accessToken", StringComparison.OrdinalIgnoreCase),
+                $"A losing request must not receive credentials, but the 409 body was: {body}");
+        }
 
         var (total, active) = await TokenCountsAsync(user.Id);
         Assert.True(
@@ -82,9 +102,51 @@ public class Auth002_RefreshTokenRotationTests
             $"Exactly one successor row must exist (original + 1), but found {total}. " +
             "A second row means two requests rotated the same presented token.");
         Assert.True(
+            active == 1,
+            "The successor minted by the winning refresh must survive the losing requests, " +
+            $"but {active} token(s) are active after the race.");
+
+        // The winning replacement is the one whose RefreshToken came back with HTTP 200.
+        var winningResponse = responses.Single(r => r.StatusCode == HttpStatusCode.OK);
+        var winner = JsonSerializer.Deserialize<RefreshResponse>(
+            await winningResponse.Content.ReadAsStringAsync(), JsonOptions);
+        Assert.NotNull(winner);
+
+        // ...and it is genuinely usable, not just present in the table.
+        var followUp = await _env.Client.SendAsync(RefreshRequest(winner!.RefreshToken, RemoteIp()));
+        Assert.True(
+            followUp.StatusCode == HttpStatusCode.OK,
+            $"The winning replacement must remain usable, but refreshing it returned " +
+            $"{(int)followUp.StatusCode}.");
+    }
+
+    /// <summary>
+    /// Presenting the rotated token again AFTER the race/retry window has closed must still be
+    /// treated as reuse - the grace must never become a permanent alternative path.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    public async Task ReplayingTheConstituentTokenAfterTheRaceWindow_IsStillReuse()
+    {
+        var email = UniqueEmail("postrace");
+        var user = await CreateUserAsync(email);
+
+        var login = await LoginAsync(email, RemoteIp());
+
+        var responses = await Task.WhenAll(Enumerable.Range(0, 5)
+            .Select(_ => _env.Client.SendAsync(RefreshRequest(login.RefreshToken, RemoteIp()))));
+        Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
+
+        await Task.Delay(RotationGrace());
+
+        var replay = await _env.Client.SendAsync(RefreshRequest(login.RefreshToken, RemoteIp()));
+        Assert.Equal(HttpStatusCode.Unauthorized, replay.StatusCode);
+
+        var (_, active) = await TokenCountsAsync(user.Id);
+        Assert.True(
             active == 0,
-            "After the losing requests replay the rotated token, reuse detection must have " +
-            $"revoked the whole chain, but {active} token(s) are still active.");
+            $"Replaying a rotated token after the race window must revoke the chain, but " +
+            $"{active} token(s) are still active.");
     }
 
     // ==================================================================
@@ -95,6 +157,13 @@ public class Auth002_RefreshTokenRotationTests
     /// login → refresh → refresh (two successors deep) → replay the ORIGINAL token.
     /// The replay must return 401 AND leave the user with zero active tokens: presenting a
     /// rotated-out token is treated as theft, so every descendant of that chain dies with it.
+    /// <para>
+    /// This replay happens immediately - inside the rotation race window - and must STILL be
+    /// detected, because the discriminator is not time alone: the successor the original token
+    /// points at has itself already been rotated away, so nothing about this presentation can be a
+    /// request racing that first rotation. A race loser, by contrast, always points at a
+    /// successor that is still live.
+    /// </para>
     /// </summary>
     [Fact]
     [Trait("Category", "SqlServer")]
@@ -180,6 +249,17 @@ public class Auth002_RefreshTokenRotationTests
 
     private static string Hash(string token) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
+
+    /// <summary>
+    /// The server-configured rotation race/retry window, padded by one second so a test that
+    /// wants to be OUTSIDE it cannot land on the boundary.
+    /// </summary>
+    private TimeSpan RotationGrace()
+    {
+        using var scope = _env.Factory.Services.CreateScope();
+        var settings = scope.ServiceProvider.GetRequiredService<IOptions<JwtSettings>>().Value;
+        return TimeSpan.FromSeconds(Math.Max(0, settings.RefreshRotationGraceSeconds) + 1);
+    }
 
     private static HttpRequestMessage LoginRequest(string email, string remoteIp)
     {

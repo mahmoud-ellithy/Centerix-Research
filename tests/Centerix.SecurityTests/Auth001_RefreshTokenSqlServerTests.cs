@@ -3,10 +3,12 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Centerix.API.Controllers;
+using Centerix.Infrastructure.Auth;
 using Centerix.Infrastructure.Data;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Centerix.SecurityTests;
@@ -136,6 +138,12 @@ public class Auth001_RefreshTokenSqlServerTests
         Assert.False(string.IsNullOrWhiteSpace(rotated.AccessToken));
 
         // Replaying the ORIGINAL (already rotated) refresh token must fail.
+        //
+        // POLICY: a presentation of a just-rotated token inside the server's bounded rotation
+        // race window is answered with 409 and issues nothing (it is indistinguishable from a
+        // concurrent retry of the same rotation). Genuine replay is what this asserts, so the
+        // replay is issued AFTER that window has closed.
+        await Task.Delay(RotationGrace());
         var replay = await _env.Client.SendAsync(
             RefreshRequest(login.RefreshToken, remoteIp));
         Assert.Equal(HttpStatusCode.Unauthorized, replay.StatusCode);
@@ -220,6 +228,14 @@ public class Auth001_RefreshTokenSqlServerTests
     {
         var bytes = Guid.NewGuid().ToByteArray();
         return $"10.{(bytes[0] % 200) + 1}.{(bytes[1] % 200) + 1}.{(bytes[2] % 200) + 1}";
+    }
+
+    /// <summary>The configured rotation race window, padded so a test lands safely outside it.</summary>
+    private TimeSpan RotationGrace()
+    {
+        using var scope = _env.Factory.Services.CreateScope();
+        var settings = scope.ServiceProvider.GetRequiredService<IOptions<JwtSettings>>().Value;
+        return TimeSpan.FromSeconds(Math.Max(0, settings.RefreshRotationGraceSeconds) + 1);
     }
 
     private static HttpRequestMessage LoginRequest(string email, string remoteIp)

@@ -111,10 +111,12 @@ public class AuthController(
 
         if (!result.IsSuccess)
         {
-            // A rotation conflict means the serializable transaction was rolled back, so the
-            // PRESENTED token is still valid. Collapsing that into 401 would tell the client to
-            // discard a live credential and force a re-login for what is a transient conflict;
-            // 409 is the honest signal - retry the same token.
+            // A conflict means the rotation was either lost to a concurrent request or rolled
+            // back, and in BOTH cases the server refused to issue anything. The client must not
+            // treat this as "my token is dead": the successor it needs may already be in shared
+            // storage (two-tab browser), or the conflict may be transient (deadlock). 409 is the
+            // honest signal - re-sync / retry - whereas 401 would tell the client to discard a
+            // credential it may still hold and force a needless re-login.
             var isConflict = result.Errors?.Any(
                 e => e.Code == RefreshTokenErrors.RotationConflict.Code) ?? false;
 

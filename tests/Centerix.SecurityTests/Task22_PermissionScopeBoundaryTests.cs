@@ -142,7 +142,8 @@ public class Task22_PermissionScopeBoundaryTests
         // Permissions.PlatformScope.PermissionCodes — never reclassified as tenant.
         var platformOnlyModules = new[]
         {
-            "Tenants", "Subscriptions", "Plans", "Features", "AddOnCatalogs", "Promotions"
+            "Tenants", "Subscriptions", "Plans", "Features", "AddOnCatalogs", "Promotions",
+            "PlatformCredits"
         };
 
         var misclassified = PermissionCatalog.All

@@ -62,6 +62,17 @@ public static class PermissionCatalog
         new("Promotions",     "Activate", "Promotions.Activate", PermissionScope.Platform, "Activate a promotion"),
         new("Promotions",     "Calculate","Promotions.Calculate", PermissionScope.Platform, "Calculate an offer"),
 
+        // FIN-001 second key. Minting tenant credit balance is a TWO-KEY operation:
+        //   * TenantCredits.Create (Tenant scope)  -> WHICH TENANT the request may act in;
+        //   * PlatformCredits.Mint (Platform scope) -> whether the caller may mint balance AT ALL.
+        // The module is deliberately PlatformCredits, NOT TenantCredits: a permission that a
+        // tenant role may hold must never be classifiable as platform, and a permission whose only
+        // acceptable grant is the PlatformAdmin verifier must never sit in a tenant-partitioned
+        // module. Enforced on the endpoint by a second [HasPermission] attribute (ASP.NET combines
+        // every attribute into ONE policy, so both must pass) and re-checked in the handler by
+        // IPlatformAdminGuard.
+        new("PlatformCredits", "Mint",   "PlatformCredits.Mint", PermissionScope.Platform, "Mint tenant credit balance (platform key)"),
+
         // TENANT scope — every entry below is tenant-partitioned data; authorization requires
         // an active TenantMembership and an authorized tenant context. NONE of these codes
         // appear in Permissions.PlatformScope.PermissionCodes.

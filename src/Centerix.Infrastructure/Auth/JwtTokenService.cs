@@ -18,6 +18,21 @@ public class JwtSettings
     public int RefreshExpirationInDays { get; set; } = 7;
 
     /// <summary>
+    /// AUTH-002 refresh-race grace, in seconds. When a refresh token has just been rotated,
+    /// a presentation of that SAME token is treated as a concurrent/late retry of the rotation
+    /// (HTTP 409 conflict, no credentials issued, chain untouched) for at most this long after
+    /// the rotation was committed. Outside the window the presentation is confirmed reuse and
+    /// the normal reuse policy applies.
+    /// <para>
+    /// Server-controlled and hard-bounded in <see cref="Validate"/>. The window NEVER mints a
+    /// token pair, so widening it cannot become an authentication path - it only decides whether
+    /// a presentation is answered with a conflict or with family revocation. 0 disables the
+    /// grace entirely (every presentation of a rotated token is reuse).
+    /// </para>
+    /// </summary>
+    public int RefreshRotationGraceSeconds { get; set; } = 5;
+
+    /// <summary>
     /// Validates that required JWT settings are properly configured.
     /// Should be called at application startup.
     /// </summary>
@@ -37,7 +52,14 @@ public class JwtSettings
 
         if (RefreshExpirationInDays < 1)
             throw new InvalidOperationException("JwtSettings:RefreshExpirationInDays must be at least 1 day.");
+
+        if (RefreshRotationGraceSeconds < 0 || RefreshRotationGraceSeconds > MaxRefreshRotationGraceSeconds)
+            throw new InvalidOperationException(
+                $"JwtSettings:RefreshRotationGraceSeconds must be between 0 and {MaxRefreshRotationGraceSeconds} seconds.");
     }
+
+    /// <summary>Upper bound for <see cref="RefreshRotationGraceSeconds"/>.</summary>
+    public const int MaxRefreshRotationGraceSeconds = 300;
 }
 
 public interface ITokenService

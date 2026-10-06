@@ -23,7 +23,17 @@ public class TenantCreditsController(ILocalizer localizer, IMediator mediator) :
     }
 
     [HttpPost]
+    // FIN-001 two-key authorization, enforced by the framework itself (not only by the handler):
+    //   1. TenantCredits.Create  (Tenant scope)   — WHICH TENANT this request may act in. Satisfied
+    //      only by an active TenantMembership in the resolved tenant holding the permission.
+    //   2. PlatformCredits.Mint  (Platform scope) — whether the caller may mint balance at all.
+    //      Satisfied only by the DB-verified IPlatformAdminVerifier; a tenant-derived grant can
+    //      NEVER satisfy it.
+    // ASP.NET Core combines every IAuthorizeData on the endpoint into ONE policy whose requirements
+    // must ALL succeed, so a plain TenantAdmin is rejected at the authorization layer even if the
+    // handler's IPlatformAdminGuard were removed.
     [HasPermission(Permissions.TenantCredits.Create)]
+    [HasPermission(Permissions.PlatformCredits.Mint)]
     public async Task<IActionResult> CreateTenantCredit(CreateTenantCreditCommand command, CancellationToken cancellationToken)
     {
         var result = await mediator.Send(command, cancellationToken);
