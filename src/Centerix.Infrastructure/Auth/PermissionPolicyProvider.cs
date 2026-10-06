@@ -62,21 +62,27 @@ public class PermissionRequirement(string permission) : IAuthorizationRequiremen
 /// Authorization handler that decides a <see cref="PermissionRequirement"/> across the two
 /// authorization domains of the system.
 /// <para>
-/// SECURITY BOUNDARY (T22 correction). The permission SCOPE is resolved first, through the single
-/// authoritative <see cref="PermissionScopes"/> classifier, and the scope then decides which — and
-/// only which — grant sources may authorize the request:
+/// SECURITY BOUNDARY (T22 final correction). The permission SCOPE is resolved FIRST, through the
+/// single authoritative <see cref="PermissionScopes"/> classifier, and the scope then decides which
+/// — and only which — grant sources may authorize the request:
 /// </para>
 /// <list type="bullet">
 ///   <item><description><b>Platform scope</b>: the ONLY acceptable grant is
 ///   <see cref="IPlatformAdminVerifier"/>, whose decision is re-validated against the server-side
-///   Identity store. There is NO tenant fallback for platform permissions: a
-///   <c>TenantMembership</c>, a tenant role, a tenant <c>RolePermission</c> row or a pre-computed
-///   permission list can never authorize them, even if the database is misconfigured or corrupted.</description></item>
+///   Identity store. The PlatformAdmin verifier is consulted INSIDE the platform-scope branch —
+///   never before scope is known — so the bypass can never apply to a Tenant or Unknown scope.
+///   There is NO tenant fallback for platform permissions: a <c>TenantMembership</c>, a tenant
+///   role, a tenant <c>RolePermission</c> row or a pre-computed permission list can never
+///   authorize them, even if the database is misconfigured or corrupted.</description></item>
 ///   <item><description><b>Tenant scope</b>: requires an AUTHORIZED tenant context
 ///   (<see cref="ICurrentTenant.IsAuthorized"/>), never merely a resolved one, and then evaluates
-///   TenantMembership → Role → RolePermission.</description></item>
+///   TenantMembership → Role → RolePermission. <b>The PlatformAdmin bypass does not apply to tenant
+///   scope</b>: a verified PlatformAdmin who has no active membership in the resolved tenant is
+///   denied for any tenant-scoped permission, exactly as any other unauthenticated-for-this-tenant
+///   principal would be.</description></item>
 ///   <item><description><b>Unknown scope</b>: DENIED. An unclassifiable permission is a
-///   configuration fault and must never widen access.</description></item>
+///   configuration fault and must never widen access — neither the PlatformAdmin verifier nor any
+///   tenant-derived source is consulted.</description></item>
 /// </list>
 /// </summary>
 public class PermissionAuthorizationHandler(
@@ -93,27 +99,29 @@ public class PermissionAuthorizationHandler(
         var cancellationToken = httpContext?.RequestAborted ?? CancellationToken.None;
 
         // STEP 1 — the single authoritative scope decision. Resolved BEFORE any grant source is
-        // consulted, so no tenant-derived data can influence a platform authorization decision.
+        // consulted. From this point on, no PlatformAdmin check, no tenant fallback, no DB read
+        // may produce a different scope. This ordering is the corrected trust boundary; the
+        // PlatformAdmin bypass used to live here (before scope was known) and would therefore widen
+        // access across BOTH platform and tenant scopes.
         var scope = PermissionScopes.Resolve(requirement.Permission);
 
-        // PlatformAdmin bypass is DB-VERIFIED (T22): the JWT role claim alone is never sufficient.
-        // Revocation/lockout takes effect immediately; a forged claim without a matching identity
-        // store role is denied. This is the single authoritative PlatformAdmin decision.
-        var isPlatformAdmin = await platformAdminVerifier.IsPlatformAdminAsync(
-            context.User, cancellationToken);
-
-        if (isPlatformAdmin)
-        {
-            context.Succeed(requirement);
-            return;
-        }
-
-        // STEP 2 — PLATFORM scope without an authoritative PlatformAdmin decision: DENY.
-        // This is the corrected trust boundary. It holds even when the request carries a tenant
-        // header, an authorized tenant context, or a deliberately injected platform RolePermission
-        // row: none of those may ever produce platform authorization.
+        // STEP 2 — PLATFORM scope: the only acceptable grant is the authoritative PlatformAdmin
+        // decision. The verifier is consulted HERE — inside the platform branch — so a Tenant or
+        // Unknown scope cannot be widened by a verified PlatformAdmin.
         if (scope == PermissionScope.Platform)
         {
+            // PlatformAdmin bypass is DB-VERIFIED (T22): the JWT role claim alone is never sufficient.
+            // Revocation/lockout takes effect immediately; a forged claim without a matching
+            // identity-store role is denied.
+            var isPlatformAdmin = await platformAdminVerifier.IsPlatformAdminAsync(
+                context.User, cancellationToken);
+
+            if (isPlatformAdmin)
+            {
+                context.Succeed(requirement);
+                return;
+            }
+
             _logger.LogWarning(
                 "Denied platform-scoped permission '{Permission}' for user {UserId}: " +
                 "tenant-derived permission sources are not valid for platform scope.",
@@ -123,7 +131,9 @@ public class PermissionAuthorizationHandler(
         }
 
         // STEP 3 — UNKNOWN scope: fail closed. An unclassifiable permission (not in the canonical
-        // catalog and not explicitly platform-scoped) is never authorized from any source.
+        // catalog and not explicitly platform-scoped, OR an entry whose explicit scope is Unknown)
+        // is never authorized from any source. The PlatformAdmin verifier is intentionally NOT
+        // called here: scope must not be widened by an unrelated grant decision.
         if (scope == PermissionScope.Unknown)
         {
             _logger.LogWarning(
@@ -133,7 +143,7 @@ public class PermissionAuthorizationHandler(
             return;
         }
 
-        // ---- TENANT scope from here on. Only authorized tenant context may grant it. ----
+        // ---- TENANT scope from here on. The PlatformAdmin bypass DOES NOT APPLY. ----
 
         if (httpContext is null)
             return;
@@ -153,7 +163,8 @@ public class PermissionAuthorizationHandler(
         // This is checked for EVERY tenant-scope grant source, including the pre-computed
         // HttpContext.Items list: that list is an optimization populated by the guard, not an
         // independent proof of authorization, so it is never honoured outside an authorized
-        // tenant context.
+        // tenant context. A verified PlatformAdmin with IsAuthorized == false is therefore
+        // denied at this exact step — the corrected trust boundary.
         if (!currentTenant.IsAuthorized || string.IsNullOrEmpty(currentTenant.TenantId))
             return;
 
