@@ -22,16 +22,20 @@ using Xunit;
 namespace Centerix.SecurityTests;
 
 /// <summary>
-/// Batch 2 targeted proof suite: NEW-1 (bootstrap credential hardening +
-/// password.change_required enforcement), CFG-001 (production SMTP sender +
-/// invitation delivery failure handling), NEW-2 (production migration / schema
-/// validation / required seeding contract).
+/// Batch 2 targeted proof suite: NEW-1 (login/refresh/change-password enforcement of the
+/// database-authoritative password.change_required requirement), CFG-001 (production SMTP
+/// sender + invitation delivery failure handling), NEW-2 (production migration / schema
+/// validation / required seeding contract). Relational/security verification additionally
+/// runs on real SQL Server in <c>Batch2SqlServerTests</c>; these fast HTTP/unit tests pin
+/// the endpoint contracts.
 /// </summary>
 [Collection("Integration")]
 public class Batch2ProductionReadinessTests : IClassFixture<TestWebApplicationFactory>
 {
     private const string StrongPassword = "Str0ng!Pass1";
     private const string NewStrongPassword = "N3w!Str0ng#Pass2";
+
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     private readonly TestWebApplicationFactory _factory;
     private readonly HttpClient _client;
@@ -43,7 +47,90 @@ public class Batch2ProductionReadinessTests : IClassFixture<TestWebApplicationFa
     }
 
     // ================================================================
-    // NEW-1: self-only change-password + cross-user proof
+    // NEW-1 A: login enforces password-change requirement
+    // ================================================================
+
+    /// <summary>
+    /// NEW-1 A: correct password + change_required=true → 403 flow contract, NO refresh
+    /// token issued, NO normal session established; the flow token completes rotation and
+    /// normal login works afterwards.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Batch2")]
+    public async Task Login_ChangeRequired_ReturnsFlowContractWithoutSession()
+    {
+        var email = UniqueEmail("b2-login-req");
+        var user = await CreateUserAsync(email);
+        await AddChangeRequiredClaimAsync(user.Id);
+
+        var response = await PostLoginAsync(email, StrongPassword);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("changePasswordToken", body);
+        Assert.DoesNotContain("refreshToken", body);
+
+        var flowToken = JsonSerializer.Deserialize<JsonElement>(body, JsonOptions)
+            .GetProperty("changePasswordToken").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(flowToken));
+
+        // No session was established: zero refresh rows for this user.
+        Assert.Equal(0, await CountRefreshRowsAsync(user.Id));
+
+        // The controlled flow remains available: rotate with the flow token.
+        var change = await PostChangePasswordWithTokenAsync(flowToken!,
+            new { currentPassword = StrongPassword, newPassword = NewStrongPassword });
+        Assert.Equal(HttpStatusCode.OK, change.StatusCode);
+        var pair = JsonSerializer.Deserialize<JsonElement>(await change.Content.ReadAsStringAsync(), JsonOptions);
+        Assert.False(string.IsNullOrWhiteSpace(pair.GetProperty("accessToken").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(pair.GetProperty("refreshToken").GetString()));
+
+        // Normal login works after rotation.
+        var login = await PostLoginAsync(email, NewStrongPassword);
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        Assert.Contains("refreshToken", await login.Content.ReadAsStringAsync());
+    }
+
+    // ================================================================
+    // NEW-1 B: refresh enforces password-change requirement
+    // ================================================================
+
+    /// <summary>
+    /// NEW-1 B: a live refresh token whose owner is subsequently flagged → refresh fails
+    /// (403), no access token minted, no new refresh token minted, row count unchanged.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Batch2")]
+    public async Task Refresh_ChangeRequired_MintsNothing()
+    {
+        var email = UniqueEmail("b2-refresh-req");
+        var user = await CreateUserAsync(email);
+
+        var login = await PostLoginAsync(email, StrongPassword);
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        var loginBody = JsonSerializer.Deserialize<JsonElement>(
+            await login.Content.ReadAsStringAsync(), JsonOptions);
+        var accessToken = loginBody.GetProperty("accessToken").GetString()!;
+        var refreshToken = loginBody.GetProperty("refreshToken").GetString()!;
+        Assert.Equal(1, await CountRefreshRowsAsync(user.Id));
+
+        await AddChangeRequiredClaimAsync(user.Id);
+
+        var refresh = await PostRefreshAsync(refreshToken);
+        Assert.Equal(HttpStatusCode.Forbidden, refresh.StatusCode);
+        var refreshBody = await refresh.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("accessToken", refreshBody);
+        Assert.DoesNotContain("refreshToken", refreshBody);
+        Assert.Equal(1, await CountRefreshRowsAsync(user.Id));
+
+        // Recovery through the controlled flow still works with the pre-existing token.
+        var change = await PostChangePasswordWithTokenAsync(accessToken,
+            new { currentPassword = StrongPassword, newPassword = NewStrongPassword });
+        Assert.Equal(HttpStatusCode.OK, change.StatusCode);
+    }
+
+    // ================================================================
+    // NEW-1 C+D: change-password contract
     // ================================================================
 
     /// <summary>
@@ -51,7 +138,8 @@ public class Batch2ProductionReadinessTests : IClassFixture<TestWebApplicationFa
     /// NO target UserId (body/query/route/headers are all ignored) and identity comes
     /// exclusively from the authenticated server-side principal. User A rotating their
     /// password — even while submitting User B's id in the payload — changes ONLY A's
-    /// credential; B's password and sessions are untouched.
+    /// credential; B's password and sessions are untouched. Success returns the fresh
+    /// NORMAL pair, which is proven usable.
     /// </summary>
     [Fact]
     [Trait("Category", "Batch2")]
@@ -70,7 +158,10 @@ public class Batch2ProductionReadinessTests : IClassFixture<TestWebApplicationFa
             userA.Id, emailA,
             new { currentPassword = StrongPassword, newPassword = NewStrongPassword, userId = userB.Id });
 
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var pair = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync(), JsonOptions);
+        var newRefreshA = pair.GetProperty("refreshToken").GetString()!;
+        Assert.False(string.IsNullOrWhiteSpace(pair.GetProperty("accessToken").GetString()));
 
         using var scope = _factory.Services.CreateScope();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
@@ -80,16 +171,17 @@ public class Batch2ProductionReadinessTests : IClassFixture<TestWebApplicationFa
         Assert.False(await userManager.CheckPasswordAsync(await userManager.FindByIdAsync(userA.Id)!, StrongPassword));
         Assert.True(await userManager.CheckPasswordAsync(await userManager.FindByIdAsync(userB.Id)!, StrongPassword));
 
-        // B's session survived A's rotation.
+        // A's fresh pair is usable; B's session survived A's rotation.
         var refreshService = scope.ServiceProvider.GetRequiredService<IRefreshTokenService>();
-        var reuse = await refreshService.RotateAsync(refreshB);
-        Assert.True(reuse.IsSuccess, "User B's refresh session must survive user A's password change.");
+        Assert.True((await refreshService.RotateAsync(newRefreshA)).IsSuccess);
+        Assert.True((await refreshService.RotateAsync(refreshB)).IsSuccess);
     }
 
     /// <summary>
-    /// NEW-1: password.change_required is cleared ONLY after a successful change and refresh
-    /// sessions are revoked ONLY after a successful change. A failed attempt leaves both
-    /// exactly as they were.
+    /// NEW-1 C+D: password.change_required is cleared ONLY after a successful change and
+    /// refresh sessions are revoked ONLY after a successful change. A failed attempt feeds
+    /// the lockout counter (AccessFailedAsync) but leaves the requirement and sessions
+    /// unchanged and issues nothing.
     /// </summary>
     [Fact]
     [Trait("Category", "Batch2")]
@@ -113,18 +205,34 @@ public class Batch2ProductionReadinessTests : IClassFixture<TestWebApplicationFa
             var claims = await userManager.GetClaimsAsync(dbUser!);
             Assert.Contains(claims, c => c.Type == "password.change_required" && c.Value == "true");
 
-            // Session still live: rotation succeeds.
+            // Lockout policy observed the credential failure...
+            Assert.Equal(1, await userManager.GetAccessFailedCountAsync(dbUser!));
+
+            // ...but the session row is untouched: still present, still not revoked.
+            // (Rotation itself is refused while the requirement stands — NEW-1 B — which
+            // is exactly why the row must be inspected rather than rotated here.)
             var refreshService = scope.ServiceProvider.GetRequiredService<IRefreshTokenService>();
-            var rotated = await refreshService.RotateAsync(refresh);
-            Assert.True(rotated.IsSuccess, "Failed password change must not revoke sessions.");
-            refresh = rotated.Value.RefreshToken;
+            var refused = await refreshService.RotateAsync(refresh);
+            Assert.False(refused.IsSuccess, "Refresh must be refused while the requirement stands.");
+            Assert.Equal("RefreshToken.PasswordChangeRequired", refused.Errors![0].Code);
         }
 
-        // Correct password → success clears the requirement and kills sessions.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var row = await db.RefreshTokens.SingleAsync(rt => rt.UserId == user.Id);
+            Assert.Null(row.RevokedAtUtc);
+        }
+
+        // Correct password → success clears the requirement, kills sessions, returns pair.
         var ok = await PostChangePasswordAsync(
             user.Id, email,
             new { currentPassword = StrongPassword, newPassword = NewStrongPassword });
-        Assert.Equal(HttpStatusCode.NoContent, ok.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+        var pair = JsonSerializer.Deserialize<JsonElement>(await ok.Content.ReadAsStringAsync(), JsonOptions);
+        Assert.False(string.IsNullOrWhiteSpace(pair.GetProperty("accessToken").GetString()));
+        var freshRefresh = pair.GetProperty("refreshToken").GetString()!;
+        Assert.False(string.IsNullOrWhiteSpace(freshRefresh));
 
         using (var scope = _factory.Services.CreateScope())
         {
@@ -134,8 +242,44 @@ public class Batch2ProductionReadinessTests : IClassFixture<TestWebApplicationFa
             Assert.DoesNotContain(claims, c => c.Type == "password.change_required");
 
             var refreshService = scope.ServiceProvider.GetRequiredService<IRefreshTokenService>();
+
+            // The fresh pair from the success response is fully usable...
+            var fresh = await refreshService.RotateAsync(freshRefresh);
+            Assert.True(fresh.IsSuccess, "The fresh pair returned by change-password must work.");
+
+            // ...while the pre-change session is dead (its replay is confirmed reuse).
             var replay = await refreshService.RotateAsync(refresh);
             Assert.False(replay.IsSuccess, "Successful password change must revoke all refresh sessions.");
+        }
+    }
+
+    /// <summary>
+    /// NEW-1 D: a locked-out account cannot rotate even with a live access token (401,
+    /// indistinguishable, no state change).
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Batch2")]
+    public async Task ChangePassword_LockedOutAccount_IsRejected()
+    {
+        var email = UniqueEmail("b2-locked");
+        var user = await CreateUserAsync(email);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+            var dbUser = await userManager.FindByIdAsync(user.Id);
+            await userManager.SetLockoutEndDateAsync(dbUser!, DateTimeOffset.UtcNow.AddMinutes(15));
+        }
+
+        var response = await PostChangePasswordAsync(
+            user.Id, email,
+            new { currentPassword = StrongPassword, newPassword = NewStrongPassword });
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+            Assert.True(await userManager.CheckPasswordAsync(await userManager.FindByIdAsync(user.Id)!, StrongPassword));
         }
     }
 
@@ -155,7 +299,7 @@ public class Batch2ProductionReadinessTests : IClassFixture<TestWebApplicationFa
             new { currentPassword = StrongPassword, newPassword = NewStrongPassword },
             tenantHeader: null);
 
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     /// <summary>
@@ -163,7 +307,8 @@ public class Batch2ProductionReadinessTests : IClassFixture<TestWebApplicationFa
     /// never trusted from the JWT. A principal whose DB row carries
     /// password.change_required=true is gated (403) on tenant endpoints even when the JWT
     /// carries NO such claim; a JWT forging password.change_required=true for a user whose
-    /// DB row lacks it is IGNORED (no gate).
+    /// DB row lacks it is IGNORED (no gate). A purpose-restricted flow token outside the
+    /// change-password endpoint is rejected even with a clean database row.
     /// </summary>
     [Fact]
     [Trait("Category", "Batch2")]
@@ -207,23 +352,25 @@ public class Batch2ProductionReadinessTests : IClassFixture<TestWebApplicationFa
         Assert.NotEqual(HttpStatusCode.Forbidden, forgedResponse.StatusCode);
         var forgedBody = await forgedResponse.Content.ReadAsStringAsync();
         Assert.DoesNotContain("PasswordChangeRequired", forgedBody);
+
+        // Purpose-restricted flow token outside its endpoint → rejected even with clean DB.
+        var flowToken = GenerateTokenWithClaim(cleanUserId, cleanEmail, "pwd_change_only", "true");
+        var flowResponse = await SendAsync(HttpMethod.Get, "/api/invitations", tenantId, flowToken);
+        Assert.Equal(HttpStatusCode.Forbidden, flowResponse.StatusCode);
     }
 
     // ================================================================
-    // NEW-1: bootstrap credential hardening (unit-level)
+    // NEW-1 E: no bootstrap password generator (unit-level)
     // ================================================================
 
     [Fact]
     [Trait("Category", "Batch2")]
-    public void GenerateTemporaryPassword_IsRandomAndNeverStaticDefault()
+    public void BootstrapCredential_RequiresExplicitConfiguration_NoDefault()
     {
-        var first = TenancyConstants.GenerateTemporaryPassword();
-        var second = TenancyConstants.GenerateTemporaryPassword();
-
-        Assert.NotEqual("Admin@123", first);
-        Assert.NotEqual("Admin@123", second);
-        Assert.NotEqual(first, second);
-        Assert.True(first.Length >= 8, "Generated password must satisfy Identity length rules.");
+        // There is no generator, no static password, and no fallback: the options
+        // contract ships EMPTY and the seeder throws without an explicit value.
+        Assert.True(string.IsNullOrWhiteSpace(new BootstrapAdminOptions().TemporaryPassword));
+        Assert.Equal("BootstrapAdmin", BootstrapAdminOptions.SectionName);
     }
 
     // ================================================================
@@ -336,6 +483,9 @@ public class Batch2ProductionReadinessTests : IClassFixture<TestWebApplicationFa
     private static string UniqueEmail(string prefix) =>
         $"{prefix}-{Guid.NewGuid():N}@test.com";
 
+    private static string UniqueIp() =>
+        $"10.{Random.Shared.Next(1, 200)}.{Random.Shared.Next(1, 200)}.{Random.Shared.Next(1, 200)}";
+
     private async Task<IdentityUser> CreateUserAsync(string email)
     {
         using var scope = _factory.Services.CreateScope();
@@ -367,11 +517,44 @@ public class Batch2ProductionReadinessTests : IClassFixture<TestWebApplicationFa
         await userManager.AddClaimAsync(user!, new Claim("password.change_required", "true"));
     }
 
+    private async Task<int> CountRefreshRowsAsync(string userId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.RefreshTokens.CountAsync(rt => rt.UserId == userId);
+    }
+
     private async Task<string> IssueRefreshAsync(string userId)
     {
         using var scope = _factory.Services.CreateScope();
         var refreshService = scope.ServiceProvider.GetRequiredService<IRefreshTokenService>();
         return await refreshService.IssueAsync(userId, "batch2-test", "127.0.0.1");
+    }
+
+    private async Task<HttpResponseMessage> PostLoginAsync(string email, string password)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/login");
+        request.Headers.Add(TestRemoteIpStartupFilter.HeaderName, UniqueIp());
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(new { email, password }), Encoding.UTF8, "application/json");
+        return await _client.SendAsync(request);
+    }
+
+    private async Task<HttpResponseMessage> PostRefreshAsync(string refreshToken)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/refresh");
+        request.Headers.Add(TestRemoteIpStartupFilter.HeaderName, UniqueIp());
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(new { refreshToken }), Encoding.UTF8, "application/json");
+        return await _client.SendAsync(request);
+    }
+
+    private async Task<HttpResponseMessage> PostChangePasswordWithTokenAsync(string token, object payload)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/change-password");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        return await _client.SendAsync(request);
     }
 
     private async Task<HttpResponseMessage> PostChangePasswordAsync(

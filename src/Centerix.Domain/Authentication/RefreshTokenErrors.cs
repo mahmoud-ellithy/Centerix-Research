@@ -43,4 +43,13 @@ public static class RefreshTokenErrors
         Error.Conflict(
             "RefreshToken.RotationConflict",
             "This refresh request conflicted with a concurrent request. Please retry.");
+
+    /// <summary>
+    /// NEW-1 correction: the account still carries the authoritative
+    /// <c>password.change_required</c> requirement (loaded from the database, never the
+    /// JWT). Refresh must not bypass it: nothing is minted. Answered as HTTP 403; the
+    /// caller must complete POST /api/auth/change-password first.
+    /// </summary>
+    public static Error PasswordChangeRequired =>
+        Error.Forbidden("RefreshToken.PasswordChangeRequired", "Password change is required before refreshing this session");
 }

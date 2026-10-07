@@ -66,11 +66,24 @@ public interface ITokenService
 {
     string GenerateAccessToken(IdentityUser user, IList<string> roles);
     (string Token, DateTime ExpiresAtUtc) GenerateRefreshToken();
+
+    /// <summary>
+    /// NEW-1 correction: purpose-restricted token for the controlled password-change flow.
+    /// Issued ONLY by the login gate when the authoritative database state still carries
+    /// <c>password.change_required</c>. It authenticates identity (NameIdentifier) for exactly
+    /// one endpoint — POST /api/auth/change-password — and is rejected everywhere else by
+    /// <c>PasswordChangeEnforcementMiddleware</c>. Short-lived (5 minutes), never paired
+    /// with a refresh token. It is NOT a normal session token.
+    /// </summary>
+    string GeneratePasswordChangeToken(IdentityUser user);
 }
 
 public class JwtTokenService(IOptions<JwtSettings> jwtSettings) : ITokenService
 {
     private readonly JwtSettings _jwtSettings = jwtSettings.Value;
+
+    /// <summary>Claim marking a purpose-restricted password-change flow token.</summary>
+    public const string PasswordChangeOnlyClaimType = "pwd_change_only";
 
     public string GenerateAccessToken(IdentityUser user, IList<string> roles)
     {
@@ -115,6 +128,32 @@ public class JwtTokenService(IOptions<JwtSettings> jwtSettings) : ITokenService
         var expiresAt = DateTime.UtcNow.AddDays(_jwtSettings.RefreshExpirationInDays);
         return (token, expiresAt);
     }
+
+    public string GeneratePasswordChangeToken(IdentityUser user)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, user.Id),
+            new(ClaimTypes.Name, user.UserName ?? string.Empty),
+            new(ClaimTypes.Email, user.Email ?? string.Empty),
+            new(PasswordChangeOnlyClaimType, "true"),
+        };
+
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Secret));
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var token = new JwtSecurityToken(
+            issuer: _jwtSettings.Issuer,
+            audience: _jwtSettings.Audience,
+            claims: claims,
+            expires: DateTime.UtcNow.AddMinutes(PasswordChangeTokenLifetimeMinutes),
+            signingCredentials: creds);
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    /// <summary>Lifetime of the purpose-restricted password-change flow token.</summary>
+    public const int PasswordChangeTokenLifetimeMinutes = 5;
 }
 
 

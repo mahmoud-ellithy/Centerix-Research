@@ -188,6 +188,22 @@ public class RefreshTokenService(
             return RefreshTokenErrors.AccountLocked;
         }
 
+        // NEW-1 correction (B): refresh must independently enforce the password-change
+        // requirement from the authoritative database state (Identity claims — never the
+        // JWT). While the requirement stands, NOTHING is minted: no access token, no
+        // refresh token. The presented token is left untouched (revocation happens only
+        // on successful password change); the caller must complete the controlled flow.
+        var requirementClaims = await userManager.GetClaimsAsync(user);
+        if (requirementClaims.Any(c =>
+                string.Equals(c.Type, "password.change_required", StringComparison.Ordinal) &&
+                string.Equals(c.Value, "true", StringComparison.OrdinalIgnoreCase)))
+        {
+            logger.LogWarning(
+                "Refresh attempted for user {UserId} with a pending password-change requirement. Rotation refused.",
+                user.Id);
+            return RefreshTokenErrors.PasswordChangeRequired;
+        }
+
         var roles = await userManager.GetRolesAsync(user);
         var accessToken = tokenService.GenerateAccessToken(user, roles);
         var accessExpiresAt = DateTime.UtcNow.AddMinutes(_jwtSettings.ExpirationInMinutes);

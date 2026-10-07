@@ -5,14 +5,19 @@ using System.Security.Claims;
 namespace Centerix.API.Infrastructure;
 
 /// <summary>
-/// NEW-1 password.change_required enforcement.
-/// When the authoritative database state (Identity user claims, loaded per request via
-/// <see cref="UserManager{TUser}"/> — NEVER the JWT) still carries
-/// <c>password.change_required=true</c>, every authenticated request except the
-/// allow-list below is rejected with 403 <c>Auth:PasswordChangeRequired</c>.
-/// The allow-list keeps the credential-rotation flow usable: login/refresh (to obtain
-/// a session), POST /api/auth/change-password (to clear the requirement), logout
-/// endpoints (to abandon sessions), anonymous invitation registration, and docs.
+/// NEW-1 password.change_required enforcement (correction).
+/// Two independent, server-authoritative gates:
+/// 1. Purpose-restricted flow tokens (JWT claim <c>pwd_change_only=true</c>, issued ONLY
+///    by the login gate while the requirement stands) are valid for exactly one endpoint:
+///    POST /api/auth/change-password. Anywhere else they are rejected with 403, so a flow
+///    token can never become a normal session.
+/// 2. When the authoritative database state (Identity user claims, loaded per request via
+///    <see cref="UserManager{TUser}"/> — NEVER trusted from the JWT) still carries
+///    <c>password.change_required=true</c>, every authenticated request except the
+///    allow-list below is rejected with 403 <c>Auth:PasswordChangeRequired</c>.
+/// The allow-list keeps the credential-rotation flow usable: login/refresh (anonymous),
+/// POST /api/auth/change-password (to clear the requirement), logout endpoints (to abandon
+/// sessions), anonymous invitation registration, and docs.
 /// </summary>
 public sealed class PasswordChangeEnforcementMiddleware(RequestDelegate next)
 {
@@ -32,7 +37,16 @@ public sealed class PasswordChangeEnforcementMiddleware(RequestDelegate next)
             return;
         }
 
-        var userId = context.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        // Gate 1: a purpose-restricted flow token outside its single endpoint is rejected
+        // even before the database is consulted — it is not a session token.
+        if (IsPasswordChangeOnlyToken(context.User) && !IsChangePasswordEndpoint(context))
+        {
+            await WriteForbidden(context,
+                "This token is restricted to POST /api/auth/change-password.");
+            return;
+        }
+
+        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (string.IsNullOrEmpty(userId))
         {
             await next(context);
@@ -46,7 +60,7 @@ public sealed class PasswordChangeEnforcementMiddleware(RequestDelegate next)
             return;
         }
 
-        // Authoritative state comes from the database, never from JWT claims.
+        // Gate 2: authoritative state comes from the database, never from JWT claims.
         var claims = await userManager.GetClaimsAsync(user);
         var changeRequired = claims.Any(c =>
             string.Equals(c.Type, ChangeRequiredClaimType, StringComparison.Ordinal) &&
@@ -58,6 +72,19 @@ public sealed class PasswordChangeEnforcementMiddleware(RequestDelegate next)
             return;
         }
 
+        await WriteForbidden(context,
+            "Password change is required before this operation. Use POST /api/auth/change-password.");
+    }
+
+    private static bool IsPasswordChangeOnlyToken(ClaimsPrincipal principal) =>
+        principal.FindFirst(Centerix.Infrastructure.Auth.JwtTokenService.PasswordChangeOnlyClaimType)?.Value == "true";
+
+    private static bool IsChangePasswordEndpoint(HttpContext context) =>
+        HttpMethods.IsPost(context.Request.Method) &&
+        context.Request.Path.Equals("/api/auth/change-password", StringComparison.OrdinalIgnoreCase);
+
+    private static async Task WriteForbidden(HttpContext context, string detail)
+    {
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         context.Response.ContentType = "application/problem+json";
         await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new
@@ -65,7 +92,7 @@ public sealed class PasswordChangeEnforcementMiddleware(RequestDelegate next)
             type = "https://tools.ietf.org/html/rfc7231#section-6.5.3",
             title = "Auth:PasswordChangeRequired",
             status = StatusCodes.Status403Forbidden,
-            detail = "Password change is required before this operation. Use POST /api/auth/change-password."
+            detail
         }));
     }
 

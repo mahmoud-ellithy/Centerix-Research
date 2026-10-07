@@ -81,15 +81,16 @@ public class ApplicationDbContextInitialiser(
 
     /// <summary>
     /// Required deterministic seed (NEW-2): single-row SubscriptionPolicy with the
-    /// platform default grace period. Idempotent: existing row is left untouched so an
-    /// operator-tuned value is never overwritten by a restart.
+    /// platform default grace period. Idempotent: an existing row is left untouched so an
+    /// operator-tuned value is never overwritten by a restart. The database generates the
+    /// key (IDENTITY) — the seed never assigns an explicit id, which SQL Server rejects.
     /// </summary>
     private async Task EnsureSubscriptionPolicySeedAsync()
     {
         if (await _context.SubscriptionPolicies.AnyAsync())
             return;
 
-        var result = SubscriptionPolicy.Create(id: 1, gracePeriodDays: 7);
+        var result = SubscriptionPolicy.Create(id: 0, gracePeriodDays: 7);
         if (!result.IsSuccess)
             throw new InvalidOperationException(
                 $"Failed to seed required SubscriptionPolicy: {string.Join(", ", result.Errors!.Select(e => e.Code))}");
@@ -212,8 +213,6 @@ public class ApplicationDbContextInitialiser(
             return;
         }
 
-        var isProduction = _hostEnvironment.IsProduction();
-
         var adminRole = tenantInfo.Id == TenancyConstants.Root.Id
             ? RoleConstants.PlatformAdmin
             : RoleConstants.TenantAdmin;
@@ -230,29 +229,19 @@ public class ApplicationDbContextInitialiser(
                 NormalizedUserName = tenantInfo.Email.ToUpperInvariant()
             };
 
-            // NEW-1: no static/default password anywhere. Production with development
-            // seed explicitly enabled MUST supply BootstrapAdmin:TemporaryPassword via
-            // configuration/secret store; startup fails clearly otherwise. Everywhere
-            // else a fresh cryptographically random password is generated per user.
-            string temporaryPassword;
-            if (isProduction)
-            {
-                if (string.IsNullOrWhiteSpace(_bootstrapAdminOptions.TemporaryPassword))
-                    throw new InvalidOperationException(
-                        "BootstrapAdmin:TemporaryPassword must be configured (environment variable or secret store) " +
-                        "when DatabaseInitialization:SeedDevelopmentData is enabled in Production. " +
-                        "Refusing to create a bootstrap admin without an explicitly configured temporary password.");
+            // NEW-1 correction: there is no generated/fallback password. A bootstrap
+            // admin is created ONLY from an explicitly configured
+            // BootstrapAdmin:TemporaryPassword (environment variable / secret store /
+            // user-secrets in development). Missing configuration fails startup clearly
+            // instead of inventing, logging, or returning a credential.
+            if (string.IsNullOrWhiteSpace(_bootstrapAdminOptions.TemporaryPassword))
+                throw new InvalidOperationException(
+                    "BootstrapAdmin:TemporaryPassword must be configured (environment variable, " +
+                    "secret store, or development user-secrets) to seed a bootstrap admin. " +
+                    "Refusing to create a bootstrap admin without an explicitly configured temporary password. " +
+                    "There is no generated or default password.");
 
-                temporaryPassword = _bootstrapAdminOptions.TemporaryPassword;
-            }
-            else if (!string.IsNullOrWhiteSpace(_bootstrapAdminOptions.TemporaryPassword))
-            {
-                temporaryPassword = _bootstrapAdminOptions.TemporaryPassword;
-            }
-            else
-            {
-                temporaryPassword = TenancyConstants.GenerateTemporaryPassword();
-            }
+            string temporaryPassword = _bootstrapAdminOptions.TemporaryPassword;
 
             // Run Identity password validators (never bypass by writing PasswordHash
             // directly): a weak explicitly-configured password fails startup loudly.
@@ -264,16 +253,10 @@ public class ApplicationDbContextInitialiser(
 
             await _userManager.AddClaimAsync(adminUser, new Claim("password.change_required", "true"));
 
-            if (isProduction)
-                logger.LogWarning(
-                    "Created bootstrap admin {Email} from explicitly configured temporary password. " +
-                    "Force password change required on first login via POST /api/auth/change-password.",
-                    tenantInfo.Email);
-            else
-                logger.LogInformation(
-                    "Created bootstrap admin {Email} with a generated temporary password. " +
-                    "Force password change required on first login via POST /api/auth/change-password.",
-                    tenantInfo.Email);
+            logger.LogWarning(
+                "Created bootstrap admin {Email} from explicitly configured temporary password. " +
+                "Force password change required on first login via POST /api/auth/change-password.",
+                tenantInfo.Email);
         }
 
         if (!await _userManager.IsInRoleAsync(adminUser, adminRole))
