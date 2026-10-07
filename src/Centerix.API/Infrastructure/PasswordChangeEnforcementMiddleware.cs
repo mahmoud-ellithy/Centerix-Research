@@ -6,15 +6,17 @@ namespace Centerix.API.Infrastructure;
 
 /// <summary>
 /// NEW-1 password.change_required enforcement (correction).
-/// Two independent, server-authoritative gates:
-/// 1. Purpose-restricted flow tokens (JWT claim <c>pwd_change_only=true</c>, issued ONLY
-///    by the login gate while the requirement stands) are valid for exactly one endpoint:
-///    POST /api/auth/change-password. Anywhere else they are rejected with 403, so a flow
-///    token can never become a normal session.
-/// 2. When the authoritative database state (Identity user claims, loaded per request via
-///    <see cref="UserManager{TUser}"/> — NEVER trusted from the JWT) still carries
-///    <c>password.change_required=true</c>, every authenticated request except the
-///    allow-list below is rejected with 403 <c>Auth:PasswordChangeRequired</c>.
+/// Two independent, server-authoritative gates evaluated in strict order:
+/// Gate 1 (evaluated FIRST, before any exemption): purpose-restricted flow tokens
+/// (JWT claim <c>pwd_change_only=true</c>, issued ONLY by the login gate while the
+/// requirement stands) are valid for exactly one endpoint: POST /api/auth/change-password.
+/// Anywhere else they are rejected with 403. This check takes precedence over AllowAnonymous
+/// so a flow token can never reach login, refresh, register, invitation, or any other
+/// anonymous endpoint.
+/// Gate 2 (evaluated after exemptions): when the authoritative database state (Identity
+/// user claims, loaded per request via <see cref="UserManager{TUser}"/> — NEVER trusted
+/// from the JWT) still carries <c>password.change_required=true</c>, every authenticated
+/// request except the allow-list below is rejected with 403 <c>Auth:PasswordChangeRequired</c>.
 /// The allow-list keeps the credential-rotation flow usable: login/refresh (anonymous),
 /// POST /api/auth/change-password (to clear the requirement), logout endpoints (to abandon
 /// sessions), anonymous invitation registration, and docs.
@@ -31,18 +33,21 @@ public sealed class PasswordChangeEnforcementMiddleware(RequestDelegate next)
             return;
         }
 
-        if (IsExempt(context))
-        {
-            await next(context);
-            return;
-        }
-
         // Gate 1: a purpose-restricted flow token outside its single endpoint is rejected
-        // even before the database is consulted — it is not a session token.
+        // BEFORE any exemption (including AllowAnonymous) is evaluated. The purpose-token
+        // restriction takes precedence over the generic AllowAnonymous exemption so that
+        // a password-change-only token can never reach login, refresh, register, invitation,
+        // or any other anonymous endpoint.
         if (IsPasswordChangeOnlyToken(context.User) && !IsChangePasswordEndpoint(context))
         {
             await WriteForbidden(context,
                 "This token is restricted to POST /api/auth/change-password.");
+            return;
+        }
+
+        if (IsExempt(context))
+        {
+            await next(context);
             return;
         }
 

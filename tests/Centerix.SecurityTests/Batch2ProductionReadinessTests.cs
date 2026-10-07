@@ -360,6 +360,134 @@ public class Batch2ProductionReadinessTests : IClassFixture<TestWebApplicationFa
     }
 
     // ================================================================
+    // Purpose-token endpoint binding: AllowAnonymous cannot bypass
+    // ================================================================
+
+    /// <summary>
+    /// Regression: password-change-only token → POST /api/auth/change-password is allowed.
+    /// Proves the purpose token works at its designated endpoint.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Batch2")]
+    public async Task PurposeToken_ChangePasswordEndpoint_Allowed()
+    {
+        var email = UniqueEmail("b2-pt-ok");
+        var user = await CreateUserAsync(email);
+        await AddChangeRequiredClaimAsync(user.Id);
+
+        // Obtain a real flow token through the login gate.
+        var loginResponse = await PostLoginAsync(email, StrongPassword);
+        Assert.Equal(HttpStatusCode.Forbidden, loginResponse.StatusCode);
+        var body = await loginResponse.Content.ReadAsStringAsync();
+        var flowToken = JsonSerializer.Deserialize<JsonElement>(body, JsonOptions)
+            .GetProperty("changePasswordToken").GetString()!;
+
+        // The flow token must be accepted at POST /api/auth/change-password.
+        var change = await PostChangePasswordWithTokenAsync(flowToken,
+            new { currentPassword = StrongPassword, newPassword = NewStrongPassword });
+        Assert.Equal(HttpStatusCode.OK, change.StatusCode);
+    }
+
+    /// <summary>
+    /// Regression: password-change-only token → POST /api/auth/login ([AllowAnonymous]) is rejected.
+    /// AllowAnonymous must NOT bypass the purpose-token restriction.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Batch2")]
+    public async Task PurposeToken_LoginAllowAnonymous_Rejected()
+    {
+        var email = UniqueEmail("b2-pt-login");
+        var user = await CreateUserAsync(email);
+
+        var flowToken = GenerateTokenWithClaim(user.Id, email, "pwd_change_only", "true");
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/login");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", flowToken);
+        request.Headers.Add(TestRemoteIpStartupFilter.HeaderName, UniqueIp());
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(new { email, password = StrongPassword }),
+            Encoding.UTF8, "application/json");
+        var response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        var responseBody = await response.Content.ReadAsStringAsync();
+        Assert.Contains("PasswordChangeRequired", responseBody);
+    }
+
+    /// <summary>
+    /// Regression: password-change-only token → POST /api/auth/refresh ([AllowAnonymous]) is rejected.
+    /// AllowAnonymous must NOT bypass the purpose-token restriction.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Batch2")]
+    public async Task PurposeToken_RefreshAllowAnonymous_Rejected()
+    {
+        var email = UniqueEmail("b2-pt-refresh");
+        var user = await CreateUserAsync(email);
+
+        var flowToken = GenerateTokenWithClaim(user.Id, email, "pwd_change_only", "true");
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/refresh");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", flowToken);
+        request.Headers.Add(TestRemoteIpStartupFilter.HeaderName, UniqueIp());
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(new { refreshToken = "any-value" }),
+            Encoding.UTF8, "application/json");
+        var response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        var responseBody = await response.Content.ReadAsStringAsync();
+        Assert.Contains("PasswordChangeRequired", responseBody);
+    }
+
+    /// <summary>
+    /// Regression: password-change-only token → POST /api/invitations/register ([AllowAnonymous]) is rejected.
+    /// AllowAnonymous must NOT bypass the purpose-token restriction.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Batch2")]
+    public async Task PurposeToken_RegisterAllowAnonymous_Rejected()
+    {
+        var email = UniqueEmail("b2-pt-reg");
+        var user = await CreateUserAsync(email);
+
+        var flowToken = GenerateTokenWithClaim(user.Id, email, "pwd_change_only", "true");
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/invitations/register");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", flowToken);
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(new { invitationToken = "any", name = "Test", password = "P@ss1" }),
+            Encoding.UTF8, "application/json");
+        var response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        var responseBody = await response.Content.ReadAsStringAsync();
+        Assert.Contains("PasswordChangeRequired", responseBody);
+    }
+
+    /// <summary>
+    /// Regression: normal authenticated token behavior remains unchanged.
+    /// A token without pwd_change_only claim can still reach authorized endpoints normally.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Batch2")]
+    public async Task NormalToken_NotAffectedByPurposeRestriction()
+    {
+        const string tenantId = "b2-pt-normal-tenant";
+        await SeedTenantWithAdminAsync(tenantId, "b2-pt-normal-admin@test.com");
+
+        var email = UniqueEmail("b2-pt-normal");
+        var user = await CreateUserAsync(email);
+        await EnsureMembershipAsync(tenantId, user.Id, "TenantAdmin");
+
+        var normalToken = _factory.GenerateTestToken(user.Id, email, ["TenantAdmin"]);
+        var response = await SendAsync(HttpMethod.Get, "/api/invitations", tenantId, normalToken);
+
+        // Must NOT be 403 from password-change enforcement.
+        Assert.NotEqual(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    // ================================================================
     // NEW-1 E: no bootstrap password generator (unit-level)
     // ================================================================
 
