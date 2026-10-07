@@ -1,0 +1,101 @@
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
+using System.Security.Claims;
+
+namespace Centerix.API.Infrastructure;
+
+/// <summary>
+/// NEW-1 password.change_required enforcement.
+/// When the authoritative database state (Identity user claims, loaded per request via
+/// <see cref="UserManager{TUser}"/> — NEVER the JWT) still carries
+/// <c>password.change_required=true</c>, every authenticated request except the
+/// allow-list below is rejected with 403 <c>Auth:PasswordChangeRequired</c>.
+/// The allow-list keeps the credential-rotation flow usable: login/refresh (to obtain
+/// a session), POST /api/auth/change-password (to clear the requirement), logout
+/// endpoints (to abandon sessions), anonymous invitation registration, and docs.
+/// </summary>
+public sealed class PasswordChangeEnforcementMiddleware(RequestDelegate next)
+{
+    public const string ChangeRequiredClaimType = "password.change_required";
+
+    public async Task InvokeAsync(HttpContext context, UserManager<IdentityUser> userManager)
+    {
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            await next(context);
+            return;
+        }
+
+        if (IsExempt(context))
+        {
+            await next(context);
+            return;
+        }
+
+        var userId = context.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(userId))
+        {
+            await next(context);
+            return;
+        }
+
+        var user = await userManager.FindByIdAsync(userId);
+        if (user is null)
+        {
+            await next(context);
+            return;
+        }
+
+        // Authoritative state comes from the database, never from JWT claims.
+        var claims = await userManager.GetClaimsAsync(user);
+        var changeRequired = claims.Any(c =>
+            string.Equals(c.Type, ChangeRequiredClaimType, StringComparison.Ordinal) &&
+            string.Equals(c.Value, "true", StringComparison.OrdinalIgnoreCase));
+
+        if (!changeRequired)
+        {
+            await next(context);
+            return;
+        }
+
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        context.Response.ContentType = "application/problem+json";
+        await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new
+        {
+            type = "https://tools.ietf.org/html/rfc7231#section-6.5.3",
+            title = "Auth:PasswordChangeRequired",
+            status = StatusCodes.Status403Forbidden,
+            detail = "Password change is required before this operation. Use POST /api/auth/change-password."
+        }));
+    }
+
+    private static bool IsExempt(HttpContext context)
+    {
+        var endpoint = context.GetEndpoint();
+        if (endpoint?.Metadata.GetMetadata<AllowAnonymousAttribute>() is not null)
+            return true;
+
+        if (IsBypassPath(context.Request.Path))
+            return true;
+
+        // POST /api/auth/change-password — the rotation endpoint itself.
+        if (HttpMethods.IsPost(context.Request.Method) &&
+            context.Request.Path.Equals("/api/auth/change-password", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Session teardown must stay usable while the requirement is set.
+        if (HttpMethods.IsPost(context.Request.Method) &&
+            (context.Request.Path.StartsWithSegments("/api/auth/logout", StringComparison.OrdinalIgnoreCase) ||
+             context.Request.Path.StartsWithSegments("/api/auth/logout-all", StringComparison.OrdinalIgnoreCase)))
+            return true;
+
+        return false;
+    }
+
+    private static bool IsBypassPath(PathString path)
+    {
+        return path.StartsWithSegments("/scalar", StringComparison.OrdinalIgnoreCase) ||
+               path.StartsWithSegments("/openapi", StringComparison.OrdinalIgnoreCase) ||
+               path.StartsWithSegments("/swagger", StringComparison.OrdinalIgnoreCase);
+    }
+}

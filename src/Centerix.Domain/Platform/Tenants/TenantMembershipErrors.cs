@@ -31,6 +31,14 @@ public static class TenantMembershipErrors
     public static Error DuplicateActiveInvitation =>
         Error.Conflict("TenantInvitation.Duplicate", "An active invitation already exists for this email in this tenant");
 
+    /// <summary>
+    /// CFG-001: invitation e-mail delivery failed. The invitation was persisted first and a
+    /// compensation (revoke so it no longer remains Pending) was attempted; either way the
+    /// request reports FAILURE and never claims success. No Outbox/DATA-001 involved.
+    /// </summary>
+    public static Error InvitationDeliveryFailed =>
+        Error.Failure("TenantInvitation.DeliveryFailed", "The invitation could not be delivered by email. No invitation was left pending.");
+
     public static Error UnauthorizedToInvite =>
         Error.Forbidden("TenantInvitation.Unauthorized", "You do not have permission to create invitations for this tenant");
 

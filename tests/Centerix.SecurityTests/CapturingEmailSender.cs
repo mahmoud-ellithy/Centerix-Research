@@ -23,10 +23,23 @@ public class CapturingEmailSender : IEmailSender
         {
             _sent.Clear();
         }
+
+        ShouldFail = null;
     }
+
+    /// <summary>
+    /// Batch 2 (CFG-001) hook: when set, <see cref="SendAsync"/> throws an
+    /// <see cref="InvalidOperationException"/> for matching recipients so tests can prove
+    /// invitation delivery-failure compensation. Null (default) preserves the old
+    /// always-succeed behavior.
+    /// </summary>
+    public Func<string, bool>? ShouldFail { get; set; }
 
     public Task SendAsync(string to, string subject, string body, CancellationToken cancellationToken = default)
     {
+        if (ShouldFail?.Invoke(to) == true)
+            throw new InvalidOperationException($"Simulated SMTP delivery failure for {to}.");
+
         lock (_sent)
         {
             _sent.Add(new SentEmail(to, subject, body));

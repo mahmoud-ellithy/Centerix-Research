@@ -6,20 +6,32 @@ using Finbuckle.MultiTenant;
 using Finbuckle.MultiTenant.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Centerix.Infrastructure.Tenancy;
 
 public class TenantDbSeeder(
     TenantDbContext tenantDbContext,
-    IServiceProvider serviceProvider) : ITenantDbSeeder
+    IServiceProvider serviceProvider,
+    IOptions<Data.DatabaseInitializationOptions> dbInitOptions) : ITenantDbSeeder
 {
     private readonly TenantDbContext _tenantDbContext = tenantDbContext;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly Data.DatabaseInitializationOptions _options = dbInitOptions.Value;
 
     public async Task InitializeDatabaseAsync(CancellationToken cancellationToken = default)
     {
-        await _tenantDbContext.Database.MigrateAsync(cancellationToken);
+        // NEW-2: honor DatabaseInitialization:ApplyMigrations. The orchestrator
+        // (Extensions.RunDatabaseInitializationAsync) already migrated the registry
+        // first; this guard keeps verify-only mode (ApplyMigrations=false) honest.
+        if (_options.ApplyMigrations)
+            await _tenantDbContext.Database.MigrateAsync(cancellationToken);
+
         await InitializeRootTenantAsync(cancellationToken);
+
+        // Required per-tenant seed runs only when DatabaseInitialization:Seed is set.
+        if (!_options.Seed)
+            return;
 
         foreach (var tenant in await _tenantDbContext.TenantInfo.ToListAsync(cancellationToken))
         {
@@ -63,7 +75,9 @@ public class TenantDbSeeder(
             };
 
         var initialiser = scope.ServiceProvider.GetRequiredService<ApplicationDbContextInitialiser>();
-        await initialiser.InitialiseAsync();
-        await initialiser.SeedAsync();
+        if (_options.ApplyMigrations)
+            await initialiser.InitialiseAsync();
+        if (_options.Seed)
+            await initialiser.SeedAsync();
     }
 }

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Centerix.Domain.Platform.Authorization;
+using Centerix.Domain.Platform.Subscriptions;
 using Centerix.Domain.Platform.Tenants;
 using Centerix.Domain.Platform.Tenants.Enums;
 using Centerix.Infrastructure.Auth;
@@ -7,7 +8,9 @@ using Centerix.Infrastructure.Tenancy;
 using Finbuckle.MultiTenant.Abstractions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Centerix.Infrastructure.Data;
 
@@ -16,13 +19,19 @@ public class ApplicationDbContextInitialiser(
     AppDbContext context,
     UserManager<IdentityUser> userManager,
     RoleManager<ApplicationRole> roleManager,
-    IMultiTenantContextAccessor<CenterixTenantInfo> tenantInfoContextAccessor)
+    IMultiTenantContextAccessor<CenterixTenantInfo> tenantInfoContextAccessor,
+    IHostEnvironment hostEnvironment,
+    IOptions<DatabaseInitializationOptions> dbInitOptions,
+    IOptions<BootstrapAdminOptions> bootstrapAdminOptions)
 {
     private readonly ILogger<ApplicationDbContextInitialiser> _logger = logger;
     private readonly AppDbContext _context = context;
     private readonly UserManager<IdentityUser> _userManager = userManager;
     private readonly RoleManager<ApplicationRole> _roleManager = roleManager;
     private readonly IMultiTenantContextAccessor<CenterixTenantInfo> _tenantInfoContextAccessor = tenantInfoContextAccessor;
+    private readonly IHostEnvironment _hostEnvironment = hostEnvironment;
+    private readonly DatabaseInitializationOptions _dbInitOptions = dbInitOptions.Value;
+    private readonly BootstrapAdminOptions _bootstrapAdminOptions = bootstrapAdminOptions.Value;
 
     public async Task InitialiseAsync(CancellationToken cancellationToken = default)
     {
@@ -52,14 +61,41 @@ public class ApplicationDbContextInitialiser(
 
     private async Task TrySeedAsync()
     {
+        // REQUIRED seed (NEW-2): deterministic + idempotent, runs in every environment
+        // when DatabaseInitialization:Seed is enabled. Never includes development-only
+        // bootstrap credentials — those are gated separately on SeedDevelopmentData.
         // Permission catalog (global) > Roles > RolePermission assignments per tenant.
         await SeedPermissionCatalogAsync();
         // Default Roles > Assign Permissions via RolePermission rows
         await InitializeDefaultRolesAsync();
-        // Admin user (from the current tenant) > Assign Role
-        await InitializeAdminUserAsync();
+        // Required platform singleton: reconciliation fail-fasts without it.
+        await EnsureSubscriptionPolicySeedAsync();
         // C2: Ensure Platform.Tenants entry exists for the root tenant
         await EnsureRootTenantEntityAsync();
+        // Development-only bootstrap admin (NEW-1/NEW-2): skipped in production unless
+        // DatabaseInitialization:SeedDevelopmentData is explicitly enabled, in which
+        // case the temporary password MUST come from BootstrapAdmin configuration —
+        // a static/default password is never created.
+        await InitializeAdminUserAsync();
+    }
+
+    /// <summary>
+    /// Required deterministic seed (NEW-2): single-row SubscriptionPolicy with the
+    /// platform default grace period. Idempotent: existing row is left untouched so an
+    /// operator-tuned value is never overwritten by a restart.
+    /// </summary>
+    private async Task EnsureSubscriptionPolicySeedAsync()
+    {
+        if (await _context.SubscriptionPolicies.AnyAsync())
+            return;
+
+        var result = SubscriptionPolicy.Create(id: 1, gracePeriodDays: 7);
+        if (!result.IsSuccess)
+            throw new InvalidOperationException(
+                $"Failed to seed required SubscriptionPolicy: {string.Join(", ", result.Errors!.Select(e => e.Code))}");
+
+        await _context.SubscriptionPolicies.AddAsync(result.Value);
+        await _context.SaveChangesAsync();
     }
 
     private async Task SeedPermissionCatalogAsync()
@@ -166,6 +202,18 @@ public class ApplicationDbContextInitialiser(
             return;
         }
 
+        // NEW-2: development-only/bootstrap data must never reach production unless an
+        // operator explicitly opts in via DatabaseInitialization:SeedDevelopmentData.
+        if (_hostEnvironment.IsProduction() && !_dbInitOptions.SeedDevelopmentData)
+        {
+            _logger.LogInformation(
+                "Skipping bootstrap admin seed for {Email} in Production (SeedDevelopmentData is disabled).",
+                tenantInfo.Email);
+            return;
+        }
+
+        var isProduction = _hostEnvironment.IsProduction();
+
         var adminRole = tenantInfo.Id == TenancyConstants.Root.Id
             ? RoleConstants.PlatformAdmin
             : RoleConstants.TenantAdmin;
@@ -182,13 +230,50 @@ public class ApplicationDbContextInitialiser(
                 NormalizedUserName = tenantInfo.Email.ToUpperInvariant()
             };
 
-            var temporaryPassword = TenancyConstants.GenerateTemporaryPassword();
-            var passwordHasher = new PasswordHasher<IdentityUser>();
-            adminUser.PasswordHash = passwordHasher.HashPassword(adminUser, temporaryPassword);
-            logger.LogInformation("Generated temporary password for {Email}. Force password change required on first login.", tenantInfo.Email);
+            // NEW-1: no static/default password anywhere. Production with development
+            // seed explicitly enabled MUST supply BootstrapAdmin:TemporaryPassword via
+            // configuration/secret store; startup fails clearly otherwise. Everywhere
+            // else a fresh cryptographically random password is generated per user.
+            string temporaryPassword;
+            if (isProduction)
+            {
+                if (string.IsNullOrWhiteSpace(_bootstrapAdminOptions.TemporaryPassword))
+                    throw new InvalidOperationException(
+                        "BootstrapAdmin:TemporaryPassword must be configured (environment variable or secret store) " +
+                        "when DatabaseInitialization:SeedDevelopmentData is enabled in Production. " +
+                        "Refusing to create a bootstrap admin without an explicitly configured temporary password.");
 
-            await _userManager.CreateAsync(adminUser);
+                temporaryPassword = _bootstrapAdminOptions.TemporaryPassword;
+            }
+            else if (!string.IsNullOrWhiteSpace(_bootstrapAdminOptions.TemporaryPassword))
+            {
+                temporaryPassword = _bootstrapAdminOptions.TemporaryPassword;
+            }
+            else
+            {
+                temporaryPassword = TenancyConstants.GenerateTemporaryPassword();
+            }
+
+            // Run Identity password validators (never bypass by writing PasswordHash
+            // directly): a weak explicitly-configured password fails startup loudly.
+            var createResult = await _userManager.CreateAsync(adminUser, temporaryPassword);
+            if (!createResult.Succeeded)
+                throw new InvalidOperationException(
+                    $"Failed to create bootstrap admin {tenantInfo.Email}: " +
+                    string.Join("; ", createResult.Errors.Select(e => e.Description)));
+
             await _userManager.AddClaimAsync(adminUser, new Claim("password.change_required", "true"));
+
+            if (isProduction)
+                logger.LogWarning(
+                    "Created bootstrap admin {Email} from explicitly configured temporary password. " +
+                    "Force password change required on first login via POST /api/auth/change-password.",
+                    tenantInfo.Email);
+            else
+                logger.LogInformation(
+                    "Created bootstrap admin {Email} with a generated temporary password. " +
+                    "Force password change required on first login via POST /api/auth/change-password.",
+                    tenantInfo.Email);
         }
 
         if (!await _userManager.IsInRoleAsync(adminUser, adminRole))

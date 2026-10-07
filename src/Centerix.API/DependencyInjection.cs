@@ -182,6 +182,10 @@ public static class DependencyInjection
 
         app.UseMultiTenant();
         app.UseAuthentication();
+        // NEW-1: password.change_required enforcement runs on the authenticated principal
+        // BEFORE tenant authorization so the bootstrap/root user (no membership) is still
+        // gated on rotation yet can always reach the rotation endpoint itself.
+        app.UseMiddleware<PasswordChangeEnforcementMiddleware>();
         // TenantGuardMiddleware must run BEFORE UseAuthorization so that tenant context
         // is established and permissions are loaded before the PermissionAuthorizationHandler runs.
         app.UseMiddleware<TenantGuardMiddleware>();

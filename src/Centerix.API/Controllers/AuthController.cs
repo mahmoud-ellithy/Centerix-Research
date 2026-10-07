@@ -156,6 +156,63 @@ public class AuthController(
         await refreshTokenService.RevokeAllAsync(userId);
         return NoContent();
     }
+
+    /// <summary>
+    /// NEW-1 self-only password rotation.
+    /// Identity comes EXCLUSIVELY from the authenticated server-side principal
+    /// (<see cref="ClaimTypes.NameIdentifier"/> resolved by authentication) — no target
+    /// UserId is accepted from body, query, route, or headers, so a caller can only ever
+    /// rotate their OWN password. The authoritative <c>password.change_required</c> state
+    /// is loaded from the database (Identity claims), never trusted from the JWT, and is
+    /// cleared — together with all refresh sessions — ONLY after a successful change. A
+    /// failed change leaves the requirement and all sessions untouched.
+    /// Tenant-independent: reachable by the bootstrap/root Platform user without any
+    /// tenant membership (see TenantGuardMiddleware bypass).
+    /// </summary>
+    [HttpPost("change-password")]
+    [Authorize]
+    public async Task<IActionResult> ChangePassword(ChangePasswordRequest request)
+    {
+        // Strictly self-only: server-resolved identity, nothing from the request identifies
+        // the target user.
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(userId))
+            return Unauthorized();
+
+        var user = await userManager.FindByIdAsync(userId);
+        if (user is null)
+            return Unauthorized();
+
+        if (string.IsNullOrWhiteSpace(request.CurrentPassword) || string.IsNullOrWhiteSpace(request.NewPassword))
+            return BadRequest(new { error = localizer.Translate("Auth:InvalidPasswordChangeRequest") });
+
+        var changeResult = await userManager.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
+        if (!changeResult.Succeeded)
+        {
+            // Failed rotation changes NOTHING: requirement claim and refresh sessions stay
+            // exactly as they were.
+            return BadRequest(new
+            {
+                error = localizer.Translate("Auth:PasswordChangeFailed"),
+                details = changeResult.Errors.Select(e => e.Description).ToList()
+            });
+        }
+
+        // Successful rotation only: clear the authoritative requirement claim from the DB...
+        var claims = await userManager.GetClaimsAsync(user);
+        var requirementClaims = claims
+            .Where(c => string.Equals(c.Type, PasswordChangeRequiredClaimType, StringComparison.Ordinal))
+            .ToList();
+        foreach (var claim in requirementClaims)
+            await userManager.RemoveClaimAsync(user, claim);
+
+        // ...and revoke every refresh session for this user.
+        await refreshTokenService.RevokeAllAsync(userId);
+
+        return NoContent();
+    }
+
+    private const string PasswordChangeRequiredClaimType = "password.change_required";
 }
 
 public record LoginRequest(string Email, string Password);
@@ -177,3 +234,6 @@ public record RefreshResponse
 }
 
 public record LogoutRequest(string RefreshToken);
+
+/// <summary>Self-only rotation payload. Carries NO user identifier by design.</summary>
+public record ChangePasswordRequest(string CurrentPassword, string NewPassword);

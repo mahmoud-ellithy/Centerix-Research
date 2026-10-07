@@ -1,5 +1,8 @@
 using Centerix.Infrastructure.Data;
+using Centerix.Infrastructure.Email;
 using Centerix.Infrastructure.Tenancy;
+
+using Microsoft.Extensions.Options;
 
 using Scalar.AspNetCore;
 
@@ -25,14 +28,27 @@ try
 
     var app = builder.Build();
 
+    // CFG-001: deterministic production SMTP gate. Options validation runs at startup,
+    // but this explicit check guarantees Production can never boot with a missing or
+    // invalid SMTP configuration and silently fall back to the development sender.
+    if (app.Environment.IsProduction())
+    {
+        var smtp = app.Services.GetRequiredService<IOptions<SmtpOptions>>().Value;
+        smtp.Validate();
+    }
+
     // Configure the HTTP request pipeline.
     if (app.Environment.IsDevelopment())
     {
         app.MapOpenApi();
         app.MapScalarApiReference();
-        await app.InitialiseDatabaseAsync();
-        await app.InitialiseTenantDatabaseAsync();
     }
+
+    // NEW-2: configured database initialization in every environment except Testing
+    // (the test host manages its own stores). Honors DatabaseInitialization:
+    // ApplyMigrations / Seed / ValidateSchema with tenant-registry-first ordering.
+    // Replaces the previous Development-only InitialiseDatabaseAsync calls.
+    await app.RunDatabaseInitializationAsync();
 
     app.UseCoreMiddlewares();
 

@@ -9,6 +9,7 @@ using Centerix.Domain.Platform.Tenants.Enums;
 using FluentValidation;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using System.Security.Cryptography;
 
 public record CreateInvitationCommand(
@@ -39,8 +40,30 @@ public class CreateInvitationHandler(
     IIdentityService identityService,
     IRoleService roleService,
     IEmailSender emailSender,
-    IInvitationLinkBuilder invitationLinkBuilder) : IRequestHandler<CreateInvitationCommand, Result<Guid>>
+    IInvitationLinkBuilder invitationLinkBuilder,
+    ILogger<CreateInvitationHandler> logger) : IRequestHandler<CreateInvitationCommand, Result<Guid>>
 {
+    /// <summary>
+    /// CFG-001 bounded-consistency invitation delivery. There is deliberately NO Outbox
+    /// (DATA-001 is out of scope), so delivery follows persist → commit → send →
+    /// compensate:
+    /// 1. Persist the Pending invitation.
+    /// 2. Commit (SaveChanges).
+    /// 3. Attempt e-mail delivery.
+    /// 4. On delivery failure, attempt compensation (revoke so the invitation no
+    ///    longer remains Pending).
+    /// 5. If compensation succeeds, the invitation is NOT Pending and the request
+    ///    returns FAILURE.
+    /// 6. If compensation itself fails, the request still returns FAILURE and NEVER
+    ///    claims success; the invitation Id, TenantId, NormalizedEmail, send exception
+    ///    AND compensation exception are all logged for operator reconciliation.
+    /// BOUNDED CONSISTENCY LIMITATION: between step 2 and step 4 (or when compensation
+    /// fails, or the process crashes in that window) a Pending invitation row can exist
+    /// without a delivered e-mail, or — if compensation failed — a Pending row that will
+    /// never be delivered. Operators MUST periodically reconcile invitations stuck in
+    /// Pending past their expected delivery (re-send or revoke them). A transactional
+    /// outbox would close this window but is explicitly deferred (no DATA-001).
+    /// </summary>
     public async Task<Result<Guid>> Handle(
         CreateInvitationCommand request,
         CancellationToken cancellationToken)
@@ -128,19 +151,57 @@ public class CreateInvitationHandler(
             return invitationResult.Errors!;
 
         dbContext.TenantInvitations.Add(invitationResult.Value);
+        var invitationId = invitationResult.Value.Id;
+        var invitationTenantId = invitationResult.Value.TenantId;
+        var invitationNormalizedEmail = invitationResult.Value.NormalizedEmail;
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        // 9. Send invitation email (development mode: logs to console).
-        // The base URL is environment configuration (Invitations:BaseUrl) — never hardcoded —
-        // so each environment links to its own front end.
+        // 9. Send invitation email (SMTP in production, development/capturing sender
+        // elsewhere). The base URL is environment configuration (Invitations:BaseUrl) —
+        // never hardcoded — so each environment links to its own front end.
         var acceptUrl = invitationLinkBuilder.BuildAcceptLink(token);
-        await emailSender.SendAsync(
-            request.Email.Trim(),
-            "You've been invited to join a center",
-            $"<p>You've been invited to join a center as <strong>{request.RoleName}</strong>.</p>" +
-            $"<p><a href=\"{acceptUrl}\">Click here to accept the invitation</a></p>" +
-            $"<p>This invitation expires in {request.ExpirationDays} days.</p>",
-            cancellationToken);
+        try
+        {
+            await emailSender.SendAsync(
+                request.Email.Trim(),
+                "You've been invited to join a center",
+                $"<p>You've been invited to join a center as <strong>{request.RoleName}</strong>.</p>" +
+                $"<p><a href=\"{acceptUrl}\">Click here to accept the invitation</a></p>" +
+                $"<p>This invitation expires in {request.ExpirationDays} days.</p>",
+                cancellationToken);
+        }
+        catch (Exception sendEx)
+        {
+            // Delivery failed AFTER commit: attempt compensation so the invitation does
+            // not remain Pending, but report FAILURE either way — never success.
+            try
+            {
+                var pending = await dbContext.TenantInvitations
+                    .FirstOrDefaultAsync(i => i.Id == invitationId, cancellationToken);
+                if (pending is not null && pending.Status == InvitationStatus.Pending)
+                {
+                    pending.Revoke(currentUser.UserId);
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                }
+
+                logger.LogWarning(
+                    sendEx,
+                    "Invitation email delivery failed; compensation succeeded. " +
+                    "InvitationId={InvitationId}, TenantId={TenantId}, NormalizedEmail={NormalizedEmail}.",
+                    invitationId, invitationTenantId, invitationNormalizedEmail);
+            }
+            catch (Exception compensationEx)
+            {
+                logger.LogError(
+                    compensationEx,
+                    "Invitation email delivery failed AND compensation failed. " +
+                    "InvitationId={InvitationId}, TenantId={TenantId}, NormalizedEmail={NormalizedEmail}, " +
+                    "SendException={SendException}. Operator reconciliation required: revoke or re-send the Pending invitation.",
+                    invitationId, invitationTenantId, invitationNormalizedEmail, sendEx.ToString());
+            }
+
+            return TenantMembershipErrors.InvitationDeliveryFailed;
+        }
 
         return invitationResult.Value.Id;
     }

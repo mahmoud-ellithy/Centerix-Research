@@ -238,11 +238,22 @@ public class TenantGuardMiddleware(RequestDelegate next)
     /// segments, so "/api/auth/logoutxyz" is NOT matched). Both are authenticated session
     /// endpoints that only revoke refresh tokens belonging to the caller; they never read or
     /// write tenant-partitioned rows.
+    /// Also matches POST /api/auth/change-password (NEW-1): self-only rotation resolved
+    /// exclusively from the server-side identity, tenant-independent by design so the
+    /// bootstrap/root Platform user — who holds no tenant membership — can rotate the
+    /// initial credential.
     /// </summary>
     private static bool IsTenantIndependentSessionEndpoint(HttpContext context)
-        => HttpMethods.IsPost(context.Request.Method)
-           && (context.Request.Path.StartsWithSegments("/api/auth/logout", StringComparison.OrdinalIgnoreCase)
-               || context.Request.Path.StartsWithSegments("/api/auth/logout-all", StringComparison.OrdinalIgnoreCase));
+    {
+        if (!HttpMethods.IsPost(context.Request.Method))
+            return false;
+
+        if (context.Request.Path.Equals("/api/auth/change-password", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return context.Request.Path.StartsWithSegments("/api/auth/logout", StringComparison.OrdinalIgnoreCase)
+            || context.Request.Path.StartsWithSegments("/api/auth/logout-all", StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// Matches exactly the two invitation consumption endpoints:

@@ -168,8 +168,59 @@ public static class DependencyInjection
         services.AddScoped<IIdentityService, IdentityService>();
         services.AddScoped<IRoleService, RoleService>();
 
-        // Email sender (development mode: logs to console)
-        services.AddScoped<IEmailSender, DevelopmentEmailSender>();
+        // NEW-2: production database-initialization contract. Validated at startup.
+        // (Fully qualified: this file lives in namespace Microsoft.Extensions.DependencyInjection,
+        // so short Data./Tenancy./Email. prefixes would bind to Microsoft.* namespaces.)
+        services.Configure<Centerix.Infrastructure.Data.DatabaseInitializationOptions>(
+            configuration.GetSection(Centerix.Infrastructure.Data.DatabaseInitializationOptions.SectionName));
+        services.AddOptions<Centerix.Infrastructure.Data.DatabaseInitializationOptions>()
+            .Bind(configuration.GetSection(Centerix.Infrastructure.Data.DatabaseInitializationOptions.SectionName))
+            .Validate(options => { options.Validate(); return true; })
+            .ValidateOnStart();
+
+        // NEW-1/NEW-2: bootstrap admin configuration (explicit temporary password only).
+        services.Configure<Centerix.Infrastructure.Tenancy.BootstrapAdminOptions>(
+            configuration.GetSection(Centerix.Infrastructure.Tenancy.BootstrapAdminOptions.SectionName));
+
+        // CFG-001: SMTP configuration. Production startup fails clearly when required
+        // values are missing/invalid; development/test may leave Smtp unconfigured and
+        // use the development/capturing sender instead.
+        services.Configure<Centerix.Infrastructure.Email.SmtpOptions>(
+            configuration.GetSection(Centerix.Infrastructure.Email.SmtpOptions.SectionName));
+        services.AddOptions<Centerix.Infrastructure.Email.SmtpOptions>()
+            .Bind(configuration.GetSection(Centerix.Infrastructure.Email.SmtpOptions.SectionName))
+            .Validate(options =>
+            {
+                var isProduction = string.Equals(
+                    Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"),
+                    "Production", StringComparison.OrdinalIgnoreCase);
+                if (!isProduction)
+                    return true;
+                try
+                {
+                    options.Validate();
+                    return true;
+                }
+                catch
+                {
+                    return false;
+                }
+            }, "Smtp configuration is missing or invalid for Production. Configure Smtp:Host, Smtp:Port, Smtp:FromAddress (and Smtp:Username/Smtp:Password when authentication is required). Production must never silently use the development email sender.")
+            .ValidateOnStart();
+
+        // CFG-001: Production MUST NEVER silently resolve DevelopmentEmailSender.
+        // The factory below is the single resolution point: Production always returns
+        // the MailKit SMTP sender (whose constructor validates config and throws on
+        // misconfiguration); non-production returns the development sender.
+        services.AddScoped<Centerix.Infrastructure.Email.SmtpEmailSender>();
+        services.AddScoped<Centerix.Infrastructure.Email.DevelopmentEmailSender>();
+        services.AddScoped<IEmailSender>(sp =>
+        {
+            var env = sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>();
+            if (Microsoft.Extensions.Hosting.HostEnvironmentEnvExtensions.IsProduction(env))
+                return (IEmailSender)sp.GetRequiredService<Centerix.Infrastructure.Email.SmtpEmailSender>();
+            return (IEmailSender)sp.GetRequiredService<Centerix.Infrastructure.Email.DevelopmentEmailSender>();
+        });
 
         // Invitation links: environment-specific base URL, validated at startup (fail fast).
         services.Configure<InvitationLinkOptions>(configuration.GetSection(InvitationLinkOptions.SectionName));
