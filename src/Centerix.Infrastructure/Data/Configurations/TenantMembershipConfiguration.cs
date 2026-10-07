@@ -11,7 +11,25 @@ public class TenantMembershipConfiguration : IEntityTypeConfiguration<TenantMemb
 {
     public void Configure(EntityTypeBuilder<TenantMembership> builder)
     {
-        builder.ToTable("TenantMemberships", "Platform");
+        builder.ToTable(
+            "TenantMemberships",
+            "Platform",
+            table =>
+            {
+                // F5: database backstop for the F3 write contract. The domain factories reject
+                // non-canonical RoleName values, but the table is also reachable through seeds,
+                // repairs and raw SQL; the CHECK constraint makes the two-value allow-list a
+                // property of the DATA, not only of the code that normally writes it.
+                //   * Explicit CS_AS collation: the default column collation is usually
+                //     case-insensitive, which would let 'tenantadmin' through the DB while the
+                //     domain (ordinal) rejects it — the backstop must be at least as strict as
+                //     the gate it backstops.
+                //   * The migration DELETEs pre-existing non-conforming rows first (mirrored
+                //     predicate), so the constraint can be added to any populated database.
+                table.HasCheckConstraint(
+                    "CK_TenantMemberships_RoleName_TenantRoleAllowList",
+                    "[RoleName] COLLATE Latin1_General_CS_AS IN ('TenantAdmin', 'TenantUser')");
+            });
 
         // Unique constraint on (UserId, TenantId): a user may belong to many tenants,
         // but only once per tenant. Composite PK also satisfies the uniqueness requirement.

@@ -1,3 +1,4 @@
+using Centerix.API.Infrastructure;
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Authentication;
 using Centerix.Infrastructure.Auth;
@@ -40,36 +41,35 @@ public class AuthController(
             });
         }
 
-        // Check if user is locked out before attempting authentication
+        // F2: lockout enforcement WITHOUT lock-state disclosure. The response for a locked
+        // account is byte-identical to every other credential failure, so login can never be
+        // used to confirm that an address exists, to learn that an account is locked, or to
+        // observe how close it is to its threshold (the previous 429 + lockoutRemainingMinutes
+        // answers did all three).
+        //
+        // Order matters:
+        //  1. CheckPasswordAsync first so a locked account pays the SAME PBKDF2 cost as an
+        //     unknown-email dummy hash (constant-cost response, no timing oracle), and because
+        //     it never mutates lockout state.
+        //  2. The lockout gate runs BEFORE the failure branch, so a wrong password against an
+        //     already-locked account never reaches AccessFailedAsync — a locked account's
+        //     remaining lock time can NOT be extended by hammering it.
+        //  3. A failure that TRIGGERS the lockout (6th failure) still returns the plain 401:
+        //     revealing the threshold by switching to 429 mid-sequence is itself enumeration.
+        var passwordValid = await userManager.CheckPasswordAsync(user, request.Password);
+
         if (await userManager.IsLockedOutAsync(user))
         {
-            var lockoutEnd = await userManager.GetLockoutEndDateAsync(user);
-            var remainingMinutes = lockoutEnd.HasValue
-                ? Math.Ceiling((lockoutEnd.Value - DateTimeOffset.UtcNow).TotalMinutes)
-                : 0;
-
-            return StatusCode(StatusCodes.Status429TooManyRequests, new
+            return Unauthorized(new
             {
-                error = localizer.Translate("Auth:AccountLocked"),
-                lockoutRemainingMinutes = remainingMinutes
+                error = localizer.Translate("Auth:InvalidCredentials")
             });
         }
 
-        // Attempt sign-in with lockout tracking enabled
-        var result = await userManager.CheckPasswordAsync(user, request.Password);
-        if (!result)
+        if (!passwordValid)
         {
-            // Increment failed access count
+            // Increment failed access count (no-op when the store lacks lockout support).
             await userManager.AccessFailedAsync(user);
-
-            // Check if this attempt triggered lockout
-            if (await userManager.IsLockedOutAsync(user))
-            {
-                return StatusCode(StatusCodes.Status429TooManyRequests, new
-                {
-                    error = localizer.Translate("Auth:AccountLockedDueToFailedAttempts")
-                });
-            }
 
             return Unauthorized(new
             {
@@ -88,7 +88,7 @@ public class AuthController(
         var refreshToken = await refreshTokenService.IssueAsync(
             userId: user.Id,
             deviceInfo: Request.Headers.UserAgent.ToString(),
-            ipAddress: Request.HttpContext.Connection.RemoteIpAddress?.ToString());
+            ipAddress: ClientIp.Normalize(Request.HttpContext.Connection.RemoteIpAddress));
 
         return Ok(new LoginResponse
         {
@@ -107,7 +107,7 @@ public class AuthController(
         var result = await refreshTokenService.RotateAsync(
             refreshToken: request.RefreshToken,
             deviceInfo: Request.Headers.UserAgent.ToString(),
-            ipAddress: Request.HttpContext.Connection.RemoteIpAddress?.ToString());
+            ipAddress: ClientIp.Normalize(Request.HttpContext.Connection.RemoteIpAddress));
 
         if (!result.IsSuccess)
         {

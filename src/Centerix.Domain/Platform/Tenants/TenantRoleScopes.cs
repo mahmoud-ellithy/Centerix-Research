@@ -32,8 +32,10 @@ public enum TenantRoleScope
 {
     /// <summary>
     /// The role name is not one of the canonical roles. Authorization is neither granted nor
-    /// rejected on the basis of the name alone - custom tenant roles are legitimate and are
-    /// validated by the Identity role catalog instead. Only <see cref="Platform"/> is rejected.
+    /// rejected on the basis of the name alone - custom tenant roles remain legitimate Identity
+    /// roles and are validated by the Identity role catalog instead. Only <see cref="Platform"/>
+    /// is rejected. Note that such a name can NOT be bound to a tenant-scoped row
+    /// (membership/invitation): those accept only <see cref="TenantRoleScopes.TenantInvitableRoleNames"/>.
     /// </summary>
     Unknown = 0,
 
@@ -62,6 +64,20 @@ public static class TenantRoleScopes
     /// <summary>Role names that are known to be tenant-scoped. Comparison is case-insensitive.</summary>
     public static readonly IReadOnlySet<string> TenantRoleNameSet =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            TenantRoleNames.TenantAdmin,
+            TenantRoleNames.TenantUser
+        };
+
+    /// <summary>
+    /// The ONLY role names that may be bound to a tenant-scoped row (F3: membership/invitation
+    /// role contract). Comparison is ORDINAL - <c>tenantadmin</c>, <c>TenantAdmin </c> or any
+    /// other casing/whitespace variant is not a canonical name and must be rejected rather than
+    /// silently classified. <see cref="Resolve"/> keeps its case-insensitive classification
+    /// semantics for the authorization pipeline; this set is the WRITE contract.
+    /// </summary>
+    public static readonly IReadOnlySet<string> TenantInvitableRoleNames =
+        new HashSet<string>(StringComparer.Ordinal)
         {
             TenantRoleNames.TenantAdmin,
             TenantRoleNames.TenantUser
@@ -103,4 +119,15 @@ public static class TenantRoleScopes
     /// <summary>True only for a canonical tenant role name.</summary>
     public static bool IsTenantScoped(string? roleName)
         => Resolve(roleName) == TenantRoleScope.Tenant;
+
+    /// <summary>
+    /// The write-side contract for <c>TenantMembership.RoleName</c> and
+    /// <c>TenantInvitation.RoleName</c> (F3): true only for the exact canonical names
+    /// <c>TenantAdmin</c> / <c>TenantUser</c>. Null, empty, whitespace-padded, differently
+    /// cased, and any custom Identity role name are all false - they are REJECTED, never
+    /// defaulted or silently accepted, so the set of roles whose grants can flow through the
+    /// tenant permission resolver stays exactly the two production-seeded matrices.
+    /// </summary>
+    public static bool IsCanonicalTenantRole(string? roleName)
+        => roleName is not null && TenantInvitableRoleNames.Contains(roleName);
 }

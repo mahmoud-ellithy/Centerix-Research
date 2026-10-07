@@ -372,8 +372,11 @@ public static class Permissions
         TenantCredits.Read,
         // FIN-001: minting a credit is a TWO-KEY operation. TenantCredits.Create is the
         // TENANT-context key (which tenant this request may act in) and is therefore part of the
-        // TenantAdmin matrix; the PLATFORM key is enforced unconditionally inside
-        // CreateTenantCreditHandler by IPlatformAdminGuard, so a plain TenantAdmin still receives
+        // TenantAdmin matrix; the PLATFORM key is enforced (a) on the endpoint by the second
+        // [HasPermission(PlatformCredits.Mint)] attribute, (b) in F4 at the authorization choke
+        // point by the catalog's RequiresPlatformAuthority flag inside PermissionAuthorizationHandler
+        // — a tenant-derived grant alone can never satisfy the flagged code — and (c) inside
+        // CreateTenantCreditHandler by IPlatformAdminGuard. A plain TenantAdmin still receives
         // HTTP 403 while a verified PlatformAdmin holding a TenantAdmin membership can reach the
         // endpoint. It is NOT granted to TenantUser.
         TenantCredits.Create,

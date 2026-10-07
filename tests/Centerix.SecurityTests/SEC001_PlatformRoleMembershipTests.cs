@@ -66,10 +66,12 @@ public class SEC001_PlatformRoleMembershipTests : IClassFixture<TestWebApplicati
     [Theory]
     [InlineData("TenantAdmin")]
     [InlineData("TenantUser")]
-    [InlineData("Ops Manager")] // custom tenant roles stay permitted (validated by the Identity catalog)
     [InlineData("")]
-    public void Membership_TenantOrCustomRole_StillSucceeds(string roleName)
+    public void Membership_CanonicalRole_StillSucceeds(string roleName)
     {
+        // F3: a custom role name ("Ops Manager") no longer qualifies — only the canonical
+        // tenant roles (or empty, which defaults to TenantUser) may be bound to a membership.
+        // The rejection lives in F3_TenantRoleContractTests.
         var result = TenantMembership.Create("user-1", "tenant-1", roleName, TenantMembershipStatus.Active);
 
         Assert.True(result.IsSuccess, DescribeErrors(result.Errors));

@@ -40,7 +40,18 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
                     ["JwtSettings:Audience"] = "TestAudience",
                     ["JwtSettings:ExpirationInMinutes"] = "60",
                     ["Invitations:BaseUrl"] = "https://app.securitytests.local",
-                    ["ConnectionStrings:DefaultConnection"] = $"Server=localhost;Database={_databaseName};Trusted_Connection=True;TrustServerCertificate=True;"
+                    ["ConnectionStrings:DefaultConnection"] = $"Server=localhost;Database={_databaseName};Trusted_Connection=True;TrustServerCertificate=True;",
+
+                    // F1: forwarded-header trust for the test host. The loopback entries mirror
+                    // production; 192.0.2.1/192.0.2.2 (TEST-NET-1) are trusted "edge proxies" so
+                    // chain-consumption tests can place the TestServer peer at a trusted hop.
+                    // ForwardLimit 5 lets multi-hop chains be consumed past the first entry.
+                    ["ForwardedHeaders:KnownProxies:0"] = "127.0.0.1",
+                    ["ForwardedHeaders:KnownProxies:1"] = "::1",
+                    ["ForwardedHeaders:KnownProxies:2"] = "192.0.2.1",
+                    ["ForwardedHeaders:KnownProxies:3"] = "192.0.2.2",
+                    ["ForwardedHeaders:KnownNetworks:0"] = "127.0.0.0/8",
+                    ["ForwardedHeaders:ForwardLimit"] = "5"
                 })
                 .Build();
 

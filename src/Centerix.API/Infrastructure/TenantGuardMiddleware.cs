@@ -162,6 +162,14 @@ public class TenantGuardMiddleware(RequestDelegate next)
         if (TenantRoleScopes.IsPlatformScoped(membership.RoleName))
             return [];
 
+        // F3 (defense in depth): a membership row written BEFORE the canonical-role write contract
+        // existed could carry a custom role name. Custom roles are not one of the production-seeded
+        // matrices, so such a row publishes NOTHING instead of whatever RolePermission rows happen
+        // to back the custom Identity role. The domain factories now prevent new rows like this;
+        // this check covers legacy/corrupt rows.
+        if (!TenantRoleScopes.IsCanonicalTenantRole(membership.RoleName))
+            return [];
+
         // Find the role by name via Identity's Roles table
         // AppDbContext inherits IdentityDbContext which has the Roles DbSet
         var identityContext = (Microsoft.AspNetCore.Identity.EntityFrameworkCore.IdentityDbContext)dbContext;

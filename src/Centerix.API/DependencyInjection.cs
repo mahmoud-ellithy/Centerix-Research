@@ -25,6 +25,10 @@ public static class DependencyInjection
             .AddExceptionHandling()
             .AddControllerWithJsonConfiguration();
 
+        // F1: forwarded-header trust is configuration-bound with fail-fast invariants. Registering
+        // it here guarantees the options are validated at startup (ValidateOnStart), never lazily.
+        services.AddForwardedHeadersProtection(configuration);
+
         services.AddSingleton<ILocalizer, JsonLocalizer>();
 
         return services;
@@ -91,7 +95,7 @@ public static class DependencyInjection
         {
             options.AddPolicy("LoginPolicy", httpContext =>
                 System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter(
-                    partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    partitionKey: ClientIp.ForRateLimit(httpContext),
                     factory: _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions
                     {
                         PermitLimit = 5,
@@ -107,7 +111,7 @@ public static class DependencyInjection
             // above that while still bounding abuse from a single source.
             options.AddPolicy("RefreshPolicy", httpContext =>
                 System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter(
-                    partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    partitionKey: ClientIp.ForRateLimit(httpContext),
                     factory: _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions
                     {
                         PermitLimit = 30,
@@ -123,7 +127,7 @@ public static class DependencyInjection
             // (registration is a one-shot flow).
             options.AddPolicy("RegisterPolicy", httpContext =>
                 System.Threading.RateLimiting.RateLimitPartition.GetSlidingWindowLimiter(
-                    partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    partitionKey: ClientIp.ForRateLimit(httpContext),
                     factory: _ => new System.Threading.RateLimiting.SlidingWindowRateLimiterOptions
                     {
                         PermitLimit = 60,
@@ -154,6 +158,14 @@ public static class DependencyInjection
     public static IApplicationBuilder UseCoreMiddlewares(this IApplicationBuilder app)
     {
         app.UseExceptionHandler();
+
+        // F1: trust guard first — strips X-Forwarded-For when there is no socket peer to
+        // attribute the chain to, so ForwardedHeadersMiddleware can only ever start its
+        // validation walk from a proven address. Runs before UseForwardedHeaders and before
+        // UseRateLimiter so the limiter partitions on the resolved (server-chosen) address.
+        app.UseMiddleware<ForwardedHeaderTrustGuardMiddleware>();
+        app.UseForwardedHeaders();
+
         app.UseStatusCodePages();
         app.UseRateLimiter();
         app.UseHttpsRedirection();

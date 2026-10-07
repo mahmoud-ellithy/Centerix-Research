@@ -50,4 +50,15 @@ public static class TenantMembershipErrors
         Error.Forbidden(
             "TenantMembership.PlatformRoleNotAllowed",
             "Platform roles cannot be granted a tenant membership or invitation");
+
+    /// <summary>
+    /// F3: only the canonical tenant roles (TenantAdmin, TenantUser) may be bound to a tenant
+    /// membership or invitation. A custom Identity role - even one backed by real RolePermission
+    /// grants - must not become a membership RoleName, because membership role grants flow
+    /// through the tenant permission resolver exactly like the production-seeded matrices.
+    /// </summary>
+    public static Error RoleNotAllowed =>
+        Error.Forbidden(
+            "TenantMembership.RoleNotAllowed",
+            "Only the canonical tenant roles (TenantAdmin, TenantUser) can be granted a tenant membership or invitation");
 }

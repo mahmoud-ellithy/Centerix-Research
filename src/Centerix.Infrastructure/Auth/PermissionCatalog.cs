@@ -26,7 +26,8 @@ public static class PermissionCatalog
         string Action,
         string Code,
         PermissionScope Scope,
-        string? Description);
+        string? Description,
+        bool RequiresPlatformAuthority = false);
 
     public static readonly Entry[] All =
     [
@@ -165,7 +166,12 @@ public static class PermissionCatalog
 
         new("Ledger",         "Read",   "Ledger.Read",           PermissionScope.Tenant, "Read customer ledger entries"),
 
-        new("TenantCredits",  "Create", "TenantCredits.Create",  PermissionScope.Tenant, "Create a tenant credit"),
+        // F4 two-key catalog flag: RequiresPlatformAuthority marks a TENANT-scoped permission
+        // that additionally demands a VERIFIED platform authority at the authorization choke
+        // point (PermissionAuthorizationHandler). TenantCredits.Create is the tenant key of the
+        // FIN-001 mint operation: a tenant-membership grant proves WHICH tenant the request may
+        // act in, never WHETHER the caller may mint balance. See RequiresPlatformAuthority(string).
+        new("TenantCredits",  "Create", "TenantCredits.Create",  PermissionScope.Tenant, "Create a tenant credit", RequiresPlatformAuthority: true),
         new("TenantCredits",  "Read",   "TenantCredits.Read",    PermissionScope.Tenant, "Read tenant credits"),
         new("TenantCredits",  "Apply",  "TenantCredits.Apply",   PermissionScope.Tenant, "Apply credit to invoice"),
 
@@ -196,4 +202,22 @@ public static class PermissionCatalog
         new("Offers",         "Calculate","Offers.Calculate",    PermissionScope.Tenant, "Calculate and persist an offer"),
         new("Offers",         "Accept",   "Offers.Accept",       PermissionScope.Tenant, "Accept an offer"),
     ];
+
+    /// <summary>
+    /// F4: the catalog's two-key flag. True only for a permission that, beyond its own scope's
+    /// normal grant rules, ALSO requires a verified platform authority at the single
+    /// authorization choke point every requirement passes through
+    /// (<c>PermissionAuthorizationHandler</c>). The flagged permission still runs the ordinary
+    /// tenant grant path afterwards — the flag is an ADDITIONAL gate, never a shortcut, so
+    /// satisfying it alone cannot authorize the request.
+    /// <para>
+    /// Exactly one code carries the flag today: <c>TenantCredits.Create</c> — the tenant key of
+    /// the FIN-001 credit-mint operation. A tenant-membership grant proves WHICH tenant; only
+    /// <c>IPlatformAdminVerifier</c> proves WHETHER the caller may mint.
+    /// </para>
+    /// </summary>
+    public static bool RequiresPlatformAuthority(string? code)
+        => All.Any(entry =>
+            entry.RequiresPlatformAuthority
+            && string.Equals(entry.Code, code, StringComparison.Ordinal));
 }

@@ -73,9 +73,19 @@ public class Auth003_RefreshLockoutTests
 
         await LockAccountAsync(email);
 
-        // The account is locked out; login now reports it.
+        // The account is locked out; login must still REJECT it — with the byte-identical uniform
+        // 401 any other credential failure gets (F2: the old 429 + lockoutRemainingMinutes body
+        // disclosed both the lock state and the remaining lock time).
         var loginAfterLock = await _env.Client.SendAsync(LoginRequest(email, RemoteIp()));
-        Assert.Equal(HttpStatusCode.TooManyRequests, loginAfterLock.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, loginAfterLock.StatusCode);
+        var lockedBody = await loginAfterLock.Content.ReadAsStringAsync();
+
+        var miss = await _env.Client.SendAsync(LoginRequest(UniqueEmail("miss"), RemoteIp()));
+        Assert.Equal(HttpStatusCode.Unauthorized, miss.StatusCode);
+        var missBody = await miss.Content.ReadAsStringAsync();
+        Assert.Equal(missBody, lockedBody);
+        Assert.DoesNotContain("lockout", lockedBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("remaining", lockedBody, StringComparison.OrdinalIgnoreCase);
 
         // ...but the refresh token issued before the lock must NOT still work.
         var refreshAfterLock = await _env.Client.SendAsync(

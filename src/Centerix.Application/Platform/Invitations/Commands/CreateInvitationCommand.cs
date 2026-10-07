@@ -67,6 +67,14 @@ public class CreateInvitationHandler(
         if (TenantRoleScopes.IsPlatformScoped(request.RoleName))
             return TenantMembershipErrors.PlatformRoleNotAllowed;
 
+        // 3b. F3: only the canonical tenant roles (TenantAdmin, TenantUser) may be invited. This
+        // runs BEFORE the role-exists lookup so a non-canonical name answers 403 (RoleNotAllowed)
+        // rather than 404 (RoleNotFound): the role may well exist in Identity - the contract is
+        // about which roles can ever become a tenant membership, not about the catalog.
+        // (Re-enforced as a domain invariant inside TenantInvitation.Create.)
+        if (!TenantRoleScopes.IsCanonicalTenantRole(request.RoleName))
+            return TenantMembershipErrors.RoleNotAllowed;
+
         // 4. Validate the target role exists
         var roleExists = await roleService.ExistsAsync(request.RoleName);
         if (!roleExists)

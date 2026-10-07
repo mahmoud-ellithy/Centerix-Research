@@ -133,6 +133,26 @@ public class FIN001_TenantCreditAuthorizationTests : IClassFixture<TestWebApplic
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    /// <summary>
+    /// F4 gate-vs-shortcut at the HTTP boundary: platform authority held, tenant key MISSING.
+    /// The platform admin's membership carries TenantUser (which holds no TenantCredits.Create),
+    /// so the flagged tenant key cannot be satisfied — the request must be 403 even though the
+    /// PlatformCredits.Mint key passes. Authority opens the gate; it does not replace the tenant
+    /// grant. (The mirror case — tenant key held, authority missing — is
+    /// <see cref="TenantAdmin_MintCredit_Returns403"/>.)
+    /// </summary>
+    [Fact]
+    public async Task PlatformAdmin_WithTenantUserMembership_MintCredit_Returns403()
+    {
+        var tenantId = await SeedAsync();
+        var platformAdmin = await CreateMemberAsync(tenantId, "TenantUser", identityRole: "PlatformAdmin");
+
+        var response = await _client.SendAsync(
+            Post(Token(platformAdmin, "PlatformAdmin"), MintPayload(), tenantId));
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
     /// <summary>The positive control: verified platform authority + active tenant membership.</summary>
     [Fact]
     public async Task PlatformAdmin_WithMembership_MintCredit_Returns201_AndPersistsRow()

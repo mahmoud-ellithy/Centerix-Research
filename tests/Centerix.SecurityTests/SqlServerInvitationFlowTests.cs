@@ -356,7 +356,11 @@ public class SqlServerInvitationFlowTests
         const string tenantId = "sql-rolename-tenant";
         await EnsureTenantAsync(tenantId);
 
-        var roleName = $"Ops Manager L{Random.Shared.Next(100)}"; // nvarchar(128), spaces preserved
+        // F3/F5: RoleName is now a closed write contract (canonical tenant roles only, backed by a
+        // CHECK constraint), so the round-trip is proven with a canonical name instead of a custom
+        // "Ops Manager L{n}" one — non-canonical names are rejected by TenantMembership.Create and
+        // would additionally violate the SQL CHECK constraint.
+        const string roleName = "TenantAdmin";
         var user = await CreateUserAsync(UniqueEmail("rolename"));
 
         using (var scope = _env.Factory.Services.CreateScope())

@@ -184,8 +184,15 @@ public class Task15_1FeatureGatingHttpTests : IClassFixture<TestWebApplicationFa
         {
             var limitedUser = await EnsureUserAsync($"limited_{Guid.NewGuid():N}@t151fg.test", "LimitedUser");
             if (!db.TenantMemberships.Any(m => m.UserId == limitedUser.Id && m.TenantId == tenant.Id.ToString()))
+            {
+                // F3: membership RoleName must be one of the canonical tenant roles; the custom
+                // "LimitedUser" Identity role stays on the user itself (token roles), while the
+                // membership carries "TenantUser". The tests that use this limited user are all
+                // PermissionMissing-403 cases, and TenantUser holds no write permissions in this
+                // seed, so the expected denials are unchanged.
                 db.TenantMemberships.Add(TenantMembership.Create(
-                    limitedUser.Id, tenant.Id.ToString(), "LimitedUser", TenantMembershipStatus.Active).Value);
+                    limitedUser.Id, tenant.Id.ToString(), "TenantUser", TenantMembershipStatus.Active).Value);
+            }
             limitedToken = _factory.GenerateTestToken(limitedUser.Id, limitedUser.Email!, ["LimitedUser"]);
         }
         await db.SaveChangesAsync();

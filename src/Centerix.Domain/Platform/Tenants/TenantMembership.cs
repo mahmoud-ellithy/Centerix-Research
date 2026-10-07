@@ -60,6 +60,14 @@ public class TenantMembership : Entity
         if (TenantRoleScopes.IsPlatformScoped(roleName))
             return TenantMembershipErrors.PlatformRoleNotAllowed;
 
+        // F3 (domain invariant): only the two canonical tenant roles may be bound to a
+        // membership. Any other name - a custom Identity role, a casing/whitespace variant -
+        // is REJECTED, not defaulted, so the grants reachable through the tenant permission
+        // resolver stay exactly the two production-seeded matrices (TenantAdmin's and
+        // TenantUser's). Checked AFTER the platform rule so SEC-001 keeps its dedicated error.
+        if (!TenantRoleScopes.IsCanonicalTenantRole(roleName))
+            return TenantMembershipErrors.RoleNotAllowed;
+
         return new TenantMembership(userId, tenantId, roleName, status);
     }
 

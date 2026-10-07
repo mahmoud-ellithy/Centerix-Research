@@ -81,6 +81,13 @@ public class TenantInvitation : Entity
         if (TenantRoleScopes.IsPlatformScoped(roleName))
             return TenantMembershipErrors.PlatformRoleNotAllowed;
 
+        // F3 (domain invariant): an invitation is only ever accepted into a membership, so it
+        // inherits the membership write contract - canonical tenant roles only. Rejecting here
+        // stops a non-canonical role at the earliest possible point of the deferred flow; the
+        // acceptance path (which creates the membership) checks again regardless.
+        if (!TenantRoleScopes.IsCanonicalTenantRole(roleName))
+            return TenantMembershipErrors.RoleNotAllowed;
+
         if (string.IsNullOrWhiteSpace(tokenHash))
             return Error.Validation("TenantInvitation.TokenHash_Required", "Token hash is required");
 

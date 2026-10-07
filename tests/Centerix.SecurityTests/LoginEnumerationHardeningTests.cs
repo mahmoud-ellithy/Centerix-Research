@@ -109,6 +109,105 @@ public class LoginEnumerationHardeningTests
     }
 
     // ==================================================================
+    // F2 — lock-state disclosure (uniform 401 for locked accounts)
+    // ==================================================================
+
+    /// <summary>
+    /// A locked account must be indistinguishable from an unknown address: same status, same
+    /// bytes. The previous implementation answered 429 with a localized "account locked" body and
+    /// a <c>lockoutRemainingMinutes</c> count — enough to confirm the address exists, that it is
+    /// locked, and how close the threshold is.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    public async Task LockedAccount_CorrectAndWrongPassword_AreIndistinguishableFromUnknownEmail()
+    {
+        var lockedEmail = UniqueEmail("locked");
+        await CreateUserAsync(lockedEmail);
+        await LockAsync(lockedEmail);
+
+        var unknownEmail = UniqueEmail("unknown");
+
+        var lockedCorrect = await SendLoginAsync(lockedEmail, StrongPassword);
+        var lockedWrong = await SendLoginAsync(lockedEmail, "definitely-not-the-password");
+        var miss = await SendLoginAsync(unknownEmail, StrongPassword);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, lockedCorrect.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, lockedWrong.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, miss.StatusCode);
+
+        Assert.Equal(miss.Body, lockedCorrect.Body);
+        Assert.Equal(miss.Body, lockedWrong.Body);
+        Assert.DoesNotContain("lockout", lockedCorrect.Body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("remaining", lockedCorrect.Body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Hammering an already-locked account must not EXTEND its lock. The failure branch (which
+    /// calls AccessFailedAsync) must sit behind the lockout gate, so wrong passwords against a
+    /// locked account never touch the failed-attempt counter or the lockout clock.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    public async Task AttemptsAgainstALockedAccount_DoNotExtendTheLockout()
+    {
+        var lockedEmail = UniqueEmail("extend");
+        await CreateUserAsync(lockedEmail);
+        await LockAsync(lockedEmail);
+
+        var (lockoutEndBefore, failuresBefore) = await ReadLockoutStateAsync(lockedEmail);
+
+        for (var i = 0; i < 3; i++)
+        {
+            var attempt = await SendLoginAsync(lockedEmail, "definitely-not-the-password");
+            Assert.Equal(HttpStatusCode.Unauthorized, attempt.StatusCode);
+        }
+
+        var (lockoutEndAfter, failuresAfter) = await ReadLockoutStateAsync(lockedEmail);
+
+        Assert.Equal(lockoutEndBefore, lockoutEndAfter);
+        Assert.Equal(failuresBefore, failuresAfter);
+    }
+
+    /// <summary>
+    /// Timing: a locked account (known email, gate denies) must not be measurably faster than an
+    /// unknown email. Both branches run the same PBKDF2 verification before answering, so the
+    /// lockout gate cannot be used as a registration oracle. Floor 0.33 with 10 interleaved
+    /// samples per branch — tighter floors flip on CI jitter, and the un-fixed gap (a
+    /// short-circuited miss vs. no hash at all) was an order of magnitude, not 3%.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    public async Task LockedAccount_IsNotMeasurablyFasterThan_UnknownEmail()
+    {
+        var lockedEmail = UniqueEmail("timinglock");
+        await CreateUserAsync(lockedEmail);
+        await LockAsync(lockedEmail);
+        var unknownEmail = UniqueEmail("timinglock");
+
+        // Warm-up: pay JIT/startup costs before either branch is measured.
+        await SendLoginAsync(lockedEmail, StrongPassword);
+        await SendLoginAsync(unknownEmail, StrongPassword);
+
+        var lockedDurations = new List<double>();
+        var missDurations = new List<double>();
+
+        for (var i = 0; i < 10; i++)
+        {
+            missDurations.Add(await TimeAsync(unknownEmail, StrongPassword));
+            lockedDurations.Add(await TimeAsync(lockedEmail, StrongPassword));
+        }
+
+        var lockedMedian = Median(lockedDurations);
+        var missMedian = Median(missDurations);
+
+        Assert.True(
+            lockedMedian >= missMedian * 0.33,
+            $"A locked account answered in {lockedMedian:F1}ms (median) while an unknown email took " +
+            $"{missMedian:F1}ms. The lockout gate must not short-circuit the password verification.");
+    }
+
+    // ==================================================================
     // Helpers
     // ==================================================================
 
@@ -170,5 +269,39 @@ public class LoginEnumerationHardeningTests
         using var verify = _env.Factory.Services.CreateScope();
         var db = verify.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.NotNull(await db.Users.SingleOrDefaultAsync(u => u.Id == user.Id));
+    }
+
+    // F2 helpers: every helper re-fetches the user inside its own scope (UserManager attaches
+    // the instance you hand it; sharing a detached instance across DbContexts is undefined).
+
+    private async Task LockAsync(string email)
+    {
+        using var scope = _env.Factory.Services.CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+        var user = await userManager.FindByEmailAsync(email);
+        Assert.NotNull(user);
+        Assert.True((await userManager.SetLockoutEnabledAsync(user!, true)).Succeeded);
+        Assert.True((await userManager.SetLockoutEndDateAsync(
+            user!, DateTimeOffset.UtcNow.AddMinutes(15))).Succeeded);
+    }
+
+    private async Task<(DateTimeOffset? LockoutEnd, int Failures)> ReadLockoutStateAsync(string email)
+    {
+        using var scope = _env.Factory.Services.CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+        var user = await userManager.FindByEmailAsync(email);
+        Assert.NotNull(user);
+        var lockoutEnd = await userManager.GetLockoutEndDateAsync(user!);
+        var failures = await userManager.GetAccessFailedCountAsync(user!);
+        return (lockoutEnd, failures);
+    }
+
+    private static double Median(List<double> samples)
+    {
+        var ordered = samples.OrderBy(s => s).ToList();
+        var middle = ordered.Count / 2;
+        return ordered.Count % 2 == 0
+            ? (ordered[middle - 1] + ordered[middle]) / 2
+            : ordered[middle];
     }
 }

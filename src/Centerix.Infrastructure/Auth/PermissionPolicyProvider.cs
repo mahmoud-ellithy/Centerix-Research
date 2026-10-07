@@ -144,7 +144,33 @@ public class PermissionAuthorizationHandler(
             return;
         }
 
-        // ---- TENANT scope from here on. The PlatformAdmin bypass DOES NOT APPLY. ----
+        // STEP 3b — F4 two-key catalog flag (FIN-001 defense in depth). A TENANT-scoped
+        // permission flagged with RequiresPlatformAuthority demands verified platform authority
+        // BEFORE any tenant-derived grant is consulted: a tenant-membership grant proves WHICH
+        // tenant the request may act in, never WHETHER the caller may mint balance. The gate is
+        // deliberately one-way: failing it denies outright, passing it falls through so the
+        // tenant branch below STILL has to grant the permission — the flag adds a key, it never
+        // replaces one. This is the choke point behind the endpoint's second [HasPermission]
+        // attribute and the handler's IPlatformAdminGuard; all three must pass.
+        if (PermissionCatalog.RequiresPlatformAuthority(requirement.Permission))
+        {
+            var isPlatformAdmin = await platformAdminVerifier.IsPlatformAdminAsync(
+                context.User, cancellationToken);
+
+            if (!isPlatformAdmin)
+            {
+                _logger.LogWarning(
+                    "Denied flagged two-key permission '{Permission}' for user {UserId}: verified " +
+                    "platform authority required (F4); tenant-derived grants cannot satisfy it.",
+                    requirement.Permission,
+                    context.User.FindFirstValue(ClaimTypes.NameIdentifier));
+                return;
+            }
+        }
+
+        // ---- TENANT scope from here on. A PlatformAdmin identity alone NEVER grants: the scope
+        // bypass of STEP 2 does not apply to tenant permissions, and STEP 3b (when flagged) only
+        // opens the gate — the tenant branch below must still authorize the request. ----
 
         if (httpContext is null)
             return;
@@ -206,6 +232,22 @@ public class PermissionAuthorizationHandler(
                 _logger.LogWarning(
                     "Denied permission '{Permission}' for user {UserId}: tenant membership carries " +
                     "platform role '{RoleName}' (SEC-001); no tenant permission may be resolved from it.",
+                    requirement.Permission,
+                    userId,
+                    membership.RoleName);
+                return;
+            }
+
+            // F3 (defense in depth): never resolve a tenant permission through a NON-CANONICAL
+            // role name stored on a membership row (a custom Identity role or a casing/whitespace
+            // variant). Such a row can only predate the canonical-role write contract; the
+            // membership then contributes NO permissions, so the grants reachable through the
+            // tenant resolver stay exactly the two production-seeded matrices.
+            if (!TenantRoleScopes.IsCanonicalTenantRole(membership.RoleName))
+            {
+                _logger.LogWarning(
+                    "Denied permission '{Permission}' for user {UserId}: tenant membership carries " +
+                    "non-canonical role '{RoleName}' (F3); no tenant permission may be resolved from it.",
                     requirement.Permission,
                     userId,
                     membership.RoleName);
