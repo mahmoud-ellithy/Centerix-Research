@@ -1,11 +1,16 @@
 using Centerix.Domain.Platform.Tenants;
 using Centerix.Domain.Platform.Tenants.Enums;
 using Centerix.Infrastructure.Data;
+using Centerix.Infrastructure.Data.Migrations;
 using Centerix.Infrastructure.Tenancy;
 using Finbuckle.MultiTenant.Abstractions;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
+using System.Reflection;
 using Xunit;
 
 namespace Centerix.SecurityTests;
@@ -16,9 +21,10 @@ namespace Centerix.SecurityTests;
 /// The F3 domain contract rejects non-canonical roles at every write path, but the table is
 /// also reachable through seeds, repairs and raw SQL. The CHECK constraint
 /// <c>CK_TenantMemberships_RoleName_TenantRoleAllowList</c> makes the contract durable at the
-/// storage layer, and the migration that adds it first DELETEs pre-existing non-conforming rows
-/// with a predicate mirrored 1:1 from the constraint — so the migration is safe on a populated
-/// production database.
+/// storage layer, and the migration that adds it is FAIL-CLOSED: when pre-existing
+/// non-conforming rows are present it THROWs (reporting count + identifying sample) instead
+/// of adding the constraint, and it never deletes or modifies a row. An operator remediates
+/// explicitly and re-runs migrations.
 /// </para>
 /// <para>
 /// All proofs run against the REAL migrated database of the SqlServerIntegration collection.
@@ -111,62 +117,100 @@ public class F5_TenantRoleCheckConstraintTests
             .SingleAsync(m => m.UserId == user.Id && m.TenantId == tenantId);
         Assert.Equal(roleName, reloaded.RoleName);
     }
-
     /// <summary>
-    /// The migration's DELETE predicate, executed exactly as written in
-    /// AddRoleNameTenantRoleAllowList.Up(): inside ONE transaction with the constraint dropped,
-    /// a legacy row must be removed while a canonical row survives — and a ROLLBACK must restore
-    /// BOTH the constraint (SQL Server DDL is transactional) and the database contents, leaving
-    /// no test residue behind.
+    /// Fail-closed proof on the exact five-row adversarial dataset: TenantAdmin, TenantUser,
+    /// PlatformAdmin, CustomRole, tenantadmin.
+    /// <para>
+    /// Inside ONE transaction with the constraint dropped (the pre-F5 schema), the five legacy
+    /// rows are inserted via raw SQL. The REAL migration (<see
+    /// cref="AddRoleNameTenantRoleAllowList.Up"/>, invoked — not copied) is then executed:
+    /// it must THROW, must delete/modify NOTHING (all five rows survive), and must fail the
+    /// same way on a deterministic re-run. After an EXPLICIT operator remediation step
+    /// (performed by the test as the operator would), re-executing the same migration
+    /// succeeds and the canonical restriction is enforced again. A ROLLBACK restores both
+    /// the constraint (SQL Server DDL is transactional) and the contents, leaving no residue.
+    /// </para>
     /// </summary>
     [Fact]
     [Trait("Category", "SqlServer")]
-    public async Task MigrationDelete_RemovesOnlyNonCanonicalRows_AndTheConstraintSurvivesRollback()
+    public async Task Migration_FailClosed_AdversarialRows_ArePreserved_AndConstraintEnforcedAfterRemediation()
     {
-        const string tenantId = "f5-legacy-tenant";
+        const string tenantId = "f5-failclosed-tenant";
         await EnsureTenantAsync(tenantId);
-        var legacyUser = await CreateUserAsync($"f5legacy_{Guid.NewGuid():N}@f5.test");
-        var canonicalUser = await CreateUserAsync($"f5canon_{Guid.NewGuid():N}@f5.test");
 
-        // Pre-transaction state: the constraint must exist BEFORE we tamper with it.
-        Assert.True(await ConstraintExistsAsync());
-
+        // The exact adversarial dataset from the review.
+        string[] roles = ["TenantAdmin", "TenantUser", "PlatformAdmin", "CustomRole", "tenantadmin"];
+        var userIds = new List<string>();
+        foreach (var role in roles)
         {
-            using var scope = _env.Factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var user = await CreateUserAsync($"f5fc_{role}_{Guid.NewGuid():N}@f5.test");
+            userIds.Add(user.Id);
+        }
 
-            await using var transaction = await db.Database.BeginTransactionAsync();
+        using var scope = _env.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            // 1. Drop the constraint (transactional DDL).
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        try
+        {
+            // 1. Pre-F5 schema: drop the constraint (transactional DDL).
             await db.Database.ExecuteSqlRawAsync(
                 $"ALTER TABLE [Platform].[TenantMemberships] DROP CONSTRAINT [{ConstraintName}]");
 
-            // 2. Seed one legacy row (bypassing the now-dropped check) and one canonical row.
-            var legacy = TenantMembership.Create(
-                legacyUser.Id, tenantId, "TenantUser", TenantMembershipStatus.Active).Value;
-            typeof(TenantMembership).GetProperty(nameof(TenantMembership.RoleName))!
-                .SetValue(legacy, "Ops Manager");
-            db.TenantMemberships.Add(legacy);
+            // 2. Pre-migration state: five rows, bypassing the domain gate via raw SQL.
+            for (var i = 0; i < roles.Length; i++)
+            {
+                var userId = userIds[i];
+                var role = roles[i];
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"INSERT INTO [Platform].[TenantMemberships] ([UserId], [TenantId], [RoleName], [Status], [JoinedAtUtc]) VALUES ({userId}, {tenantId}, {role}, 0, SYSUTCDATETIME())");
+            }
 
-            db.TenantMemberships.Add(
-                TenantMembership.Create(
-                    canonicalUser.Id, tenantId, "TenantAdmin", TenantMembershipStatus.Active).Value);
-            await db.SaveChangesAsync();
+            Assert.Equal(5, await CountTenantRowsAsync(db, tenantId));
 
-            // 3. The migration's DELETE literal, verbatim.
-            await db.Database.ExecuteSqlRawAsync(
-                "DELETE FROM [Platform].[TenantMemberships] " +
-                "WHERE [RoleName] COLLATE Latin1_General_CS_AS NOT IN ('TenantAdmin', 'TenantUser')");
+            // 3. Execute the REAL migration: it must fail safely.
+            var first = await Assert.ThrowsAsync<SqlException>(() => ExecuteF5MigrationUpAsync(db));
+            Assert.Equal(51000, first.Number);
+            Assert.Contains(ConstraintName, first.Message);
+            Assert.Contains("3 row(s)", first.Message);
 
-            var legacyGone = !await db.TenantMemberships.AsNoTracking().AnyAsync(
-                m => m.UserId == legacyUser.Id && m.TenantId == tenantId);
-            var canonicalKept = await db.TenantMemberships.AsNoTracking().AnyAsync(
-                m => m.UserId == canonicalUser.Id && m.TenantId == tenantId);
+            // 4. No membership row was silently deleted or modified.
+            Assert.Equal(5, await CountTenantRowsAsync(db, tenantId));
+            var survivingRoles = await db.TenantMemberships.AsNoTracking()
+                .Where(m => m.TenantId == tenantId)
+                .Select(m => m.RoleName)
+                .ToListAsync();
+            Assert.Equivalent(
+                roles.OrderBy(r => r, StringComparer.Ordinal).ToList(),
+                survivingRoles.OrderBy(r => r, StringComparer.Ordinal).ToList());
 
-            Assert.True(legacyGone, "The migration DELETE must remove the non-canonical row.");
-            Assert.True(canonicalKept, "The migration DELETE must never touch a canonical row.");
+            // 5. Determinism: a second run fails identically and still preserves everything.
+            var second = await Assert.ThrowsAsync<SqlException>(() => ExecuteF5MigrationUpAsync(db));
+            Assert.Equal(51000, second.Number);
+            Assert.Equal(5, await CountTenantRowsAsync(db, tenantId));
 
-            // 4. Roll back: constraint and contents must both be as they were.
+            // 6. EXPLICIT operator remediation (a deliberate, auditable step — never performed
+            // by the migration itself): normalize the three non-canonical rows.
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE [Platform].[TenantMemberships] SET [RoleName] = 'TenantUser' WHERE [TenantId] = {tenantId} AND [RoleName] COLLATE Latin1_General_CS_AS NOT IN ('TenantAdmin', 'TenantUser')");
+            Assert.Equal(5, await CountTenantRowsAsync(db, tenantId));
+
+            // 7. Re-executing the same migration now succeeds and the constraint is back.
+            await ExecuteF5MigrationUpAsync(db);
+            Assert.True(await ConstraintExistsAsync(db));
+            Assert.Equal(5, await CountTenantRowsAsync(db, tenantId));
+
+            // 8. The canonical restriction is enforced again: a new bad row is rejected by
+            // the constraint, naming it so operators can find it.
+            var badUser = await CreateUserAsync($"f5fc_bad_{Guid.NewGuid():N}@f5.test");
+            var badUserId = badUser.Id;
+            var rejected = await Assert.ThrowsAsync<SqlException>(() => db.Database.ExecuteSqlInterpolatedAsync(
+                $"INSERT INTO [Platform].[TenantMemberships] ([UserId], [TenantId], [RoleName], [Status], [JoinedAtUtc]) VALUES ({badUserId}, {tenantId}, 'CustomRole', 0, SYSUTCDATETIME())"));
+            Assert.Contains(ConstraintName, rejected.Message);
+        }
+        finally
+        {
+            // 9. Roll back: constraint and contents must both be as they were.
             await transaction.RollbackAsync();
         }
 
@@ -174,20 +218,49 @@ public class F5_TenantRoleCheckConstraintTests
             await ConstraintExistsAsync(),
             "SQL Server DDL is transactional: the DROP CONSTRAINT must be rolled back too.");
 
-        using (var scope = _env.Factory.Services.CreateScope())
+        using (var verifyScope = _env.Factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            Assert.False(
-                await db.TenantMemberships.AsNoTracking().AnyAsync(
-                    m => (m.UserId == legacyUser.Id || m.UserId == canonicalUser.Id)
-                      && m.TenantId == tenantId),
-                "The proof transaction must leave no rows behind.");
+            var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.Equal(
+                0,
+                await verifyDb.TenantMemberships.AsNoTracking().CountAsync(m => m.TenantId == tenantId));
         }
     }
 
     // ==================================================================
     // Helpers
     // ==================================================================
+
+    /// <summary>
+    /// Executes the REAL F5 migration (<see cref="AddRoleNameTenantRoleAllowList.Up"/>) by
+    /// generating its SQL Server commands from the migration class itself — never a copy of
+    /// its SQL — and running them on the given connection (inside the caller's transaction
+    /// when one is active). A fail-closed guard violation surfaces as
+    /// <see cref="SqlException"/> (error 51000).
+    /// </summary>
+    private static async Task ExecuteF5MigrationUpAsync(AppDbContext db)
+    {
+        var migration = new AddRoleNameTenantRoleAllowList();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        typeof(Migration).GetMethod("Up", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(migration, [builder]);
+
+        var generator = db.GetService<IMigrationsSqlGenerator>();
+        foreach (var command in generator.Generate(builder.Operations, db.Model))
+            await db.Database.ExecuteSqlRawAsync(command.CommandText);
+    }
+
+    private static Task<int> CountTenantRowsAsync(AppDbContext db, string tenantId) =>
+        db.TenantMemberships.AsNoTracking().CountAsync(m => m.TenantId == tenantId);
+
+    /// <summary>Same-connection variant for use inside an uncommitted transaction.</summary>
+    private static async Task<bool> ConstraintExistsAsync(AppDbContext db)
+    {
+        var count = await db.Database.SqlQuery<int>(
+                $"SELECT COUNT(*) AS [Value] FROM sys.check_constraints WHERE parent_object_id = OBJECT_ID(N'Platform.TenantMemberships') AND name = {ConstraintName}")
+            .SingleAsync();
+        return count == 1;
+    }
 
     private async Task<bool> ConstraintExistsAsync()
     {

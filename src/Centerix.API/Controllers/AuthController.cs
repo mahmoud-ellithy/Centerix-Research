@@ -196,12 +196,19 @@ public class AuthController(
     /// 1. The caller is authenticated (Authorize) and ONLY the caller's own UserId —
     ///    resolved server-side from <see cref="ClaimTypes.NameIdentifier"/> — is ever used.
     ///    No target UserId is accepted from body, query, route, or headers.
-    /// 2. The current password is validated; on credential failure the existing Identity
+    /// 2. A purpose-restricted password-change-only token (JWT claim
+    ///    <c>pwd_change_only=true</c>) is SINGLE-USE: it is accepted here only while the
+    ///    authoritative database state still carries <c>password.change_required</c> for the
+    ///    caller. The first successful rotation clears that claim, which consumes the flow
+    ///    token — any later presentation of the same token is rejected (401) before any
+    ///    password is validated, so the check can never degrade into a 400. Normal session
+    ///    tokens carry no purpose claim and are unaffected by this gate.
+    /// 3. The current password is validated; on credential failure the existing Identity
     ///    lockout policy applies (<c>AccessFailedAsync</c>) and NOTHING else happens: no
     ///    claim cleared, no sessions revoked, no tokens issued.
-    /// 3. ONLY after a successful change is <c>password.change_required</c> cleared in the
+    /// 4. ONLY after a successful change is <c>password.change_required</c> cleared in the
     ///    database and are existing refresh sessions revoked.
-    /// 4. The response is the fresh NORMAL token pair so the user continues normally.
+    /// 5. The response is the fresh NORMAL token pair so the user continues normally.
     /// Tenant-independent: reachable by the bootstrap/root Platform user without any
     /// tenant membership (see TenantGuardMiddleware bypass).
     /// </summary>
@@ -218,6 +225,22 @@ public class AuthController(
         var user = await userManager.FindByIdAsync(userId);
         if (user is null)
             return Unauthorized();
+
+        // Single-use consumption of the purpose-restricted flow token (server-side, against
+        // the authoritative database state — no new session/store subsystem). A flow token
+        // presented after its requirement was already cleared (i.e. after a successful
+        // rotation consumed it) is rejected indistinguishably (401) BEFORE any password is
+        // validated. Failed attempts leave the requirement — and therefore the token —
+        // intact, so legitimate retries keep working until the rotation succeeds.
+        if (IsPasswordChangeOnlyToken(User))
+        {
+            var purposeRequirementClaims = await userManager.GetClaimsAsync(user);
+            var stillRequired = purposeRequirementClaims.Any(c =>
+                string.Equals(c.Type, PasswordChangeRequiredClaimType, StringComparison.Ordinal) &&
+                string.Equals(c.Value, "true", StringComparison.OrdinalIgnoreCase));
+            if (!stillRequired)
+                return Unauthorized(new { error = localizer.Translate("Auth:InvalidCredentials") });
+        }
 
         if (string.IsNullOrWhiteSpace(request.CurrentPassword) || string.IsNullOrWhiteSpace(request.NewPassword))
             return BadRequest(new { error = localizer.Translate("Auth:InvalidPasswordChangeRequest") });
@@ -271,6 +294,12 @@ public class AuthController(
     }
 
     private const string PasswordChangeRequiredClaimType = "password.change_required";
+
+    private static bool IsPasswordChangeOnlyToken(ClaimsPrincipal principal) =>
+        string.Equals(
+            principal.FindFirst(JwtTokenService.PasswordChangeOnlyClaimType)?.Value,
+            "true",
+            StringComparison.Ordinal);
 }
 
 public record LoginRequest(string Email, string Password);

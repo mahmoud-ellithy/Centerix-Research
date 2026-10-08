@@ -24,8 +24,10 @@ public class TenantMembershipConfiguration : IEntityTypeConfiguration<TenantMemb
                 //     case-insensitive, which would let 'tenantadmin' through the DB while the
                 //     domain (ordinal) rejects it — the backstop must be at least as strict as
                 //     the gate it backstops.
-                //   * The migration DELETEs pre-existing non-conforming rows first (mirrored
-                //     predicate), so the constraint can be added to any populated database.
+                //   * The F5 migration is fail-closed: when pre-existing non-conforming rows
+                //     are present it THROWs (reporting count + identifying sample) instead of
+                //     adding the constraint, and it never deletes or modifies rows. An operator
+                //     remediates explicitly and re-runs migrations.
                 table.HasCheckConstraint(
                     "CK_TenantMemberships_RoleName_TenantRoleAllowList",
                     "[RoleName] COLLATE Latin1_General_CS_AS IN ('TenantAdmin', 'TenantUser')");

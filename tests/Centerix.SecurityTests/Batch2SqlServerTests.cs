@@ -622,7 +622,8 @@ public class Batch2SqlServerTests
             sp.GetRequiredService<IMultiTenantContextAccessor<CenterixTenantInfo>>(),
             new FakeHostEnvironment(environmentName),
             Options.Create(new DatabaseInitializationOptions { SeedDevelopmentData = seedDevelopmentData }),
-            Options.Create(new BootstrapAdminOptions { TemporaryPassword = bootstrapPassword }));
+            Options.Create(new BootstrapAdminOptions { TemporaryPassword = bootstrapPassword }),
+            Options.Create(new PlatformAdminBootstrapOptions()));
     }
 
     private sealed class FakeHostEnvironment(string environmentName) : IHostEnvironment

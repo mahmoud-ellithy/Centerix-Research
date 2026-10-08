@@ -182,6 +182,11 @@ public static class DependencyInjection
         services.Configure<Centerix.Infrastructure.Tenancy.BootstrapAdminOptions>(
             configuration.GetSection(Centerix.Infrastructure.Tenancy.BootstrapAdminOptions.SectionName));
 
+        // Batch 2 correction: production first-PlatformAdmin bootstrap. Own section with its
+        // own Enabled switch — operationally distinct from SeedDevelopmentData sample seeding.
+        services.Configure<Centerix.Infrastructure.Tenancy.PlatformAdminBootstrapOptions>(
+            configuration.GetSection(Centerix.Infrastructure.Tenancy.PlatformAdminBootstrapOptions.SectionName));
+
         // CFG-001: SMTP configuration. Production startup fails clearly when required
         // values are missing/invalid; development/test may leave Smtp unconfigured and
         // use the development/capturing sender instead.

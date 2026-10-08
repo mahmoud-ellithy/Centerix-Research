@@ -22,7 +22,8 @@ public class ApplicationDbContextInitialiser(
     IMultiTenantContextAccessor<CenterixTenantInfo> tenantInfoContextAccessor,
     IHostEnvironment hostEnvironment,
     IOptions<DatabaseInitializationOptions> dbInitOptions,
-    IOptions<BootstrapAdminOptions> bootstrapAdminOptions)
+    IOptions<BootstrapAdminOptions> bootstrapAdminOptions,
+    IOptions<PlatformAdminBootstrapOptions> platformAdminBootstrapOptions)
 {
     private readonly ILogger<ApplicationDbContextInitialiser> _logger = logger;
     private readonly AppDbContext _context = context;
@@ -32,6 +33,7 @@ public class ApplicationDbContextInitialiser(
     private readonly IHostEnvironment _hostEnvironment = hostEnvironment;
     private readonly DatabaseInitializationOptions _dbInitOptions = dbInitOptions.Value;
     private readonly BootstrapAdminOptions _bootstrapAdminOptions = bootstrapAdminOptions.Value;
+    private readonly PlatformAdminBootstrapOptions _platformAdminBootstrapOptions = platformAdminBootstrapOptions.Value;
 
     public async Task InitialiseAsync(CancellationToken cancellationToken = default)
     {
@@ -77,6 +79,9 @@ public class ApplicationDbContextInitialiser(
         // case the temporary password MUST come from BootstrapAdmin configuration —
         // a static/default password is never created.
         await InitializeAdminUserAsync();
+        // Production first-PlatformAdmin bootstrap (Batch 2 correction): independent of
+        // SeedDevelopmentData, gated on its own PlatformAdminBootstrap:Enabled switch.
+        await EnsureFirstPlatformAdminAsync();
     }
 
     /// <summary>
@@ -292,6 +297,85 @@ public class ApplicationDbContextInitialiser(
                     string.Join(", ", membership.Errors!.Select(e => e.Code)));
             }
         }
+    }
+
+    /// <summary>
+    /// Production first-PlatformAdmin bootstrap (Batch 2 correction). Operational contract:
+    /// <list type="bullet">
+    /// <item>Runs automatically at startup during the required seed — no SeedDevelopmentData,
+    /// no hardcoded/default password, no separate command.</item>
+    /// <item>Disabled by default; an enabled-but-incomplete configuration fails startup
+    /// clearly (<see cref="PlatformAdminBootstrapOptions.Validate"/>).</item>
+    /// <item>Idempotent: an existing PlatformAdmin with the configured email is left fully
+    /// untouched (no password reset, no claim/role rewrite). A second startup is a no-op.</item>
+    /// <item>Never elevates: when the configured email already belongs to a NON-admin user,
+    /// startup fails instead of granting PlatformAdmin through this mechanism.</item>
+    /// <item>Creates no tenant membership: platform authority flows from the Identity role
+    /// plus <c>IPlatformAdminVerifier</c>, never from a membership row (SEC-001). Tenant
+    /// access for the operator is granted later per tenant through the normal invitation
+    /// flow.</item>
+    /// </list>
+    /// </summary>
+    private async Task EnsureFirstPlatformAdminAsync()
+    {
+        var bootstrap = _platformAdminBootstrapOptions;
+
+        if (!bootstrap.Enabled)
+        {
+            _logger.LogInformation(
+                "Skipping first-PlatformAdmin bootstrap (PlatformAdminBootstrap:Enabled is false).");
+            return;
+        }
+
+        // Fail-closed: missing email/password aborts startup before anything is created.
+        bootstrap.Validate();
+        var email = bootstrap.Email.Trim();
+
+        if (await _userManager.FindByEmailAsync(email) is IdentityUser existingUser)
+        {
+            if (!await _userManager.IsInRoleAsync(existingUser, RoleConstants.PlatformAdmin))
+                throw new InvalidOperationException(
+                    $"PlatformAdmin bootstrap refused: a user with email '{email}' already exists " +
+                    "but is not a PlatformAdmin. Granting the platform role through the bootstrap " +
+                    "mechanism is not allowed. Either configure PlatformAdminBootstrap:Email with the " +
+                    "intended first-admin address or assign the role through an existing PlatformAdmin.");
+
+            _logger.LogInformation(
+                "First-PlatformAdmin bootstrap already satisfied for {Email}; leaving the existing account untouched.",
+                email);
+            return;
+        }
+
+        // Self-sufficient: the platform role is ensured here (with its production permission
+        // matrix) regardless of which tenant context the seed loop is currently running under.
+        var platformAdminRole = await EnsureRoleAsync(RoleConstants.PlatformAdmin, "Platform Administrator", isSystem: true);
+        await AssignPermissionsToRoleAsync(platformAdminRole, Permissions.GetPlatformAdminPermissions());
+
+        var adminUser = new IdentityUser
+        {
+            Email = email,
+            UserName = email,
+            EmailConfirmed = true,
+            PhoneNumberConfirmed = true,
+            NormalizedEmail = email.ToUpperInvariant(),
+            NormalizedUserName = email.ToUpperInvariant()
+        };
+
+        // Run Identity password validators (never bypass by writing PasswordHash
+        // directly): a weak explicitly-configured password fails startup loudly.
+        var createResult = await _userManager.CreateAsync(adminUser, bootstrap.TemporaryPassword);
+        if (!createResult.Succeeded)
+            throw new InvalidOperationException(
+                $"Failed to create first PlatformAdmin {email}: " +
+                string.Join("; ", createResult.Errors.Select(e => e.Description)));
+
+        await _userManager.AddClaimAsync(adminUser, new Claim("password.change_required", "true"));
+        await _userManager.AddToRoleAsync(adminUser, RoleConstants.PlatformAdmin);
+
+        logger.LogWarning(
+            "Created first PlatformAdmin {Email} via PlatformAdminBootstrap. " +
+            "Force password change required on first login via POST /api/auth/change-password.",
+            email);
     }
 
     private async Task AssignPermissionsToRoleAsync(ApplicationRole role, string[] permissions)
