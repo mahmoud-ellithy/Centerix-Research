@@ -383,6 +383,96 @@ public class Batch2PlatformBootstrapSqlServerTests
         }
     }
 
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    public async Task ProductionBootstrap_RoleCreationFailure_FailsBeforeUserCreation()
+    {
+        var email = UniqueEmail("prodboot-rolecreatefail");
+        var tenant = FakeTenant(UniqueEmail("prodboot-rolecreatefail-tenant"));
+        var bootstrap = new PlatformAdminBootstrapOptions
+        {
+            Enabled = true,
+            Email = email,
+            TemporaryPassword = BootstrapPassword
+        };
+
+        // The create path requires the PlatformAdmin role to be absent. Save the shared
+        // state first (role + current members) so it can be restored afterwards; the
+        // SqlServerIntegration database is shared across suites.
+        List<string> priorMemberIds = [];
+        string? priorRoleId = null;
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+            var priorRole = await roleManager.FindByNameAsync(RoleConstants.PlatformAdmin);
+            if (priorRole is not null)
+            {
+                priorRoleId = priorRole.Id;
+                priorMemberIds = (await userManager.GetUsersInRoleAsync(RoleConstants.PlatformAdmin))
+                    .Select(u => u.Id).ToList();
+                var deleted = await roleManager.DeleteAsync(priorRole);
+                Assert.True(deleted.Succeeded);
+
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var orphans = await db.RolePermissions
+                    .Where(rp => rp.RoleId == priorRoleId).ToListAsync();
+                db.RolePermissions.RemoveRange(orphans);
+                await db.SaveChangesAsync();
+            }
+        }
+
+        try
+        {
+            using (var scope = _env.Factory.Services.CreateScope())
+            {
+                var failingRoleManager = new FailingBootstrapRoleManager(scope.ServiceProvider) { FailCreate = true };
+                var seeder = BuildInitialiser(
+                    scope, tenant, "Production", seedDevelopmentData: false, bootstrap,
+                    roleManagerOverride: failingRoleManager);
+                var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.SeedAsync());
+                Assert.Contains(RoleConstants.PlatformAdmin, ex.Message);
+                Assert.Contains("injected role creation failure", ex.Message);
+            }
+
+            // Bootstrap did not continue past the failed role creation: no admin user exists.
+            using (var scope = _env.Factory.Services.CreateScope())
+            {
+                var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+                Assert.Null(await userManager.FindByEmailAsync(email));
+            }
+
+            var login = await _env.Client.SendAsync(LoginRequest(email, BootstrapPassword, UniqueIp()));
+            Assert.Equal(HttpStatusCode.Unauthorized, login.StatusCode);
+
+            // A healthy retry starts from a clean state and succeeds fully.
+            using (var scope = _env.Factory.Services.CreateScope())
+                await BuildInitialiser(scope, tenant, "Production", seedDevelopmentData: false, bootstrap).SeedAsync();
+
+            using (var scope = _env.Factory.Services.CreateScope())
+            {
+                var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+                var admin = await userManager.FindByEmailAsync(email);
+                Assert.NotNull(admin);
+                Assert.True(await userManager.IsInRoleAsync(admin!, RoleConstants.PlatformAdmin));
+                var claims = await userManager.GetClaimsAsync(admin!);
+                Assert.Contains(claims, c => c.Type == "password.change_required" && c.Value == "true");
+            }
+        }
+        finally
+        {
+            // Restore the shared role memberships recorded before the test.
+            using var scope = _env.Factory.Services.CreateScope();
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+            foreach (var memberId in priorMemberIds)
+            {
+                var member = await userManager.FindByIdAsync(memberId);
+                if (member is not null && !await userManager.IsInRoleAsync(member, RoleConstants.PlatformAdmin))
+                    Assert.True((await userManager.AddToRoleAsync(member, RoleConstants.PlatformAdmin)).Succeeded);
+            }
+        }
+    }
+
     // ==================================================================
     // Helpers
     // ==================================================================
@@ -450,7 +540,8 @@ public class Batch2PlatformBootstrapSqlServerTests
         string environmentName,
         bool seedDevelopmentData,
         PlatformAdminBootstrapOptions bootstrap,
-        UserManager<IdentityUser>? userManagerOverride = null)
+        UserManager<IdentityUser>? userManagerOverride = null,
+        RoleManager<ApplicationRole>? roleManagerOverride = null)
     {
         var sp = scope.ServiceProvider;
         sp.GetRequiredService<IMultiTenantContextSetter>().MultiTenantContext =
@@ -460,7 +551,7 @@ public class Batch2PlatformBootstrapSqlServerTests
             sp.GetRequiredService<ILogger<ApplicationDbContextInitialiser>>(),
             sp.GetRequiredService<AppDbContext>(),
             userManagerOverride ?? sp.GetRequiredService<UserManager<IdentityUser>>(),
-            sp.GetRequiredService<RoleManager<ApplicationRole>>(),
+            roleManagerOverride ?? sp.GetRequiredService<RoleManager<ApplicationRole>>(),
             sp.GetRequiredService<IMultiTenantContextAccessor<CenterixTenantInfo>>(),
             new FakeHostEnvironment(environmentName),
             Options.Create(new DatabaseInitializationOptions { SeedDevelopmentData = seedDevelopmentData }),
@@ -510,6 +601,35 @@ public class Batch2PlatformBootstrapSqlServerTests
                     Description = "injected role failure for bootstrap test"
                 }))
                 : base.AddToRoleAsync(user, role);
+    }
+
+    /// <summary>
+    /// Deterministic failure injection for the role-creation path: a real
+    /// <see cref="RoleManager{ApplicationRole}"/> (same store as production) with a
+    /// flaggable <see cref="RoleManager{ApplicationRole}.CreateAsync"/> override.
+    /// </summary>
+    private sealed class FailingBootstrapRoleManager : RoleManager<ApplicationRole>
+    {
+        public bool FailCreate { get; set; }
+
+        public FailingBootstrapRoleManager(IServiceProvider services)
+            : base(
+                services.GetRequiredService<IRoleStore<ApplicationRole>>(),
+                services.GetRequiredService<IEnumerable<IRoleValidator<ApplicationRole>>>(),
+                services.GetRequiredService<ILookupNormalizer>(),
+                services.GetRequiredService<IdentityErrorDescriber>(),
+                services.GetRequiredService<ILogger<RoleManager<ApplicationRole>>>())
+        {
+        }
+
+        public override Task<IdentityResult> CreateAsync(ApplicationRole role) =>
+            FailCreate
+                ? Task.FromResult(IdentityResult.Failed(new IdentityError
+                {
+                    Code = "Test.RoleCreateRejected",
+                    Description = "injected role creation failure for bootstrap test"
+                }))
+                : base.CreateAsync(role);
     }
 
     private sealed class FakeHostEnvironment(string environmentName) : IHostEnvironment

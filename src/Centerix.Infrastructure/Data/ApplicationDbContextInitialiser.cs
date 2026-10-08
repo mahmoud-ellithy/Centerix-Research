@@ -166,7 +166,14 @@ public class ApplicationDbContextInitialiser(
                 IsSystem = isSystem,
                 NormalizedName = code.ToUpperInvariant()
             };
-            await _roleManager.CreateAsync(role);
+            // Bootstrap all-or-nothing contract: a failed role creation must fail startup
+            // here — never continue to permission assignment or admin creation as if the
+            // role existed.
+            var createResult = await _roleManager.CreateAsync(role);
+            if (!createResult.Succeeded)
+                throw new InvalidOperationException(
+                    $"Failed to create role '{code}' during database bootstrap: " +
+                    string.Join("; ", createResult.Errors.Select(e => e.Description)));
         }
         else
         {
@@ -192,7 +199,13 @@ public class ApplicationDbContextInitialiser(
 
             if (changed)
             {
-                await _roleManager.UpdateAsync(role);
+                // Same contract: the role's authoritative metadata could not be guaranteed,
+                // so fail startup instead of continuing as if it were correct.
+                var updateResult = await _roleManager.UpdateAsync(role);
+                if (!updateResult.Succeeded)
+                    throw new InvalidOperationException(
+                        $"Failed to update role '{code}' during database bootstrap: " +
+                        string.Join("; ", updateResult.Errors.Select(e => e.Description)));
             }
         }
 
