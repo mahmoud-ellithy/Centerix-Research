@@ -308,6 +308,9 @@ public class ApplicationDbContextInitialiser(
     /// clearly (<see cref="PlatformAdminBootstrapOptions.Validate"/>).</item>
     /// <item>Idempotent: an existing PlatformAdmin with the configured email is left fully
     /// untouched (no password reset, no claim/role rewrite). A second startup is a no-op.</item>
+    /// <item>All-or-nothing: every Identity result (create, claim, role) is enforced. A failed
+    /// claim/role write compensates the just-created user and fails startup — a partially
+    /// configured admin can never silently pass.</item>
     /// <item>Never elevates: when the configured email already belongs to a NON-admin user,
     /// startup fails instead of granting PlatformAdmin through this mechanism.</item>
     /// <item>Creates no tenant membership: platform authority flows from the Identity role
@@ -369,8 +372,51 @@ public class ApplicationDbContextInitialiser(
                 $"Failed to create first PlatformAdmin {email}: " +
                 string.Join("; ", createResult.Errors.Select(e => e.Description)));
 
-        await _userManager.AddClaimAsync(adminUser, new Claim("password.change_required", "true"));
-        await _userManager.AddToRoleAsync(adminUser, RoleConstants.PlatformAdmin);
+        // Micro-correction: EVERY Identity step is enforced — no swallowed IdentityResult.
+        // Either the admin is fully created, correctly configured and usable, or bootstrap
+        // fails loudly. A failed claim/role write can never leave a partially configured
+        // admin behind: the user above was created by THIS run only (an existing admin
+        // short-circuits earlier and is never touched), so it is compensated (deleted) and
+        // startup still fails.
+        var bootstrapComplete = false;
+        try
+        {
+            var claimResult = await _userManager.AddClaimAsync(adminUser, new Claim("password.change_required", "true"));
+            if (!claimResult.Succeeded)
+                throw new InvalidOperationException(
+                    $"Failed to stamp the forced password-change requirement for first PlatformAdmin {email}: " +
+                    string.Join("; ", claimResult.Errors.Select(e => e.Description)));
+
+            var roleResult = await _userManager.AddToRoleAsync(adminUser, RoleConstants.PlatformAdmin);
+            if (!roleResult.Succeeded)
+                throw new InvalidOperationException(
+                    $"Failed to assign the PlatformAdmin role to first PlatformAdmin {email}: " +
+                    string.Join("; ", roleResult.Errors.Select(e => e.Description)));
+
+            bootstrapComplete = true;
+        }
+        finally
+        {
+            if (!bootstrapComplete)
+            {
+                try
+                {
+                    var compensation = await _userManager.DeleteAsync(adminUser);
+                    if (!compensation.Succeeded)
+                        _logger.LogError(
+                            "PlatformAdmin bootstrap compensation failed for {Email}: {Errors}. Startup will still fail.",
+                            email,
+                            string.Join("; ", compensation.Errors.Select(e => e.Description)));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(
+                        ex,
+                        "PlatformAdmin bootstrap compensation threw for {Email}. Startup will still fail.",
+                        email);
+                }
+            }
+        }
 
         logger.LogWarning(
             "Created first PlatformAdmin {Email} via PlatformAdminBootstrap. " +

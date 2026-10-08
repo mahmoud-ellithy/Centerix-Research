@@ -288,6 +288,101 @@ public class Batch2PlatformBootstrapSqlServerTests
         Assert.DoesNotContain(claims, c => c.Type == "password.change_required");
     }
 
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    public async Task ProductionBootstrap_ClaimFailure_FailsAndCompensates_LeavesNothingBehind()
+    {
+        var email = UniqueEmail("prodboot-claimfail");
+        var tenant = FakeTenant(UniqueEmail("prodboot-claimfail-tenant"));
+        var bootstrap = new PlatformAdminBootstrapOptions
+        {
+            Enabled = true,
+            Email = email,
+            TemporaryPassword = BootstrapPassword
+        };
+
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var failingManager = new FailingBootstrapUserManager(scope.ServiceProvider) { FailAddClaim = true };
+            var seeder = BuildInitialiser(scope, tenant, "Production", seedDevelopmentData: false, bootstrap, failingManager);
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.SeedAsync());
+            Assert.Contains("PlatformAdmin", ex.Message);
+            Assert.Contains("injected claim failure", ex.Message);
+        }
+
+        // No false "bootstrap succeeded" state: the partially created user was compensated.
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+            Assert.Null(await userManager.FindByEmailAsync(email));
+        }
+
+        // Unknown credential: login is still plain unauthorized.
+        var login = await _env.Client.SendAsync(LoginRequest(email, BootstrapPassword, UniqueIp()));
+        Assert.Equal(HttpStatusCode.Unauthorized, login.StatusCode);
+
+        // A healthy retry starts from a clean state and succeeds fully.
+        using (var scope = _env.Factory.Services.CreateScope())
+            await BuildInitialiser(scope, tenant, "Production", seedDevelopmentData: false, bootstrap).SeedAsync();
+
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+            var admin = await userManager.FindByEmailAsync(email);
+            Assert.NotNull(admin);
+            Assert.True(await userManager.IsInRoleAsync(admin!, RoleConstants.PlatformAdmin));
+            var claims = await userManager.GetClaimsAsync(admin!);
+            Assert.Contains(claims, c => c.Type == "password.change_required" && c.Value == "true");
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    public async Task ProductionBootstrap_RoleFailure_FailsAndCompensates_LeavesNothingBehind()
+    {
+        var email = UniqueEmail("prodboot-rolefail");
+        var tenant = FakeTenant(UniqueEmail("prodboot-rolefail-tenant"));
+        var bootstrap = new PlatformAdminBootstrapOptions
+        {
+            Enabled = true,
+            Email = email,
+            TemporaryPassword = BootstrapPassword
+        };
+
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var failingManager = new FailingBootstrapUserManager(scope.ServiceProvider) { FailAddToRole = true };
+            var seeder = BuildInitialiser(scope, tenant, "Production", seedDevelopmentData: false, bootstrap, failingManager);
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => seeder.SeedAsync());
+            Assert.Contains("PlatformAdmin", ex.Message);
+            Assert.Contains("injected role failure", ex.Message);
+        }
+
+        // Compensation removed the whole partially configured user (claim included).
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+            Assert.Null(await userManager.FindByEmailAsync(email));
+        }
+
+        var login = await _env.Client.SendAsync(LoginRequest(email, BootstrapPassword, UniqueIp()));
+        Assert.Equal(HttpStatusCode.Unauthorized, login.StatusCode);
+
+        // A healthy retry starts from a clean state and succeeds fully.
+        using (var scope = _env.Factory.Services.CreateScope())
+            await BuildInitialiser(scope, tenant, "Production", seedDevelopmentData: false, bootstrap).SeedAsync();
+
+        using (var scope = _env.Factory.Services.CreateScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+            var admin = await userManager.FindByEmailAsync(email);
+            Assert.NotNull(admin);
+            Assert.True(await userManager.IsInRoleAsync(admin!, RoleConstants.PlatformAdmin));
+            var claims = await userManager.GetClaimsAsync(admin!);
+            Assert.Contains(claims, c => c.Type == "password.change_required" && c.Value == "true");
+        }
+    }
+
     // ==================================================================
     // Helpers
     // ==================================================================
@@ -354,7 +449,8 @@ public class Batch2PlatformBootstrapSqlServerTests
         CenterixTenantInfo tenant,
         string environmentName,
         bool seedDevelopmentData,
-        PlatformAdminBootstrapOptions bootstrap)
+        PlatformAdminBootstrapOptions bootstrap,
+        UserManager<IdentityUser>? userManagerOverride = null)
     {
         var sp = scope.ServiceProvider;
         sp.GetRequiredService<IMultiTenantContextSetter>().MultiTenantContext =
@@ -363,13 +459,57 @@ public class Batch2PlatformBootstrapSqlServerTests
         return new ApplicationDbContextInitialiser(
             sp.GetRequiredService<ILogger<ApplicationDbContextInitialiser>>(),
             sp.GetRequiredService<AppDbContext>(),
-            sp.GetRequiredService<UserManager<IdentityUser>>(),
+            userManagerOverride ?? sp.GetRequiredService<UserManager<IdentityUser>>(),
             sp.GetRequiredService<RoleManager<ApplicationRole>>(),
             sp.GetRequiredService<IMultiTenantContextAccessor<CenterixTenantInfo>>(),
             new FakeHostEnvironment(environmentName),
             Options.Create(new DatabaseInitializationOptions { SeedDevelopmentData = seedDevelopmentData }),
             Options.Create(new BootstrapAdminOptions()),
             Options.Create(bootstrap));
+    }
+
+    /// <summary>
+    /// Deterministic failure injection for bootstrap failure paths: a real
+    /// <see cref="UserManager{IdentityUser}"/> (same stores, validators, normalizers as
+    /// production) with flaggable claim/role writes. Everything else delegates to base.
+    /// </summary>
+    private sealed class FailingBootstrapUserManager : UserManager<IdentityUser>
+    {
+        public bool FailAddClaim { get; set; }
+
+        public bool FailAddToRole { get; set; }
+
+        public FailingBootstrapUserManager(IServiceProvider services)
+            : base(
+                services.GetRequiredService<IUserStore<IdentityUser>>(),
+                services.GetRequiredService<IOptions<IdentityOptions>>(),
+                services.GetRequiredService<IPasswordHasher<IdentityUser>>(),
+                services.GetRequiredService<IEnumerable<IUserValidator<IdentityUser>>>(),
+                services.GetRequiredService<IEnumerable<IPasswordValidator<IdentityUser>>>(),
+                services.GetRequiredService<ILookupNormalizer>(),
+                services.GetRequiredService<IdentityErrorDescriber>(),
+                services,
+                services.GetRequiredService<ILogger<UserManager<IdentityUser>>>())
+        {
+        }
+
+        public override Task<IdentityResult> AddClaimAsync(IdentityUser user, Claim claim) =>
+            FailAddClaim
+                ? Task.FromResult(IdentityResult.Failed(new IdentityError
+                {
+                    Code = "Test.ClaimRejected",
+                    Description = "injected claim failure for bootstrap test"
+                }))
+                : base.AddClaimAsync(user, claim);
+
+        public override Task<IdentityResult> AddToRoleAsync(IdentityUser user, string role) =>
+            FailAddToRole
+                ? Task.FromResult(IdentityResult.Failed(new IdentityError
+                {
+                    Code = "Test.RoleRejected",
+                    Description = "injected role failure for bootstrap test"
+                }))
+                : base.AddToRoleAsync(user, role);
     }
 
     private sealed class FakeHostEnvironment(string environmentName) : IHostEnvironment
