@@ -15,7 +15,13 @@ public record RegisterFromInvitationCommand(
     string Token,
     string Password,
     string? FirstName = null,
-    string? LastName = null) : IRequest<Result<Created>>;
+    string? LastName = null) : IRequest<Result<Created>>, ISensitiveRequest
+{
+    // REV-001: never print secret fields — defence-in-depth in case any future
+    // logging pipeline or test invocation accidentally logs the request object.
+    public override string ToString()
+        => "RegisterFromInvitationCommand { Token = ***, Password = ***, FirstName = ***, LastName = *** }";
+}
 
 public class RegisterFromInvitationValidator : AbstractValidator<RegisterFromInvitationCommand>
 {
