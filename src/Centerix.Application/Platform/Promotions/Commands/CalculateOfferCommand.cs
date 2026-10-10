@@ -11,12 +11,12 @@ using Microsoft.EntityFrameworkCore;
 /// </summary>
 public record CalculateOfferQuery(
     int PlanId,
-    int DurationMonths,
-    DateTime? EvaluationTimeUtc = null) : IRequest<Result<CalculatedOfferDto>>;
+    int DurationMonths) : IRequest<Result<CalculatedOfferDto>>;
 
 public class CalculateOfferHandler(
     IAppDbContext dbContext,
-    IPromotionCalculationService promotionCalculationService) : IRequestHandler<CalculateOfferQuery, Result<CalculatedOfferDto>>
+    IPromotionCalculationService promotionCalculationService,
+    TimeProvider timeProvider) : IRequestHandler<CalculateOfferQuery, Result<CalculatedOfferDto>>
 {
     public async Task<Result<CalculatedOfferDto>> Handle(CalculateOfferQuery request, CancellationToken cancellationToken)
     {
@@ -27,7 +27,8 @@ public class CalculateOfferHandler(
         if (plan is null)
             return PromotionErrors.PlanNotFound;
 
-        var evaluationTime = request.EvaluationTimeUtc ?? DateTime.UtcNow;
+        // REV-002: the evaluation time is the SERVER clock, never a client-supplied value.
+        var evaluationTime = timeProvider.GetUtcNow().UtcDateTime;
 
         // Fetch all promotions matching this plan (PlanId == 0 means all plans) or with matching planId
         var candidatePromotions = await dbContext.Promotions

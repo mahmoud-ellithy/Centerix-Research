@@ -26,6 +26,8 @@ public class OffersController(ILocalizer localizer, IMediator mediator) : ApiCon
     {
         // PaymentTerms is an explicit commercial decision. The request must supply it.
         // We reject missing/undefined values rather than silently defaulting to either arm.
+        // TODO(REV-002b): PaymentTerms should become platform-controlled (operator catalog)
+        // in Batch C — at that point the field will be removed from the client request body.
         if (request.PaymentTerms is null || !Enum.IsDefined(typeof(PaymentTerms), request.PaymentTerms.Value))
         {
             return Problem(
@@ -38,8 +40,7 @@ public class OffersController(ILocalizer localizer, IMediator mediator) : ApiCon
         var command = new CalculateAndPersistOfferCommand(
             request.PlanId,
             request.DurationMonths,
-            request.PaymentTerms.Value,
-            request.EvaluationTimeUtc);
+            request.PaymentTerms.Value);
 
         var result = await mediator.Send(command, cancellationToken);
 
@@ -105,6 +106,4 @@ public class CalculateAndPersistOfferRequest
     /// the absence of the field is rejected (treated as "explicit decision missing").
     /// </summary>
     public PaymentTerms? PaymentTerms { get; set; }
-
-    public DateTime? EvaluationTimeUtc { get; set; }
 }

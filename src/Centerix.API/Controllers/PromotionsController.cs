@@ -85,7 +85,7 @@ public class PromotionsController(ILocalizer localizer, IMediator mediator) : Ap
     public async Task<IActionResult> CalculateOffer([FromBody] CalculateOfferRequest request, CancellationToken cancellationToken)
     {
         var result = await mediator.Send(
-            new CalculateOfferQuery(request.PlanId, request.DurationMonths, request.EvaluationTimeUtc),
+            new CalculateOfferQuery(request.PlanId, request.DurationMonths),
             cancellationToken);
 
         return result.Match(
@@ -98,5 +98,4 @@ public class CalculateOfferRequest
 {
     public int PlanId { get; set; }
     public int DurationMonths { get; set; }
-    public DateTime? EvaluationTimeUtc { get; set; }
 }

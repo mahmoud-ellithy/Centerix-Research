@@ -160,11 +160,13 @@ public class CompleteOfferSnapshotIntegrityTests
             tiers: [(3, 2700m), (6, 5220m), (12, 10000m)],
             featureIds: [701, 702]);
 
-        // 2. Calculate and persist the Offer (actual production handler)
+        // 2. Calculate and persist the Offer (actual production handler).
+        // REV-002: handler now takes the server TimeProvider; no client-supplied time.
         var calculateHandler = new CalculateAndPersistOfferHandler(
-            db, new PromotionCalculationService(), tenant);
+            db, new PromotionCalculationService(), tenant, FixedTimeProvider());
         var offerResult = await calculateHandler.Handle(
-            new CalculateAndPersistOfferCommand(plan.Id, 12, PaymentTerms.Installments, FixedNow), CancellationToken.None);
+            new CalculateAndPersistOfferCommand(plan.Id, 12, PaymentTerms.Installments),
+            CancellationToken.None);
         Assert.True(offerResult.IsSuccess);
 
         // 3. Accept the Offer (actual production handler)
@@ -226,9 +228,10 @@ public class CompleteOfferSnapshotIntegrityTests
             featureIds: [801, 802]);
 
         var calculateHandler = new CalculateAndPersistOfferHandler(
-            db, new PromotionCalculationService(), tenant);
+            db, new PromotionCalculationService(), tenant, FixedTimeProvider());
         var offerResult = await calculateHandler.Handle(
-            new CalculateAndPersistOfferCommand(plan.Id, 12, PaymentTerms.Installments, FixedNow), CancellationToken.None);
+            new CalculateAndPersistOfferCommand(plan.Id, 12, PaymentTerms.Installments),
+            CancellationToken.None);
         Assert.True(offerResult.IsSuccess);
 
         var acceptHandler = new AcceptOfferHandler(db, tenant);
