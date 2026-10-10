@@ -28,10 +28,15 @@ try
 
     var app = builder.Build();
 
-    // CFG-001: deterministic production SMTP gate. Options validation runs at startup,
-    // but this explicit check guarantees Production can never boot with a missing or
-    // invalid SMTP configuration and silently fall back to the development sender.
-    if (app.Environment.IsProduction())
+    // REV-012: EmailOptions.Validate runs first so Capture-mode misuse outside
+    // Development/Testing is rejected before any side-effecting startup work.
+    var emailOptions = app.Services.GetRequiredService<IOptions<EmailOptions>>().Value;
+    emailOptions.Validate(app.Environment);
+
+    // CFG-001 + REV-012: deterministic SMTP gate when the effective email mode is Smtp.
+    // The previous code branched on Production only; Capture mode legitimately skips this
+    // check, so the trigger is now the resolved email mode rather than the environment name.
+    if (emailOptions.ResolveMode(app.Environment) == EmailMode.Smtp)
     {
         var smtp = app.Services.GetRequiredService<IOptions<SmtpOptions>>().Value;
         smtp.Validate();

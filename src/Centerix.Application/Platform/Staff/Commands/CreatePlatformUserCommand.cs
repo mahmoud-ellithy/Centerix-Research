@@ -9,7 +9,13 @@ using MediatR;
 public record CreatePlatformUserCommand(
     string Email,
     string FullName,
-    string Password) : IRequest<Result<Created>>;
+    string Password) : IRequest<Result<Created>>, ISensitiveRequest
+{
+    // REV-001: never print the Password — defence-in-depth in case any future
+    // logging pipeline or test invocation accidentally logs the request object.
+    public override string ToString()
+        => "CreatePlatformUserCommand { Email = ***, FullName = ***, Password = *** }";
+}
 
 public class CreatePlatformUserHandler(
     IAppDbContext dbContext,

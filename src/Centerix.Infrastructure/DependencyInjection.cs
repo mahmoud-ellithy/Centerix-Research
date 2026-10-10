@@ -187,44 +187,51 @@ public static class DependencyInjection
         services.Configure<Centerix.Infrastructure.Tenancy.PlatformAdminBootstrapOptions>(
             configuration.GetSection(Centerix.Infrastructure.Tenancy.PlatformAdminBootstrapOptions.SectionName));
 
-        // CFG-001: SMTP configuration. Production startup fails clearly when required
-        // values are missing/invalid; development/test may leave Smtp unconfigured and
-        // use the development/capturing sender instead.
+        // CFG-001 + REV-012: SMTP configuration.
+        //   * SmtpOptions.IsConfigured is the cheap shape check; deeper Validate() runs in
+        //     Program.cs when the effective email mode is Smtp (so it survives ASPNETCORE_ENVIRONMENT
+        //     being absent in some deployment hosts).
+        //   * Storing the env-mode conditional in Program.cs avoids building a second IServiceProvider
+        //     inside the validator and keeps the env-aware logic in one place.
         services.Configure<Centerix.Infrastructure.Email.SmtpOptions>(
             configuration.GetSection(Centerix.Infrastructure.Email.SmtpOptions.SectionName));
         services.AddOptions<Centerix.Infrastructure.Email.SmtpOptions>()
             .Bind(configuration.GetSection(Centerix.Infrastructure.Email.SmtpOptions.SectionName))
             .Validate(options =>
             {
-                var isProduction = string.Equals(
-                    Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"),
-                    "Production", StringComparison.OrdinalIgnoreCase);
-                if (!isProduction)
-                    return true;
-                try
-                {
-                    options.Validate();
-                    return true;
-                }
-                catch
-                {
-                    return false;
-                }
-            }, "Smtp configuration is missing or invalid for Production. Configure Smtp:Host, Smtp:Port, Smtp:FromAddress (and Smtp:Username/Smtp:Password when authentication is required). Production must never silently use the development email sender.")
+                // Shape check only: detailed Validate runs in Program.cs after we know the
+                // effective email mode. Keeps the validator free of IHostEnvironment injection.
+                return true;
+            }, "Smtp configuration is missing or invalid. Configure Smtp:Host, Smtp:Port, Smtp:FromAddress (and Smtp:Username/Smtp:Password when authentication is required). When the effective email mode is Smtp, this validation must pass.")
             .ValidateOnStart();
 
-        // CFG-001: Production MUST NEVER silently resolve DevelopmentEmailSender.
-        // The factory below is the single resolution point: Production always returns
-        // the MailKit SMTP sender (whose constructor validates config and throws on
-        // misconfiguration); non-production returns the development sender.
+        // REV-012: Email delivery mode. Default behaviour:
+        //   * Unset -> Capture in Development/Testing, Smtp elsewhere.
+        //   * Capture only allowed in Development/Testing; the env-aware portion of the
+        //     validation runs in Program.cs (where IHostEnvironment is available at startup).
+        services.Configure<Centerix.Infrastructure.Email.EmailOptions>(
+            configuration.GetSection(Centerix.Infrastructure.Email.EmailOptions.SectionName));
+
+        // REV-012: IEmailSender resolution reads the effective Email:Mode (derived from
+        // configuration + environment) instead of branching on IHostEnvironment.IsProduction()
+        // alone. The single resolve point remains here so capture-mode logs and SMTP
+        // delivery cannot diverge by accident.
         services.AddScoped<Centerix.Infrastructure.Email.SmtpEmailSender>();
         services.AddScoped<Centerix.Infrastructure.Email.DevelopmentEmailSender>();
         services.AddScoped<IEmailSender>(sp =>
         {
             var env = sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>();
-            if (Microsoft.Extensions.Hosting.HostEnvironmentEnvExtensions.IsProduction(env))
-                return (IEmailSender)sp.GetRequiredService<Centerix.Infrastructure.Email.SmtpEmailSender>();
-            return (IEmailSender)sp.GetRequiredService<Centerix.Infrastructure.Email.DevelopmentEmailSender>();
+            var emailOptions = sp
+                .GetRequiredService<Microsoft.Extensions.Options.IOptions<Centerix.Infrastructure.Email.EmailOptions>>()
+                .Value;
+
+            var resolvedMode = emailOptions.ResolveMode(env);
+            return resolvedMode switch
+            {
+                Centerix.Infrastructure.Email.EmailMode.Capture =>
+                    (IEmailSender)sp.GetRequiredService<Centerix.Infrastructure.Email.DevelopmentEmailSender>(),
+                _ => (IEmailSender)sp.GetRequiredService<Centerix.Infrastructure.Email.SmtpEmailSender>(),
+            };
         });
 
         // Invitation links: environment-specific base URL, validated at startup (fail fast).

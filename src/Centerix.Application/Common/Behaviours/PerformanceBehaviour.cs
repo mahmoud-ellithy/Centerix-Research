@@ -25,9 +25,11 @@ public class PerformanceBehaviour<TRequest, TResponse>(
         {
             var requestName = typeof(TRequest).Name;
 
+            // REV-001: do not log the request payload — it may contain secrets.
+            // Log only the request type name and elapsed time.
             logger.LogWarning(
-                "Long Running Request: {RequestName} ({ElapsedMilliseconds} milliseconds) {Request}",
-                requestName, elapsedMilliseconds, request);
+                "Long Running Request: {RequestName} ({ElapsedMilliseconds} milliseconds)",
+                requestName, elapsedMilliseconds);
         }
 
         return response;

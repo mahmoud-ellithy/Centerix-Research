@@ -46,8 +46,12 @@ public class PermissionPolicyProvider(IOptions<AuthorizationOptions> options) : 
     public Task<AuthorizationPolicy?> GetDefaultPolicyAsync()
         => _fallback.GetDefaultPolicyAsync();
 
+    // REV-015: delegate to the DefaultAuthorizationPolicyProvider so the framework's
+    // SetFallbackPolicy(...) configuration in API/DependencyInjection.cs is honored.
+    // Returning null here would silently disable the fallback policy and let an
+    // unattributed endpoint be reached anonymously.
     public Task<AuthorizationPolicy?> GetFallbackPolicyAsync()
-        => Task.FromResult<AuthorizationPolicy?>(null);
+        => _fallback.GetFallbackPolicyAsync();
 }
 
 /// <summary>

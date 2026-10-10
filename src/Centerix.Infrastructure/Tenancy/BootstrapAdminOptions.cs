@@ -7,8 +7,6 @@ namespace Centerix.Infrastructure.Tenancy;
 /// data is enabled in production, the temporary password MUST come from this
 /// configuration (environment variable / secret store). Startup fails clearly
 /// when it is missing or does not satisfy Identity password rules.
-/// In non-production environments the seeder generates a cryptographically
-/// random temporary password when no explicit value is configured.
 /// </summary>
 public sealed class BootstrapAdminOptions
 {

@@ -74,20 +74,30 @@ public class TenantGuardMiddleware(RequestDelegate next)
             return;
         }
 
-        if (!string.IsNullOrEmpty(userId))
+        // REV-019: an authenticated request reaching a tenant-scoped endpoint without a usable
+        // NameIdentifier MUST be rejected — that identity anomaly is exactly the case the
+        // open-session + ValidateOnStart path used to fall through silently into AuthorizeTenant().
+        // The membership check below would also short-circuit on userId == null, but a missing
+        // claim is a configuration/token bug, not a missing membership: it must fail loud and
+        // closed BEFORE we mark the tenant as authorized.
+        if (string.IsNullOrEmpty(userId))
         {
-            var isActiveMember = await dbContext.TenantMemberships
-                .AnyAsync(m => m.UserId == userId
-                            && m.TenantId == currentTenant.ResolvedTenantId
-                            && m.Status == TenantMembershipStatus.Active,
-                    context.RequestAborted);
+            await WriteForbidden(context,
+                $"[GUARD] Authenticated request has no NameIdentifier. Path={context.Request.Path}");
+            return;
+        }
 
-            if (!isActiveMember)
-            {
-                await WriteForbidden(context,
-                    $"[GUARD] Not active member. userId={userId}, tenantId={currentTenant.ResolvedTenantId}");
-                return;
-            }
+        var isActiveMember = await dbContext.TenantMemberships
+            .AnyAsync(m => m.UserId == userId
+                        && m.TenantId == currentTenant.ResolvedTenantId
+                        && m.Status == TenantMembershipStatus.Active,
+                context.RequestAborted);
+
+        if (!isActiveMember)
+        {
+            await WriteForbidden(context,
+                $"[GUARD] Not active member. userId={userId}, tenantId={currentTenant.ResolvedTenantId}");
+            return;
         }
 
         currentTenant.AuthorizeTenant();

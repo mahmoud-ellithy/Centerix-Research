@@ -221,12 +221,15 @@ public class ApplicationDbContextInitialiser(
             return;
         }
 
-        // NEW-2: development-only/bootstrap data must never reach production unless an
-        // operator explicitly opts in via DatabaseInitialization:SeedDevelopmentData.
-        if (_hostEnvironment.IsProduction() && !_dbInitOptions.SeedDevelopmentData)
+        // REV-012: bootstrap admin seeding is gated SOLELY on SeedDevelopmentData in every
+        // environment. The previous "_hostEnvironment.IsProduction() && !SeedDevelopmentData"
+        // shortcut meant Staging (and any non-Production environment with registry data and
+        // an owner email) silently created an admin per tenant when SeedDevelopmentData=false;
+        // now every environment obeys the same explicit opt-in flag.
+        if (!_dbInitOptions.SeedDevelopmentData)
         {
             _logger.LogInformation(
-                "Skipping bootstrap admin seed for {Email} in Production (SeedDevelopmentData is disabled).",
+                "Skipping bootstrap admin seed for {Email} (DatabaseInitialization:SeedDevelopmentData is disabled).",
                 tenantInfo.Email);
             return;
         }

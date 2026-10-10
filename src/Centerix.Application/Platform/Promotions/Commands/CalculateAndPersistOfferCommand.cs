@@ -22,13 +22,13 @@ using Microsoft.EntityFrameworkCore;
 public record CalculateAndPersistOfferCommand(
     int PlanId,
     int DurationMonths,
-    PaymentTerms PaymentTerms,
-    DateTime? EvaluationTimeUtc = null) : IRequest<Result<OfferDto>>;
+    PaymentTerms PaymentTerms) : IRequest<Result<OfferDto>>;
 
 public class CalculateAndPersistOfferHandler(
     IAppDbContext dbContext,
     IPromotionCalculationService promotionCalculationService,
-    ICurrentTenant currentTenant) : IRequestHandler<CalculateAndPersistOfferCommand, Result<OfferDto>>
+    ICurrentTenant currentTenant,
+    TimeProvider timeProvider) : IRequestHandler<CalculateAndPersistOfferCommand, Result<OfferDto>>
 {
     public async Task<Result<OfferDto>> Handle(CalculateAndPersistOfferCommand request, CancellationToken cancellationToken)
     {
@@ -44,7 +44,9 @@ public class CalculateAndPersistOfferHandler(
         if (plan is null)
             return PromotionErrors.PlanNotFound;
 
-        var evaluationTime = request.EvaluationTimeUtc ?? DateTime.UtcNow;
+        // REV-002: the evaluation time is the SERVER clock, never a client-supplied value.
+        // Tenants cannot ask the system "what was the price at time T" to bypass promotion windows.
+        var evaluationTime = timeProvider.GetUtcNow().UtcDateTime;
 
         var candidatePromotions = await dbContext.Promotions
             .Where(p =>

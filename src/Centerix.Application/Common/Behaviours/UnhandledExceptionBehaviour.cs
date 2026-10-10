@@ -20,8 +20,9 @@ public class UnhandledExceptionBehaviour<TRequest, TResponse>(
         {
             var requestName = typeof(TRequest).Name;
 
-            logger.LogError(ex, "Unhandled Exception for Request {RequestName}: {Request}",
-                requestName, request);
+            // REV-001: do not log the request payload — it may contain secrets
+            // (passwords, invitation tokens, etc.). Log only the request type name.
+            logger.LogError(ex, "Unhandled Exception for Request {RequestName}", requestName);
 
             throw;
         }
