@@ -106,6 +106,19 @@ public class RegisterFromInvitationHandler(
             return Error.Conflict("Invitation.UserAlreadyExists",
                 "An account already exists for this email. Please log in and accept the invitation.");
 
+        // 4b. SEC-001/F3 pre-check on the invited role BEFORE the claim, the Users
+        // reservation or user creation: a legacy invitation row carrying a
+        // platform-authority or non-canonical role (written before the write contract
+        // existed) must fail with its 403 here — regardless of quota state — leaving no
+        // user, no membership and a still-Pending invitation. Valid invitations always
+        // carry canonical tenant roles, so this is invisible to them; Create re-enforces
+        // the same rules at the membership write point.
+        if (TenantRoleScopes.IsPlatformScoped(invitation.RoleName))
+            return TenantMembershipErrors.PlatformRoleNotAllowed;
+
+        if (!TenantRoleScopes.IsCanonicalTenantRole(invitation.RoleName))
+            return TenantMembershipErrors.RoleNotAllowed;
+
         // 5. Atomic single-use claim: flip Pending → Accepted ONLY while still pending.
         // Identity's default indexes on AspNetUsers are NON-unique, so nothing else serializes
         // two concurrent registrations with the same e-mail. On relational providers this

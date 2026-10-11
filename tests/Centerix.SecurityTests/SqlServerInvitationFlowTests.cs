@@ -512,6 +512,39 @@ public class SqlServerInvitationFlowTests
         Assert.Equal(HttpStatusCode.Forbidden, (await _env.Client.SendAsync(deniedRequest)).StatusCode);
     }
 
+    /// <summary>
+    /// REV-017: concurrent double-accept racing on one token — the atomic claim lets exactly
+    /// one caller win (200); the loser gets a clean 409 and exactly one membership row exists.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    public async Task Accept_ConcurrentDoubleAccept_ExactlyOneSucceeds_SingleMembership()
+    {
+        // REV-011: GUID tenant id + provisioned Users quota (see Register_NewUser).
+        var tenantId = $"sql-dblaccept-{Guid.NewGuid():N}";
+        await EnsureTenantAsync(tenantId);
+        var adminToken = await SeedAdminAsync(tenantId);
+        await EnsureUsersQuotaAsync(tenantId);
+
+        var email = UniqueEmail("dblaccept");
+        var user = await CreateUserAsync(email);
+        var rawToken = await CreateInvitationViaApiAsync(adminToken, tenantId, email);
+
+        var responses = await Task.WhenAll(
+            _env.Client.SendAsync(AcceptRequest(rawToken, user, tenantId)),
+            _env.Client.SendAsync(AcceptRequest(rawToken, user, tenantId)));
+
+        Assert.Single(responses.Where(r => r.StatusCode == HttpStatusCode.OK));
+        Assert.Single(responses.Where(r => r.StatusCode == HttpStatusCode.Conflict));
+
+        using var scope = _env.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Single(db.TenantMemberships.Where(m => m.UserId == user.Id && m.TenantId == tenantId));
+        Assert.Equal(
+            InvitationStatus.Accepted,
+            db.TenantInvitations.Single(i => i.NormalizedEmail == email.ToUpperInvariant()).Status);
+    }
+
     // ==================================================================
     // Helpers
     // ==================================================================
