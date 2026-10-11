@@ -330,9 +330,11 @@ public class ApplicationDbContextInitialiser(
     /// <item>Never elevates: when the configured email already belongs to a NON-admin user,
     /// startup fails instead of granting PlatformAdmin through this mechanism.</item>
     /// <item>Creates no tenant membership: platform authority flows from the Identity role
-    /// plus <c>IPlatformAdminVerifier</c>, never from a membership row (SEC-001). Tenant
-    /// access for the operator is granted later per tenant through the normal invitation
-    /// flow.</item>
+    /// plus <c>IPlatformAdminVerifier</c>, never from a membership row (SEC-001). Per-tenant
+    /// access (if the operator ever needs it) is a separate, later, explicit path: approve
+    /// the tenant (<c>POST /api/tenants/{id}/approve</c>), provision its owner
+    /// (<c>POST /api/tenants/{id}/provision-owner</c>), then the owner registers via the
+    /// emailed invitation link — see <c>docs/PLATFORM-ADMIN-BOOTSTRAP.md</c> section 2b.</item>
     /// </list>
     /// </summary>
     private async Task EnsureFirstPlatformAdminAsync()

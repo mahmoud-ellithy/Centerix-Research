@@ -155,9 +155,20 @@ public class RegisterFromInvitationHandler(
         // REV-011: reserve a Users slot inside the same transaction as the membership insert.
         // Failure returns Conflict and the ambient transaction rolls back, so nothing is
         // created and the invitation stays usable (still Pending after rollback).
-        // Exemption: a tenant with zero Active memberships is onboarding its first owner —
-        // never fail that path for a missing/inactive subscription; best-effort track the
-        // user instead (increment only applies when a counter row exists).
+        // First-owner exemption: a tenant with zero Active memberships is onboarding its
+        // first owner — never fail that path for a missing/inactive subscription;
+        // best-effort track the user instead via LimitService.IncrementAsync (a plain
+        // unconditional +1, which silently no-ops if the counter row doesn't exist yet).
+        // Known limits of this exemption (accepted, not fixed here):
+        //   - It skips the capacity check entirely, not just the "no subscription" case: if
+        //     the tenant DOES have an active subscription with Users already at its max (or
+        //     a TenantLimitOverride of 0), the first owner still gets in uncounted-for-limits.
+        //   - The "zero Active memberships" read and the eventual membership insert are not
+        //     atomic with each other: two concurrent "first" accept/register calls for the
+        //     same brand-new tenant can both observe zero and both take this branch, so more
+        //     than one caller can claim the exemption. This is an accepted race for an
+        //     operationally rare scenario (a tenant has no owner yet), not a correctness gap
+        //     reconcile is relied on to paper over for ongoing usage.
         var activeMembers = await dbContext.TenantMemberships
             .CountAsync(
                 m => m.TenantId == invitation.TenantId
