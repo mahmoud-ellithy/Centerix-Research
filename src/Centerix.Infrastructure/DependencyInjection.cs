@@ -213,11 +213,16 @@ public static class DependencyInjection
         services.AddScoped<IEmailSender>(sp =>
         {
             var env = sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>();
+            var resolvedConfiguration = sp.GetRequiredService<IConfiguration>();
             var emailOptions = sp
                 .GetRequiredService<Microsoft.Extensions.Options.IOptions<Centerix.Infrastructure.Email.EmailOptions>>()
                 .Value;
 
-            var resolvedMode = emailOptions.ResolveMode(env);
+            // REV-012 (A.1): the environment NAME "Testing" is never trusted by itself.
+            var allowTestingCapture = resolvedConfiguration.GetValue<bool>(
+                Centerix.Infrastructure.Common.TestHostMarkers.AllowCaptureAndSkipDbInitKey);
+
+            var resolvedMode = emailOptions.ResolveMode(env, allowTestingCapture);
             return resolvedMode switch
             {
                 Centerix.Infrastructure.Email.EmailMode.Capture =>

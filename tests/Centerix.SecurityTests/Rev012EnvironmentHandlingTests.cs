@@ -1,8 +1,13 @@
 using System.Reflection;
+using Centerix.Infrastructure.Common;
 using Centerix.Infrastructure.Data;
 using Centerix.Infrastructure.Email;
+using Centerix.Infrastructure.Tenancy;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Xunit;
@@ -10,8 +15,10 @@ using Xunit;
 namespace Centerix.SecurityTests;
 
 // REV-012: environment handling must be driven by the Email:Mode option (not just
-// IsProduction()). Capture is permitted only in Development/Testing; bootstrap admin
-// seeding is gated on SeedDevelopmentData in every environment.
+// IsProduction()). Capture is permitted only in Development, or in "Testing" when the
+// test host has explicitly opted in via TestHostMarkers.AllowCaptureAndSkipDbInitKey
+// (REV-012 A.1: the environment NAME "Testing" is never trusted by itself). Bootstrap
+// admin seeding is gated on SeedDevelopmentData in every environment.
 [Collection("Integration")]
 public class Rev012EnvironmentHandlingTests : IClassFixture<TestWebApplicationFactory>
 {
@@ -27,15 +34,25 @@ public class Rev012EnvironmentHandlingTests : IClassFixture<TestWebApplicationFa
     // ================================================================
 
     [Fact]
-    public void EmailOptions_Unset_DefaultsToCapture_InDevelopmentOrTesting()
+    public void EmailOptions_Unset_DefaultsToCapture_InDevelopment()
     {
         var env = NewHost("Development");
         var options = new EmailOptions();
 
+        // No marker needed: Development is always allowed.
         Assert.Equal(EmailMode.Capture, options.ResolveMode(env));
+    }
 
-        env.EnvironmentName = "Testing";
-        Assert.Equal(EmailMode.Capture, options.ResolveMode(env));
+    [Fact]
+    public void EmailOptions_Unset_InTesting_RequiresExplicitMarker()
+    {
+        // REV-012 (A.1): the environment NAME "Testing" is NOT trusted by itself anymore.
+        // Without the marker it must behave like any other non-Development environment.
+        var env = NewHost("Testing");
+        var options = new EmailOptions();
+
+        Assert.Equal(EmailMode.Smtp, options.ResolveMode(env, allowTestingCapture: false));
+        Assert.Equal(EmailMode.Capture, options.ResolveMode(env, allowTestingCapture: true));
     }
 
     [Fact]
@@ -52,7 +69,7 @@ public class Rev012EnvironmentHandlingTests : IClassFixture<TestWebApplicationFa
     }
 
     [Fact]
-    public void EmailOptions_Capture_RejectedOutsideDevelopmentOrTesting()
+    public void EmailOptions_Capture_RejectedOutsideDevelopmentOrAllowedTesting()
     {
         var env = NewHost("Staging");
         var options = new EmailOptions { Mode = EmailMode.Capture };
@@ -67,13 +84,25 @@ public class Rev012EnvironmentHandlingTests : IClassFixture<TestWebApplicationFa
     }
 
     [Fact]
-    public void EmailOptions_Capture_AllowedInDevelopmentOrTesting()
+    public void EmailOptions_Capture_RejectedInTesting_WithoutExplicitMarker()
+    {
+        // REV-012 (A.1): an operator naming a real deployment "Testing" must not be able to
+        // unlock Capture just by the environment name — only the test host marker can.
+        var env = NewHost("Testing");
+        var options = new EmailOptions { Mode = EmailMode.Capture };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => options.Validate(env, allowTestingCapture: false));
+        Assert.Contains("Development or Testing", ex.Message);
+    }
+
+    [Fact]
+    public void EmailOptions_Capture_AllowedInDevelopment_OrTestingWithMarker()
     {
         var dev = NewHost("Development");
-        new EmailOptions { Mode = EmailMode.Capture }.Validate(dev); // no throw
+        new EmailOptions { Mode = EmailMode.Capture }.Validate(dev); // no throw, no marker needed
 
         var test = NewHost("Testing");
-        new EmailOptions { Mode = EmailMode.Capture }.Validate(test); // no throw
+        new EmailOptions { Mode = EmailMode.Capture }.Validate(test, allowTestingCapture: true); // no throw
     }
 
     [Fact]

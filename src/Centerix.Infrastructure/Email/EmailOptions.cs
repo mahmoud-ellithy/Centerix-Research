@@ -6,13 +6,17 @@ using Microsoft.Extensions.Hosting;
 /// Email delivery mode (REV-012). Section: "Email".
 /// <list type="bullet">
 /// <item><see cref="EmailMode.Smtp"/> – real outbound delivery. Required outside
-/// Development/Testing; allowed everywhere.</item>
+/// Development (and the test host); allowed everywhere.</item>
 /// <item><see cref="EmailMode.Capture"/> – logs the rendered message instead of sending it.
-/// ALLOWED only when the hosting environment is Development or Testing; any other
-/// environment fails startup through <c>ValidateOnStart</c>.</item>
+/// ALLOWED only when the hosting environment is Development, or is "Testing" AND the caller
+/// passes <c>allowTestingCapture: true</c> (REV-012 A.1: the environment NAME "Testing" is
+/// never trusted by itself — see <see cref="Centerix.Infrastructure.Common.TestHostMarkers"/>).
+/// Any other environment, or "Testing" without the marker, fails startup through
+/// <c>ValidateOnStart</c>.</item>
 /// </list>
 /// When <see cref="Mode"/> is unset, the framework default is Smtp everywhere except
-/// Development/Testing, where it defaults to Capture so dev/test never needs SMTP.
+/// Development (and "Testing" with the marker), where it defaults to Capture so dev/test
+/// never needs SMTP.
 /// </summary>
 public sealed class EmailOptions
 {
@@ -27,27 +31,24 @@ public sealed class EmailOptions
     /// <summary>
     /// True when <see cref="Mode"/> resolves to Capture for the given environment.
     /// </summary>
-    public bool IsCaptureAllowed(IHostEnvironment environment)
+    public bool IsCaptureAllowed(IHostEnvironment environment, bool allowTestingCapture = false)
     {
-        var resolved = ResolveMode(environment);
+        var resolved = ResolveMode(environment, allowTestingCapture);
         return resolved == EmailMode.Capture;
     }
 
     /// <summary>
     /// Compute the effective mode for the environment. Unset defaults to Capture in
-    /// Development/Testing and to Smtp in every other environment.
+    /// Development (or "Testing" when <paramref name="allowTestingCapture"/> is true) and to
+    /// Smtp everywhere else.
     /// </summary>
-    public EmailMode ResolveMode(IHostEnvironment environment)
+    public EmailMode ResolveMode(IHostEnvironment environment, bool allowTestingCapture = false)
     {
         if (Mode != EmailMode.Unset)
             return Mode;
 
-        var name = environment.EnvironmentName;
-        if (string.Equals(name, "Development", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(name, "Testing", StringComparison.OrdinalIgnoreCase))
-        {
+        if (IsDevelopmentOrAllowedTesting(environment, allowTestingCapture))
             return EmailMode.Capture;
-        }
 
         return EmailMode.Smtp;
     }
@@ -56,19 +57,26 @@ public sealed class EmailOptions
     /// Validate the resolved configuration against the hosting environment.
     /// Called by the options pipeline at startup (<c>ValidateOnStart</c>).
     /// </summary>
-    public void Validate(IHostEnvironment environment)
+    public void Validate(IHostEnvironment environment, bool allowTestingCapture = false)
     {
-        var resolved = ResolveMode(environment);
+        var resolved = ResolveMode(environment, allowTestingCapture);
 
-        if (resolved == EmailMode.Capture
-            && !string.Equals(environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase))
+        if (resolved == EmailMode.Capture && !IsDevelopmentOrAllowedTesting(environment, allowTestingCapture))
         {
             throw new InvalidOperationException(
                 $"Email:Mode=Capture is only permitted in Development or Testing. " +
                 $"Current environment is '{environment.EnvironmentName}'. " +
                 "Set Email:Mode=Smtp and configure Smtp:Host / Smtp:Port / Smtp:FromAddress.");
         }
+    }
+
+    private static bool IsDevelopmentOrAllowedTesting(IHostEnvironment environment, bool allowTestingCapture)
+    {
+        if (string.Equals(environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return allowTestingCapture
+            && string.Equals(environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase);
     }
 }
 

@@ -1,7 +1,9 @@
+using Centerix.Infrastructure.Common;
 using Centerix.Infrastructure.Tenancy;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -40,13 +42,17 @@ public static class Extensions
 
     /// <summary>
     /// Runs the configured production initialization pipeline (NEW-2). Honors
-    /// DatabaseInitialization: ApplyMigrations / Seed / ValidateSchema. Skipped
-    /// entirely in the Testing environment (the test host manages its own stores).
+    /// DatabaseInitialization: ApplyMigrations / Seed / ValidateSchema. Skipped entirely when
+    /// the environment is "Testing" AND the test host has set
+    /// <see cref="TestHostMarkers.AllowCaptureAndSkipDbInitKey"/> (REV-012 A.1: the test host
+    /// manages its own stores; the environment NAME "Testing" is never trusted by itself).
     /// </summary>
     public static async Task RunDatabaseInitializationAsync(this WebApplication app, CancellationToken cancellationToken = default)
     {
         var env = app.Services.GetRequiredService<IHostEnvironment>();
-        if (env.EnvironmentName.Equals("Testing", StringComparison.OrdinalIgnoreCase))
+        var configuration = app.Services.GetRequiredService<IConfiguration>();
+        var allowSkip = configuration.GetValue<bool>(TestHostMarkers.AllowCaptureAndSkipDbInitKey);
+        if (allowSkip && env.EnvironmentName.Equals("Testing", StringComparison.OrdinalIgnoreCase))
             return;
 
         using var scope = app.Services.CreateScope();
