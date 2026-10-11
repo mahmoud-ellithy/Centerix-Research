@@ -2,6 +2,7 @@ namespace Centerix.Application.Platform.Invitations.Commands;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Subscriptions;
 using Centerix.Domain.Platform.Tenants;
 using Centerix.Domain.Platform.Tenants.Enums;
 
@@ -59,6 +60,7 @@ public class RegisterFromInvitationValidator : AbstractValidator<RegisterFromInv
 public class RegisterFromInvitationHandler(
     IAppDbContext dbContext,
     IIdentityService identityService,
+    ILimitService limitService,
     ILogger<RegisterFromInvitationHandler> logger) : IRequestHandler<RegisterFromInvitationCommand, Result<Created>>
 {
     public async Task<Result<Created>> Handle(
@@ -104,6 +106,19 @@ public class RegisterFromInvitationHandler(
             return Error.Conflict("Invitation.UserAlreadyExists",
                 "An account already exists for this email. Please log in and accept the invitation.");
 
+        // 4b. SEC-001/F3 pre-check on the invited role BEFORE the claim, the Users
+        // reservation or user creation: a legacy invitation row carrying a
+        // platform-authority or non-canonical role (written before the write contract
+        // existed) must fail with its 403 here — regardless of quota state — leaving no
+        // user, no membership and a still-Pending invitation. Valid invitations always
+        // carry canonical tenant roles, so this is invisible to them; Create re-enforces
+        // the same rules at the membership write point.
+        if (TenantRoleScopes.IsPlatformScoped(invitation.RoleName))
+            return TenantMembershipErrors.PlatformRoleNotAllowed;
+
+        if (!TenantRoleScopes.IsCanonicalTenantRole(invitation.RoleName))
+            return TenantMembershipErrors.RoleNotAllowed;
+
         // 5. Atomic single-use claim: flip Pending → Accepted ONLY while still pending.
         // Identity's default indexes on AspNetUsers are NON-unique, so nothing else serializes
         // two concurrent registrations with the same e-mail. On relational providers this
@@ -136,6 +151,30 @@ public class RegisterFromInvitationHandler(
 
         if (claimed != 1)
             return TenantMembershipErrors.InvitationAlreadyAccepted;
+
+        // REV-011: reserve a Users slot inside the same transaction as the membership insert.
+        // Failure returns Conflict and the ambient transaction rolls back, so nothing is
+        // created and the invitation stays usable (still Pending after rollback).
+        // Exemption: a tenant with zero Active memberships is onboarding its first owner —
+        // never fail that path for a missing/inactive subscription; best-effort track the
+        // user instead (increment only applies when a counter row exists).
+        var activeMembers = await dbContext.TenantMemberships
+            .CountAsync(
+                m => m.TenantId == invitation.TenantId
+                  && m.Status == TenantMembershipStatus.Active,
+                cancellationToken);
+
+        if (activeMembers == 0)
+        {
+            await limitService.IncrementAsync(invitation.TenantId, LimitTypeCodes.Users, cancellationToken);
+        }
+        else
+        {
+            var usersLimitResult = await limitService.ReserveAsync(
+                invitation.TenantId, LimitTypeCodes.Users, cancellationToken);
+            if (!usersLimitResult.IsSuccess)
+                return usersLimitResult.Errors!;
+        }
 
         // 6. Create the IdentityUser (same DbContext/transaction).
         var (userId, succeeded, errors) = await identityService.CreateUserAsync(

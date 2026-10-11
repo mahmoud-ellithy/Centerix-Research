@@ -2,6 +2,11 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Centerix.Domain.Platform.Authorization;
+using Centerix.Domain.Platform.Plans;
+using Centerix.Domain.Platform.Subscriptions;
+using Centerix.Domain.Platform.Subscriptions.Enums;
+using Centerix.Domain.Platform.Subscriptions.UsageCounters;
 using Centerix.Domain.Platform.Tenants;
 using Centerix.Domain.Platform.Tenants.Enums;
 using Centerix.Infrastructure.Auth;
@@ -106,9 +111,12 @@ public class SEC001_SqlServerInvitationRoleBoundaryTests
     [Trait("Category", "SqlServer")]
     public async Task CanonicalInvitation_StillConsumesOnBothFlows()
     {
-        const string tenantId = "f6-canonical";
+        // REV-011: GUID tenant id + provisioned Users quota — consumption now reserves a
+        // Users slot, so the positive control needs the production commercial preconditions.
+        var tenantId = Guid.NewGuid().ToString();
         await EnsureTenantAsync(tenantId);
         var adminToken = await SeedAdminAsync(tenantId);
+        await EnsureUsersQuotaAsync(tenantId);
 
         // Register flow (brand-new account).
         var registerEmail = UniqueEmail("canonreg");
@@ -218,8 +226,37 @@ public class SEC001_SqlServerInvitationRoleBoundaryTests
         return new SeededInvitation(rawToken, tokenHash);
     }
 
-    private async Task<string> CreateInvitationViaApiAsync(string adminToken, string tenantId, string email)
+    /// <summary>
+    /// REV-011: invitation consumption reserves a Users quota slot, so the positive control
+    /// provisions an Active subscription snapshot and a usage-counter row seeded at the
+    /// current Active-membership count.
+    /// </summary>
+    private async Task EnsureUsersQuotaAsync(string tenantId, int maxUsers = 10)
     {
+        using var scope = _env.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var plan = Plan.Create(
+            0, $"F6Q_{Guid.NewGuid():N}"[..28], "Quota test plan", 100m,
+            100, maxUsers, 10, 40, 50, 1000, true, null, "USD", 12, 0).Value;
+        db.Plans.Add(plan);
+        await db.SaveChangesAsync();
+
+        var sub = TenantPlan.Create(
+            Guid.NewGuid(), tenantId, plan.Id, 100m, 100m, "USD", 12, 0,
+            DateTime.UtcNow, false, SubscriptionStatus.Pending,
+            100, maxUsers, 10, 40, 50, 500).Value;
+        Assert.True(sub.Activate(DateTime.UtcNow).IsSuccess);
+        db.TenantPlans.Add(sub);
+
+        var activeUsers = await db.TenantMemberships.CountAsync(m =>
+            m.TenantId == tenantId && m.Status == TenantMembershipStatus.Active);
+        db.TenantUsageCounters.Add(TenantUsageCounter.Create(
+            Guid.Parse(tenantId), 0, activeUsers, 0, 0, 0, 0, 100, maxUsers, 10, 40, DateTime.UtcNow));
+        await db.SaveChangesAsync();
+    }
+
+    private async Task<string> CreateInvitationViaApiAsync(string adminToken, string tenantId, string email)    {
         _env.EmailSender.Clear();
 
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/invitations");

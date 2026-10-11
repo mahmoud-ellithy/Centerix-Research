@@ -31,6 +31,16 @@ public interface ILimitService
 
     /// <summary>Releases one unit of previously reserved capacity (never below zero).</summary>
     Task ReleaseAsync(string tenantId, string limitType, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// REV-011: best-effort unconditional increment of a usage counter (no limit check, never
+    /// fails the caller). Used for first-owner onboarding, which must never be blocked by a
+    /// missing/inactive subscription but should still track the user when a counter row exists.
+    /// No-op on the InMemory test provider (same read-only tracking mode as the reservation
+    /// check there); on relational providers an auto-committed conditional increment that only
+    /// applies when the counter row exists. Failures are swallowed by design (tracked in logs).
+    /// </summary>
+    Task IncrementAsync(string tenantId, string limitType, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Canonical limit types shared across modules. Delegates to domain codes.</summary>

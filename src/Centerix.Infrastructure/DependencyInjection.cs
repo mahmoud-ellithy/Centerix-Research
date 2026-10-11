@@ -1,6 +1,7 @@
 using System.Text;
 using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Platform;
+using Centerix.Application.Platform.Invitations;
 using Centerix.Application.Platform.Subscriptions;
 using Centerix.Infrastructure.Auditing;
 using Centerix.Infrastructure.Auth;
@@ -138,6 +139,10 @@ public static class DependencyInjection
         // handler, the feature handler and the platform guard.
         services.AddScoped<IPlatformAdminVerifier, PlatformAdminVerifier>();
         services.AddScoped<ISubscriptionFactory, SubscriptionFactory>();
+
+        // REV-003: shared invitation-issuing primitive used by tenant invitation creation
+        // and by platform tenant-owner provisioning.
+        services.AddScoped<IInvitationIssuer, InvitationIssuer>();
 
         // Phase 7: Contract Benefits eligibility service
         services.AddScoped<IBenefitEligibilityService, BenefitEligibilityService>();

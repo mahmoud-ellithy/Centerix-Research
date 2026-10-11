@@ -13,6 +13,14 @@ public static class TenantMembershipErrors
     public static Error AlreadyMember =>
         Error.Conflict("TenantMembership.AlreadyMember", "User is already an active member of this tenant");
 
+    /// <summary>
+    /// REV-017: a Suspended member cannot self-reactivate by accepting an invitation —
+    /// restoration requires an administrator. Invitation acceptance only reactivates Revoked rows.
+    /// </summary>
+    public static Error MembershipSuspended =>
+        Error.Forbidden("TenantMembership.Suspended",
+            "This membership is suspended and cannot be reactivated by accepting an invitation");
+
     public static Error NotMember =>
         Error.NotFound("TenantMembership.NotMember", "User is not a member of this tenant");
 

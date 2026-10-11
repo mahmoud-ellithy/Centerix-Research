@@ -3910,10 +3910,6 @@ namespace Centerix.Infrastructure.Data.Migrations
 
                     b.HasIndex("BranchId");
 
-                    b.HasIndex("QRCode")
-                        .IsUnique()
-                        .HasDatabaseName("UX_Students_QRCode");
-
                     b.HasIndex("StageId");
 
                     b.HasIndex("TenantId");
@@ -3921,6 +3917,10 @@ namespace Centerix.Infrastructure.Data.Migrations
                     b.HasIndex("YearId");
 
                     b.HasIndex("TenantId", "BranchId");
+
+                    b.HasIndex("TenantId", "QRCode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Students_Tenant_QRCode");
 
                     b.HasIndex("TenantId", "Status");
 

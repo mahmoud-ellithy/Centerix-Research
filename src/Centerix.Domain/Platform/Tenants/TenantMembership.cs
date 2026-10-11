@@ -80,6 +80,41 @@ public class TenantMembership : Entity
         return Result.Updated;
     }
 
+    /// <summary>
+    /// REV-017: reactivates a Revoked membership through an invitation, APPLYING the invited
+    /// role. Only Revoked rows may return this way: a Suspended member must be restored by
+    /// an administrator (accepting an invitation must never self-reactivate a suspension),
+    /// and an Active member is already a member. The role is validated with the same
+    /// SEC-001/F3 rules as <see cref="Create"/>, so a returning member always ends with
+    /// exactly the invited role — a revoked ex-TenantAdmin re-invited as TenantUser returns
+    /// as TenantUser, never as TenantAdmin.
+    /// </summary>
+    public Result<Updated> Reactivate(string roleName)
+    {
+        if (Status == TenantMembershipStatus.Active)
+            return TenantMembershipErrors.AlreadyMember;
+
+        // Invitation acceptance is not an administrative restore path: anything that is not
+        // a Revoked return (Suspended, or any other non-Active state) is rejected here.
+        if (Status != TenantMembershipStatus.Revoked)
+            return TenantMembershipErrors.MembershipSuspended;
+
+        if (string.IsNullOrWhiteSpace(roleName))
+            roleName = TenantRoleNames.TenantUser;
+
+        // SEC-001 + F3 (same rules as Create): the applied role can never be a
+        // platform-authority or non-canonical role.
+        if (TenantRoleScopes.IsPlatformScoped(roleName))
+            return TenantMembershipErrors.PlatformRoleNotAllowed;
+
+        if (!TenantRoleScopes.IsCanonicalTenantRole(roleName))
+            return TenantMembershipErrors.RoleNotAllowed;
+
+        RoleName = roleName;
+        Status = TenantMembershipStatus.Active;
+        return Result.Updated;
+    }
+
     public Result<Updated> Suspend()
     {
         if (Status == TenantMembershipStatus.Suspended)

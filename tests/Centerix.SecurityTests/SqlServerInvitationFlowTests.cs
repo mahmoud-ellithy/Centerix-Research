@@ -3,6 +3,10 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Centerix.Domain.Platform.Authorization;
+using Centerix.Domain.Platform.Plans;
+using Centerix.Domain.Platform.Subscriptions;
+using Centerix.Domain.Platform.Subscriptions.Enums;
+using Centerix.Domain.Platform.Subscriptions.UsageCounters;
 using Centerix.Domain.Platform.Tenants;
 using Centerix.Domain.Platform.Tenants.Enums;
 using Centerix.Infrastructure.Auth;
@@ -81,9 +85,13 @@ public class SqlServerInvitationFlowTests
     [Trait("Category", "SqlServer")]
     public async Task Register_NewUser_PersistsUserMembershipRoleName_AndAcceptsInvitation()
     {
-        const string tenantId = "sql-reg-tenant";
+        // REV-011: the tenant id must be a valid GUID (usage-counter PK) and the tenant needs
+        // the production commercial preconditions (Active subscription + counter row) because
+        // registration now reserves a Users quota slot.
+        var tenantId = Guid.NewGuid().ToString();
         await EnsureTenantAsync(tenantId);
         var adminToken = await SeedAdminAsync(tenantId);
+        await EnsureUsersQuotaAsync(tenantId);
         var email = UniqueEmail("register");
 
         var rawToken = await CreateInvitationViaApiAsync(adminToken, tenantId, email);
@@ -261,9 +269,11 @@ public class SqlServerInvitationFlowTests
     [Trait("Category", "SqlServer")]
     public async Task Register_ConcurrentSameToken_ExactlyOneSucceeds_OneUserOneMembership()
     {
-        const string tenantId = "sql-race-tenant";
+        // REV-011: GUID tenant id + provisioned Users quota (see Register_NewUser).
+        var tenantId = Guid.NewGuid().ToString();
         await EnsureTenantAsync(tenantId);
         var adminToken = await SeedAdminAsync(tenantId);
+        await EnsureUsersQuotaAsync(tenantId);
         var email = UniqueEmail("race");
 
         var rawToken = await CreateInvitationViaApiAsync(adminToken, tenantId, email);
@@ -294,9 +304,11 @@ public class SqlServerInvitationFlowTests
     [Trait("Category", "SqlServer")]
     public async Task Accept_ExistingUser_CreatesMembership_OnSqlServer()
     {
-        const string tenantId = "sql-accept-tenant";
+        // REV-011: GUID tenant id + provisioned Users quota (see Register_NewUser).
+        var tenantId = Guid.NewGuid().ToString();
         await EnsureTenantAsync(tenantId);
         var adminToken = await SeedAdminAsync(tenantId);
+        await EnsureUsersQuotaAsync(tenantId);
 
         var email = UniqueEmail("acceptor");
         var user = await CreateUserAsync(email);
@@ -316,9 +328,13 @@ public class SqlServerInvitationFlowTests
     [Trait("Category", "SqlServer")]
     public async Task Accept_ReactivatesPreviouslyRevokedMembership_SingleRow()
     {
-        const string tenantId = "sql-reactivate-tenant";
+        // REV-011: GUID tenant id + provisioned Users quota (see Register_NewUser).
+        // The quota is seeded BEFORE the revoked row below, so the counter holds only the
+        // admin; reactivation then reserves one more unit (a returning member counts anew).
+        var tenantId = Guid.NewGuid().ToString();
         await EnsureTenantAsync(tenantId);
         var adminToken = await SeedAdminAsync(tenantId);
+        await EnsureUsersQuotaAsync(tenantId);
 
         var email = UniqueEmail("reactivate");
         var user = await CreateUserAsync(email);
@@ -496,6 +512,39 @@ public class SqlServerInvitationFlowTests
         Assert.Equal(HttpStatusCode.Forbidden, (await _env.Client.SendAsync(deniedRequest)).StatusCode);
     }
 
+    /// <summary>
+    /// REV-017: concurrent double-accept racing on one token — the atomic claim lets exactly
+    /// one caller win (200); the loser gets a clean 409 and exactly one membership row exists.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "SqlServer")]
+    public async Task Accept_ConcurrentDoubleAccept_ExactlyOneSucceeds_SingleMembership()
+    {
+        // REV-011: GUID tenant id + provisioned Users quota (see Register_NewUser).
+        var tenantId = Guid.NewGuid().ToString();
+        await EnsureTenantAsync(tenantId);
+        var adminToken = await SeedAdminAsync(tenantId);
+        await EnsureUsersQuotaAsync(tenantId);
+
+        var email = UniqueEmail("dblaccept");
+        var user = await CreateUserAsync(email);
+        var rawToken = await CreateInvitationViaApiAsync(adminToken, tenantId, email);
+
+        var responses = await Task.WhenAll(
+            _env.Client.SendAsync(AcceptRequest(rawToken, user, tenantId)),
+            _env.Client.SendAsync(AcceptRequest(rawToken, user, tenantId)));
+
+        Assert.Single(responses.Where(r => r.StatusCode == HttpStatusCode.OK));
+        Assert.Single(responses.Where(r => r.StatusCode == HttpStatusCode.Conflict));
+
+        using var scope = _env.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Single(db.TenantMemberships.Where(m => m.UserId == user.Id && m.TenantId == tenantId));
+        Assert.Equal(
+            InvitationStatus.Accepted,
+            db.TenantInvitations.Single(i => i.NormalizedEmail == email.ToUpperInvariant()).Status);
+    }
+
     // ==================================================================
     // Helpers
     // ==================================================================
@@ -642,6 +691,38 @@ public class SqlServerInvitationFlowTests
         db.TenantInvitations.Add(invitation);
         await db.SaveChangesAsync();
         return new SeededInvitation(invitation.Id, rawToken, tokenHash, email);
+    }
+
+    /// <summary>
+    /// REV-011: invitation acceptance/registration now reserves a Users quota slot inside the
+    /// membership transaction, so these tests provision the same commercial preconditions a
+    /// production tenant has after approve: an Active subscription snapshot and a
+    /// usage-counter row seeded at the current Active-membership count. Without this the
+    /// reservation fails closed (Subscription.NotActive / TrackingNotProvisioned).
+    /// </summary>
+    private async Task EnsureUsersQuotaAsync(string tenantId, int maxUsers = 10)
+    {
+        using var scope = _env.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var plan = Plan.Create(
+            0, $"SQLQ_{Guid.NewGuid():N}"[..28], "Quota test plan", 100m,
+            100, maxUsers, 10, 40, 50, 1000, true, null, "USD", 12, 0).Value;
+        db.Plans.Add(plan);
+        await db.SaveChangesAsync();
+
+        var sub = TenantPlan.Create(
+            Guid.NewGuid(), tenantId, plan.Id, 100m, 100m, "USD", 12, 0,
+            DateTime.UtcNow, false, SubscriptionStatus.Pending,
+            100, maxUsers, 10, 40, 50, 500).Value;
+        Assert.True(sub.Activate(DateTime.UtcNow).IsSuccess);
+        db.TenantPlans.Add(sub);
+
+        var activeUsers = await db.TenantMemberships.CountAsync(m =>
+            m.TenantId == tenantId && m.Status == TenantMembershipStatus.Active);
+        db.TenantUsageCounters.Add(TenantUsageCounter.Create(
+            Guid.Parse(tenantId), 0, activeUsers, 0, 0, 0, 0, 100, maxUsers, 10, 40, DateTime.UtcNow));
+        await db.SaveChangesAsync();
     }
 
     /// <summary>Creates an invitation through the API and recovers the RAW token from the captured e-mail.</summary>

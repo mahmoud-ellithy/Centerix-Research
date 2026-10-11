@@ -61,11 +61,13 @@ public class CreateTeacherHandler(
         CreateTeacherCommand request,
         CancellationToken cancellationToken)
     {
-        // Commercial gate: plan/override limit on active subscription (atomic slot reservation).
-        var limitResult = await limitService.ReserveAsync(
-            currentTenant.TenantId!, LimitTypeCodes.Teachers, cancellationToken);
-        if (!limitResult.IsSuccess)
-            return limitResult.Errors!;
+        // REV-011: same transaction wrapper as CreateStudentHandler (reserve + validations +
+        // save commit atomically on relational providers) without changing success/error
+        // semantics: validation failures are checked before reserving, and the transaction —
+        // not manual ReleaseAsync — undoes the reservation on every failure path.
+        await using var transaction = dbContext.IsRelational
+            ? await dbContext.BeginTransactionAsync(cancellationToken)
+            : null;
 
         // Security: the referenced Identity user must hold an active membership in this tenant.
         var userIsMember = await dbContext.TenantMemberships
@@ -76,20 +78,21 @@ public class CreateTeacherHandler(
                 && m.Status == TenantMembershipStatus.Active,
                 cancellationToken);
         if (!userIsMember)
-        {
-            await limitService.ReleaseAsync(currentTenant.TenantId!, LimitTypeCodes.Teachers, cancellationToken);
             return TeacherErrors.UserNotInTenant;
-        }
 
         // Tenant-scoped referential integrity: branch must exist within the resolved tenant.
         var branchExists = await dbContext.Branches
             .AsNoTracking()
             .AnyAsync(b => b.Id == request.BranchId, cancellationToken);
         if (!branchExists)
-        {
-            await limitService.ReleaseAsync(currentTenant.TenantId!, LimitTypeCodes.Teachers, cancellationToken);
             return BranchErrors.NotFound;
-        }
+
+        // Commercial gate: plan/override limit on active subscription (atomic slot reservation
+        // inside the ambient transaction above).
+        var limitResult = await limitService.ReserveAsync(
+            currentTenant.TenantId!, LimitTypeCodes.Teachers, cancellationToken);
+        if (!limitResult.IsSuccess)
+            return limitResult.Errors!;
 
         var result = Teacher.Create(
             Guid.NewGuid(),
@@ -103,23 +106,15 @@ public class CreateTeacherHandler(
             request.JoinedAt);
 
         if (!result.IsSuccess)
-        {
-            await limitService.ReleaseAsync(currentTenant.TenantId!, LimitTypeCodes.Teachers, cancellationToken);
             return result.Errors!;
-        }
 
         dbContext.Teachers.Add(result.Value);
         dbContext.StampAddedTenantIds(currentTenant.TenantId!);
 
-        try
-        {
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
-        catch
-        {
-            await limitService.ReleaseAsync(currentTenant.TenantId!, LimitTypeCodes.Teachers, cancellationToken);
-            throw;
-        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (transaction is not null)
+            await transaction.CommitAsync(cancellationToken);
 
         await auditWriter.WriteAsync(
             action: "Teacher.Create",

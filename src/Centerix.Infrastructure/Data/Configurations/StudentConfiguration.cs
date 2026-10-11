@@ -74,9 +74,13 @@ public class StudentConfiguration : IEntityTypeConfiguration<Student>
         builder.HasQueryFilter(s => s.DeletedAtUtc == null);
 
         builder.HasIndex(s => s.TenantId);
-        builder.HasIndex(s => s.QRCode)
+        // REV-009: QR codes are unique PER TENANT, not globally — the same QR string may
+        // exist in different tenants. Soft-deleted rows are deliberately NOT filtered out:
+        // a soft-deleted student's QR stays reserved within its tenant (matches the
+        // application-level duplicate check, which includes soft-deleted rows).
+        builder.HasIndex(s => new { s.TenantId, s.QRCode })
             .IsUnique()
-            .HasDatabaseName("UX_Students_QRCode");
+            .HasDatabaseName("UX_Students_Tenant_QRCode");
 
         builder.HasIndex(s => new { s.TenantId, s.BranchId });
         builder.HasIndex(s => new { s.TenantId, s.StageId, s.YearId });

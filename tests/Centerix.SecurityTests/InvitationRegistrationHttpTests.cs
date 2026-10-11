@@ -3,6 +3,10 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Centerix.Domain.Platform.Authorization;
+using Centerix.Domain.Platform.Plans;
+using Centerix.Domain.Platform.Subscriptions;
+using Centerix.Domain.Platform.Subscriptions.Enums;
+using Centerix.Domain.Platform.Subscriptions.UsageCounters;
 using Centerix.Domain.Platform.Tenants;
 using Centerix.Domain.Platform.Tenants.Enums;
 using Centerix.Infrastructure.Auth;
@@ -29,7 +33,10 @@ public class InvitationRegistrationHttpTests : IClassFixture<TestWebApplicationF
     private readonly TestWebApplicationFactory _factory;
     private readonly HttpClient _client;
 
-    private const string TenantA = "reg-tenant-a";
+    // REV-011: invitation consumption reserves a Users quota slot, and usage-counter rows
+    // are keyed by GUID tenant id — so this suite uses a GUID tenant with the production
+    // commercial preconditions (Active subscription + counter row) seeded below.
+    private static readonly string TenantA = Guid.NewGuid().ToString("N");
     public const string TestBaseUrl = "https://app.securitytests.local";
 
     public InvitationRegistrationHttpTests(TestWebApplicationFactory factory)
@@ -106,6 +113,31 @@ public class InvitationRegistrationHttpTests : IClassFixture<TestWebApplicationF
                 appDbContext.RolePermissions.Add(RolePermission.Create(adminRole.Id, permission.Id).Value);
             }
 
+            await appDbContext.SaveChangesAsync();
+        }
+
+        // REV-011: invitation acceptance/registration reserves a Users quota slot inside the
+        // membership transaction, so the suite provisions the production commercial
+        // preconditions (Active subscription snapshot + usage-counter row). Without these the
+        // reservation fails closed and no consumption flow can succeed.
+        if (!await appDbContext.TenantPlans.IgnoreQueryFilters()
+                .AnyAsync(tp => tp.TenantId == TenantA, CancellationToken.None))
+        {
+            var plan = Plan.Create(
+                0, $"REG{Guid.NewGuid():N}"[..24], "Registration test plan", 100m,
+                100, 10, 10, 40, 50, 1000, true, null, "USD", 12, 0).Value;
+            appDbContext.Plans.Add(plan);
+            await appDbContext.SaveChangesAsync();
+
+            var sub = TenantPlan.Create(
+                Guid.NewGuid(), TenantA, plan.Id, 100m, 100m, "USD", 12, 0,
+                DateTime.UtcNow, false, SubscriptionStatus.Pending,
+                100, 10, 10, 40, 50, 500).Value;
+            Assert.True(sub.Activate(DateTime.UtcNow).IsSuccess);
+            appDbContext.TenantPlans.Add(sub);
+
+            appDbContext.TenantUsageCounters.Add(TenantUsageCounter.Create(
+                Guid.Parse(TenantA), 0, 0, 0, 0, 0, 0, 100, 10, 10, 40, DateTime.UtcNow));
             await appDbContext.SaveChangesAsync();
         }
     }

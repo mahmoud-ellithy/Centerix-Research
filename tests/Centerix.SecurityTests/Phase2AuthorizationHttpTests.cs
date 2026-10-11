@@ -9,6 +9,8 @@ using Centerix.Domain.Platform.Subscriptions.Enums;
 using Centerix.Domain.Platform.Subscriptions.UsageCounters;
 using Centerix.Domain.Platform.Tenants;
 using Centerix.Domain.Platform.Tenants.Enums;
+using Centerix.Domain.Students.Branches;
+using Centerix.Domain.Students.Lookups;
 using Centerix.Infrastructure.Auth;
 using Centerix.Infrastructure.Data;
 using Centerix.Infrastructure.Tenancy;
@@ -457,7 +459,7 @@ private static object StudentPayload() => new
         branchId = Guid.NewGuid(),
         stageId = 1,
         yearId = 1,
-        fullNameAr = "Ø·Ø§Ù„Ø¨ Ø§Ø®ØªØ¨Ø§Ø±",
+        fullNameAr = "طالب اختبار",
         fullNameEn = (string?)"Test Student",
         gender = 1, // Gender.Male
         phone = "01000000000",
@@ -465,6 +467,45 @@ private static object StudentPayload() => new
         status = 0, // StudentStatus.Active
         enrolledAt = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd")
     };
+
+private static object StudentPayload(Guid branchId, int stageId, int yearId) => new
+    {
+        branchId,
+        stageId,
+        yearId,
+        fullNameAr = "طالب اختبار",
+        fullNameEn = (string?)"Test Student",
+        gender = 1, // Gender.Male
+        phone = "01000000000",
+        qrCode = $"QR-{Guid.NewGuid():N}",
+        status = 0, // StudentStatus.Active
+        enrolledAt = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd")
+    };
+
+/// <summary>
+/// REV-011: referential validation (branch/stage/year) now runs BEFORE the quota reservation,
+/// so this seed gives the limit test a referentially-valid target and the request reaches
+/// the limit gate.
+/// </summary>
+private async Task<(Guid BranchId, int StageId, int YearId)> SeedStudentPrerequisitesAsync(Guid tenantId)
+{
+    using var scope = _factory.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var branch = Branch.Create(Guid.NewGuid(), "Limit Branch", null, null, null, true).Value;
+    db.Branches.Add(branch);
+    db.StampAddedTenantIds(tenantId.ToString());
+    var maxStageId = await db.AcademicStages.IgnoreQueryFilters().Select(x => (int?)x.Id).MaxAsync() ?? 0;
+    var stage = AcademicStage.Create(maxStageId + 1, $"LS{maxStageId + 1}", "Limit Stage", (byte)1).Value;
+    db.AcademicStages.Add(stage);
+    db.StampAddedTenantIds(tenantId.ToString());
+    await db.SaveChangesAsync();
+    var maxYearId = await db.AcademicYears.IgnoreQueryFilters().Select(x => (int?)x.Id).MaxAsync() ?? 0;
+    var year = AcademicYear.Create(maxYearId + 1, stage.Id, $"LY{maxYearId + 1}", "Limit Year").Value;
+    db.AcademicYears.Add(year);
+    db.StampAddedTenantIds(tenantId.ToString());
+    await db.SaveChangesAsync();
+    return (branch.Id, stage.Id, year.Id);
+}
 
 private async Task EnsureFeatureOnPlanAsync(int planId, string featureCode)
     {
@@ -497,8 +538,12 @@ public async Task BusinessWrite_FeatureGranted_LimitExhausted_DeniedByLimit()
         var (subscriptionId, _) = await ApproveAndActivateAsync(platformToken, tenantId, planId);
         await SeedUsageCounterAsync(tenantId, studentsUsed: 50, studentsMax: 1); // quota exhausted (plan snapshot maxStudents = 50)
 
+        // REV-011: the payload must be referentially valid (real branch/stage/year) so the
+        // request passes the now-first validation and reaches the limit gate.
+        var (branchId, stageId, yearId) = await SeedStudentPrerequisitesAsync(tenantId);
+
         var response = await _client.SendAsync(Post(
-            "/api/students", StudentPayload(), tenantAdminToken, identifier));
+            "/api/students", StudentPayload(branchId, stageId, yearId), tenantAdminToken, identifier));
 
         var body = await response.Content.ReadAsStringAsync();
         Assert.False(response.IsSuccessStatusCode);
