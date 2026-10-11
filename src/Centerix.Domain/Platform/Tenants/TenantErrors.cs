@@ -69,4 +69,13 @@ public static class TenantErrors
     public static Error CannotReject(LifecycleStatus current) =>
         Error.Conflict("Tenant.CannotReject",
             $"Tenant rejection requires PendingApproval status; current status is '{current}'");
+
+    /// <summary>
+    /// REV-003: owner provisioning requires an approved tenant. Only Provisioning (post-Approve),
+    /// Active or Trial may receive the first-owner invitation; PendingApproval/Rejected/Cancelled/
+    /// Suspended are rejected so a dead application can never mint a live owner invitation.
+    /// </summary>
+    public static Error ProvisionOwnerNotAllowed(LifecycleStatus current) =>
+        Error.Conflict("Tenant.ProvisionOwnerNotAllowed",
+            $"Tenant owner provisioning requires an approved tenant (Provisioning, Active or Trial); current status is '{current}'");
 }

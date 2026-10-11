@@ -78,6 +78,18 @@ public class TenantsController(ILocalizer localizer, IMediator mediator) : ApiCo
             Problem);
     }
 
+    /// <summary>PLATFORM-ONLY: provisions the tenant's first owner invitation (TenantAdmin to OwnerEmail).</summary>
+    [HttpPost("{id:guid}/provision-owner")]
+    [HasPermission(Permissions.Tenants.Update)]
+    public async Task<IActionResult> ProvisionTenantOwner(Guid id, CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(new ProvisionTenantOwnerCommand(id), cancellationToken);
+
+        return result.Match(
+            invitationId => StatusCode(StatusCodes.Status201Created, new { id = invitationId }),
+            Problem);
+    }
+
     /// <summary>PLATFORM-ONLY: completes provisioning (Provisioning → Active).</summary>
     [HttpPost("{id:guid}/activate")]
     [HasPermission(Permissions.Tenants.Update)]

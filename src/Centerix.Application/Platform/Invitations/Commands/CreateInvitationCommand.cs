@@ -2,6 +2,7 @@ namespace Centerix.Application.Platform.Invitations.Commands;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Application.Common;
+using Centerix.Application.Platform.Invitations;
 using Centerix.Domain.Common.Results;
 using Centerix.Domain.Platform.Tenants;
 using Centerix.Domain.Platform.Tenants.Enums;
@@ -9,8 +10,6 @@ using Centerix.Domain.Platform.Tenants.Enums;
 using FluentValidation;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
-using System.Security.Cryptography;
 
 public record CreateInvitationCommand(
     string Email,
@@ -39,9 +38,7 @@ public class CreateInvitationHandler(
     ICurrentTenant currentTenant,
     IIdentityService identityService,
     IRoleService roleService,
-    IEmailSender emailSender,
-    IInvitationLinkBuilder invitationLinkBuilder,
-    ILogger<CreateInvitationHandler> logger) : IRequestHandler<CreateInvitationCommand, Result<Guid>>
+    IInvitationIssuer invitationIssuer) : IRequestHandler<CreateInvitationCommand, Result<Guid>>
 {
     /// <summary>
     /// CFG-001 bounded-consistency invitation delivery. There is deliberately NO Outbox
@@ -132,83 +129,20 @@ public class CreateInvitationHandler(
                 return TenantMembershipErrors.AlreadyMember;
         }
 
-        // 7. Generate cryptographically secure invitation token
-        var tokenBytes = RandomNumberGenerator.GetBytes(32);
-        var token = Convert.ToBase64String(tokenBytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        var tokenHash = HashToken(token);
+        // 7. REV-003: mint + persist + deliver through the shared issuer (token
+        // generation, SHA-256 hash, TenantInvitation.Create, e-mail send and
+        // compensation-on-send-failure). All checks above are unchanged.
+        var issueResult = await invitationIssuer.IssueAsync(
+            currentTenant.TenantId,
+            request.Email.Trim(),
+            request.RoleName,
+            currentUser.UserId,
+            request.ExpirationDays,
+            cancellationToken);
 
-        // 8. Create the invitation
-        var invitationResult = TenantInvitation.Create(
-            id: Guid.NewGuid(),
-            tenantId: currentTenant.TenantId,
-            email: request.Email.Trim(),
-            invitedByUserId: currentUser.UserId,
-            roleName: request.RoleName,
-            tokenHash: tokenHash,
-            expiresAtUtc: DateTimeOffset.UtcNow.AddDays(request.ExpirationDays));
+        if (!issueResult.IsSuccess)
+            return issueResult.Errors!;
 
-        if (!invitationResult.IsSuccess)
-            return invitationResult.Errors!;
-
-        dbContext.TenantInvitations.Add(invitationResult.Value);
-        var invitationId = invitationResult.Value.Id;
-        var invitationTenantId = invitationResult.Value.TenantId;
-        var invitationNormalizedEmail = invitationResult.Value.NormalizedEmail;
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        // 9. Send invitation email (SMTP in production, development/capturing sender
-        // elsewhere). The base URL is environment configuration (Invitations:BaseUrl) —
-        // never hardcoded — so each environment links to its own front end.
-        var acceptUrl = invitationLinkBuilder.BuildAcceptLink(token);
-        try
-        {
-            await emailSender.SendAsync(
-                request.Email.Trim(),
-                "You've been invited to join a center",
-                $"<p>You've been invited to join a center as <strong>{request.RoleName}</strong>.</p>" +
-                $"<p><a href=\"{acceptUrl}\">Click here to accept the invitation</a></p>" +
-                $"<p>This invitation expires in {request.ExpirationDays} days.</p>",
-                cancellationToken);
-        }
-        catch (Exception sendEx)
-        {
-            // Delivery failed AFTER commit: attempt compensation so the invitation does
-            // not remain Pending, but report FAILURE either way — never success.
-            try
-            {
-                var pending = await dbContext.TenantInvitations
-                    .FirstOrDefaultAsync(i => i.Id == invitationId, cancellationToken);
-                if (pending is not null && pending.Status == InvitationStatus.Pending)
-                {
-                    pending.Revoke(currentUser.UserId);
-                    await dbContext.SaveChangesAsync(cancellationToken);
-                }
-
-                logger.LogWarning(
-                    sendEx,
-                    "Invitation email delivery failed; compensation succeeded. " +
-                    "InvitationId={InvitationId}, TenantId={TenantId}, NormalizedEmail={NormalizedEmail}.",
-                    invitationId, invitationTenantId, invitationNormalizedEmail);
-            }
-            catch (Exception compensationEx)
-            {
-                logger.LogError(
-                    compensationEx,
-                    "Invitation email delivery failed AND compensation failed. " +
-                    "InvitationId={InvitationId}, TenantId={TenantId}, NormalizedEmail={NormalizedEmail}, " +
-                    "SendException={SendException}. Operator reconciliation required: revoke or re-send the Pending invitation.",
-                    invitationId, invitationTenantId, invitationNormalizedEmail, sendEx.ToString());
-            }
-
-            return TenantMembershipErrors.InvitationDeliveryFailed;
-        }
-
-        return invitationResult.Value.Id;
-    }
-
-    private static string HashToken(string token)
-    {
-        var bytes = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(token));
-        return Convert.ToHexString(bytes).ToLowerInvariant();
+        return issueResult.Value;
     }
 }

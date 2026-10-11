@@ -34,7 +34,29 @@ Automatic at startup during the required database seed
    `POST /api/auth/change-password` (login returns HTTP 403 + a single-use flow token until then).
 4. No tenant membership row is created: platform authority flows from the Identity role
    plus `IPlatformAdminVerifier`, never from a membership row. Tenant access is granted
-   later per tenant through the normal invitation flow.
+   later per tenant through the explicit owner-provisioning step below
+   (`POST /api/tenants/{id}/provision-owner`), never through ad-hoc SQL.
+
+## 2b. Provisioning a new tenant's first TenantAdmin (REV-003)
+
+`POST /api/tenants` creates the tenant but no member: `CreateInvitationHandler` requires
+the inviter to hold an active membership, which a PlatformAdmin can never hold (SEC-001).
+The explicit platform step that closes this gap is:
+
+1. Approve the tenant: `POST /api/tenants/{id}/approve` (plus `POST /api/tenants/{id}/activate`
+   when it must serve traffic).
+2. Provision the owner: `POST /api/tenants/{id}/provision-owner` (platform permission
+   `Tenants.Update`, no request body). This issues a 7-day `TenantAdmin` invitation to the
+   tenant's `OwnerEmail` and e-mails the accept link. Re-calling it revokes a still-Pending
+   owner invitation and issues a fresh one (resend semantics); if the owner is already an
+   Active member it answers 409.
+3. The owner registers via `POST /api/invitations/register` (new account) or accepts via
+   `POST /api/invitations/{token}/accept` (existing account), then logs in and calls tenant
+   endpoints with the `tenant` header.
+
+Approval does NOT auto-provision the owner: keeping it an explicit step makes re-sends,
+delivery-failure compensation and audit (`Tenant.ProvisionOwner`) visible operator actions
+rather than hidden side effects of approval.
 
 ## 3. Missing configuration
 
