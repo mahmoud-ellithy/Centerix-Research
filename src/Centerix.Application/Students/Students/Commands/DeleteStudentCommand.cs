@@ -2,6 +2,7 @@ namespace Centerix.Application.Students.Students.Commands;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Subscriptions;
 using Centerix.Domain.Students.Students;
 
 using MediatR;
@@ -11,6 +12,7 @@ public record DeleteStudentCommand(Guid Id) : IRequest<Result<Updated>>;
 public class DeleteStudentHandler(
     IAppDbContext dbContext,
     ICurrentTenant currentTenant,
+    ILimitService limitService,
     IAuditWriter auditWriter) : IRequestHandler<DeleteStudentCommand, Result<Updated>>
 {
     public async Task<Result<Updated>> Handle(
@@ -45,6 +47,11 @@ public class DeleteStudentHandler(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        // REV-011: soft-deleting a student returns the slot to the active counter so the
+        // tenant can immediately replace them (mirrors DeleteTeacherCommand). Only reached
+        // after a successful save, so an already-deleted/not-found entity never releases.
+        await limitService.ReleaseAsync(currentTenant.TenantId!, LimitTypeCodes.Students, cancellationToken);
 
         await auditWriter.WriteAsync(
             action: "Student.Delete",

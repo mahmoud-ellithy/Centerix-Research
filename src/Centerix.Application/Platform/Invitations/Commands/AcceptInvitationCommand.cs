@@ -2,6 +2,7 @@ namespace Centerix.Application.Platform.Invitations.Commands;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Subscriptions;
 using Centerix.Domain.Platform.Tenants;
 using Centerix.Domain.Platform.Tenants.Enums;
 
@@ -14,6 +15,7 @@ public record AcceptInvitationCommand(string Token) : IRequest<Result<Created>>;
 public class AcceptInvitationHandler(
     IAppDbContext dbContext,
     ICurrentUser currentUser,
+    ILimitService limitService,
     IIdentityService identityService) : IRequestHandler<AcceptInvitationCommand, Result<Created>>
 {
     public async Task<Result<Created>> Handle(
@@ -71,6 +73,29 @@ public class AcceptInvitationHandler(
 
         if (existingMembership is not null)
             return TenantMembershipErrors.AlreadyMember;
+
+        // REV-011: reserve a Users slot for the membership about to be created OR
+        // reactivated (a returning revoked member counts as a new user). Runs before any
+        // mutation, so a limit failure leaves everything untouched. Exemption: a tenant
+        // with zero Active memberships is onboarding its first owner — never fail that
+        // path for a missing/inactive subscription; best-effort track instead.
+        var activeMembers = await dbContext.TenantMemberships
+            .CountAsync(
+                m => m.TenantId == invitation.TenantId
+                  && m.Status == TenantMembershipStatus.Active,
+                cancellationToken);
+
+        if (activeMembers == 0)
+        {
+            await limitService.IncrementAsync(invitation.TenantId, LimitTypeCodes.Users, cancellationToken);
+        }
+        else
+        {
+            var usersLimitResult = await limitService.ReserveAsync(
+                invitation.TenantId, LimitTypeCodes.Users, cancellationToken);
+            if (!usersLimitResult.IsSuccess)
+                return usersLimitResult.Errors!;
+        }
 
         // 7. Create TenantMembership
         var membershipResult = TenantMembership.Create(

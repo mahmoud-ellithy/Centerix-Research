@@ -175,4 +175,49 @@ public class LimitService(
             logger.LogWarning(ex, "Failed to release limit {LimitType} for tenant {TenantId}", limitType, tenantId);
         }
     }
+
+    public async Task IncrementAsync(string tenantId, string limitType, CancellationToken cancellationToken = default)
+    {
+        if (!dbContext.IsRelational)
+            return; // Read-only tracking mode on the InMemory test provider.
+
+        try
+        {
+            if (!Guid.TryParse(tenantId, out var tenantGuid))
+                return;
+
+            // REV-011: unconditional +1 (no max comparison) — participates in the caller's
+            // ambient transaction when one exists, so a later rollback still undoes the track.
+            switch (limitType)
+            {
+                case LimitTypeCodes.Students:
+                    await dbContext.TenantUsageCounters
+                        .Where(c => c.Id == tenantGuid)
+                        .ExecuteUpdateAsync(s => s.SetProperty(c => c.StudentsCount, c => c.StudentsCount + 1), cancellationToken);
+                    break;
+                case LimitTypeCodes.Users:
+                    await dbContext.TenantUsageCounters
+                        .Where(c => c.Id == tenantGuid)
+                        .ExecuteUpdateAsync(s => s.SetProperty(c => c.UsersCount, c => c.UsersCount + 1), cancellationToken);
+                    break;
+                case LimitTypeCodes.Branches:
+                    await dbContext.TenantUsageCounters
+                        .Where(c => c.Id == tenantGuid)
+                        .ExecuteUpdateAsync(s => s.SetProperty(c => c.BranchesCount, c => c.BranchesCount + 1), cancellationToken);
+                    break;
+                case LimitTypeCodes.Teachers:
+                    await dbContext.TenantUsageCounters
+                        .Where(c => c.Id == tenantGuid)
+                        .ExecuteUpdateAsync(s => s.SetProperty(c => c.TeachersCount, c => c.TeachersCount + 1), cancellationToken);
+                    break;
+                default:
+                    logger.LogWarning("Limit type {LimitType} has no counter mapping; increment skipped", limitType);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to increment limit {LimitType} for tenant {TenantId}", limitType, tenantId);
+        }
+    }
 }

@@ -128,6 +128,18 @@ public class TenantPlansController(ILocalizer localizer, IMediator mediator) : A
             Problem);
     }
 
+    /// <summary>PLATFORM: recomputes the tenant's usage counters from real rows (quota repair).</summary>
+    [HttpPost("{tenantId:guid}/reconcile-usage")]
+    [HasPermission(Permissions.Subscriptions.Manage)]
+    public async Task<IActionResult> ReconcileUsage(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(new ReconcileUsageCountersCommand(tenantId), cancellationToken);
+
+        return result.Match(
+            _ => NoContent(),
+            Problem);
+    }
+
     /// <summary>PLATFORM: activates a Pending/Suspended subscription.</summary>
     [HttpPost("activate")]
     [HasPermission(Permissions.Subscriptions.Manage)]

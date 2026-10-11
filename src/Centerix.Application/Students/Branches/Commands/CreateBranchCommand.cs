@@ -30,7 +30,15 @@ public class CreateBranchHandler(
         CreateBranchCommand request,
         CancellationToken cancellationToken)
     {
-        // Commercial gate: plan/override limit on active subscription (atomic slot reservation).
+        // REV-011: same transaction wrapper as CreateStudentHandler (reserve + save commit
+        // atomically on relational providers) without changing success/error semantics: the
+        // transaction — not manual ReleaseAsync — undoes the reservation on failure paths.
+        await using var transaction = dbContext.IsRelational
+            ? await dbContext.BeginTransactionAsync(cancellationToken)
+            : null;
+
+        // Commercial gate: plan/override limit on active subscription (atomic slot reservation
+        // inside the ambient transaction above).
         var limitResult = await limitService.ReserveAsync(
             currentTenant.TenantId!, LimitTypeCodes.Branches, cancellationToken);
         if (!limitResult.IsSuccess)
@@ -45,24 +53,15 @@ public class CreateBranchHandler(
             request.IsActive);
 
         if (!branchResult.IsSuccess)
-        {
-            await limitService.ReleaseAsync(currentTenant.TenantId!, LimitTypeCodes.Branches, cancellationToken);
             return branchResult.Errors!;
-        }
 
         dbContext.Branches.Add(branchResult.Value);
         dbContext.StampAddedTenantIds(currentTenant.TenantId!);
 
-        try
-        {
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
-        catch
-        {
-            // Rollback releases the reserved counter slot along with the uncommitted insert.
-            await limitService.ReleaseAsync(currentTenant.TenantId!, LimitTypeCodes.Branches, cancellationToken);
-            throw;
-        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (transaction is not null)
+            await transaction.CommitAsync(cancellationToken);
 
         await auditWriter.WriteAsync(
             action: "Branch.Create",

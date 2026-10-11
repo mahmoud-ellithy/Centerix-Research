@@ -42,15 +42,19 @@ public class CreateStudentHandler(
         CreateStudentCommand request,
         CancellationToken cancellationToken)
     {
-        // Commercial gate: plan/override limit on active subscription (atomic slot reservation).
-        var limitResult = await limitService.ReserveAsync(
-            currentTenant.TenantId!, LimitTypeCodes.Students, cancellationToken);
-        if (!limitResult.IsSuccess)
-            return limitResult.Errors!;
+        // REV-011: reserve + validations + save run in ONE transaction on relational providers
+        // (commit only on success; every non-success return/exception rolls back, so a crash
+        // between reserve and save can no longer leak a slot). On InMemory the reservation is
+        // a read-only check and the transaction is a no-op — nothing to undo there.
+        await using var transaction = dbContext.IsRelational
+            ? await dbContext.BeginTransactionAsync(cancellationToken)
+            : null;
 
         // Tenant-scoped referential integrity: branch / stage / year must exist within the
         // resolved tenant (FailClosed — query filter ensures cross-tenant FK lookups return
         // null and surface as clean 404 rather than a relational FK violation 500).
+        // REV-011: validated BEFORE reserving, so a 404 never burns a quota slot even
+        // without the transaction safety net.
         var branchExists = await dbContext.Branches
             .AsNoTracking()
             .AnyAsync(b => b.Id == request.BranchId, cancellationToken);
@@ -69,6 +73,13 @@ public class CreateStudentHandler(
         if (!yearExists)
             return AcademicYearErrors.NotFound;
 
+        // Commercial gate: plan/override limit on active subscription (atomic slot reservation
+        // inside the ambient transaction above).
+        var limitResult = await limitService.ReserveAsync(
+            currentTenant.TenantId!, LimitTypeCodes.Students, cancellationToken);
+        if (!limitResult.IsSuccess)
+            return limitResult.Errors!;
+
         var studentResult = Student.Create(
             Guid.NewGuid(),
             request.BranchId,
@@ -86,24 +97,19 @@ public class CreateStudentHandler(
             request.EnrolledAt);
 
         if (!studentResult.IsSuccess)
-        {
-            await limitService.ReleaseAsync(currentTenant.TenantId!, LimitTypeCodes.Students, cancellationToken);
             return studentResult.Errors!;
-        }
 
         dbContext.Students.Add(studentResult.Value);
         dbContext.StampAddedTenantIds(currentTenant.TenantId!);
 
-        try
-        {
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
-        catch
-        {
-            // Rollback releases the reserved counter slot along with the uncommitted insert.
-            await limitService.ReleaseAsync(currentTenant.TenantId!, LimitTypeCodes.Students, cancellationToken);
-            throw;
-        }
+        // No manual ReleaseAsync: any SaveChanges failure (or concurrent unique-violation)
+        // rolls back the reservation with the transaction on relational providers; on
+        // InMemory the reservation was a read-only check. The exception still propagates
+        // so infrastructure maps it (500, or a mapped 409 for unique violations).
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (transaction is not null)
+            await transaction.CommitAsync(cancellationToken);
 
         await auditWriter.WriteAsync(
             action: "Student.Create",

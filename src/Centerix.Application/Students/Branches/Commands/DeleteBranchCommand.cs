@@ -2,6 +2,7 @@ namespace Centerix.Application.Students.Branches.Commands;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Subscriptions;
 using Centerix.Domain.Students.Branches;
 
 using MediatR;
@@ -10,6 +11,7 @@ public record DeleteBranchCommand(Guid Id) : IRequest<Result<Deleted>>;
 
 public class DeleteBranchHandler(
     IAppDbContext dbContext,
+    ILimitService limitService,
     IAuditWriter auditWriter) : IRequestHandler<DeleteBranchCommand, Result<Deleted>>
 {
     public async Task<Result<Deleted>> Handle(DeleteBranchCommand request, CancellationToken cancellationToken)
@@ -36,6 +38,12 @@ public class DeleteBranchHandler(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        // REV-011: soft-deleting a branch returns the slot to the active counter (mirrors
+        // DeleteTeacherCommand). Only reached after a successful save, so an
+        // already-deleted/not-found branch never releases. The entity's own TenantId is
+        // used because this handler is tenant-filtered but has no ICurrentTenant.
+        await limitService.ReleaseAsync(branch.TenantId, LimitTypeCodes.Branches, cancellationToken);
 
         await auditWriter.WriteAsync(
             action: "Branch.Delete",
