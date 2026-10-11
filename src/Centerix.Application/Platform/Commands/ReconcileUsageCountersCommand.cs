@@ -2,6 +2,7 @@ namespace Centerix.Application.Platform.Commands;
 
 using Centerix.Application.Common.Interfaces;
 using Centerix.Domain.Common.Results;
+using Centerix.Domain.Platform.Subscriptions;
 using Centerix.Domain.Platform.Subscriptions.UsageCounters;
 using Centerix.Domain.Platform.Tenants.Enums;
 
@@ -15,12 +16,31 @@ using Microsoft.EntityFrameworkCore;
 /// Counts use <c>IgnoreQueryFilters()</c> with an EXPLICIT <c>TenantId == target</c>
 /// predicate (soft-deleted students/teachers/branches excluded; only Active memberships
 /// count as users) so the reconciliation is exact regardless of the caller's context.
+///
+/// Maintenance tool, not a request-path operation: it is NOT atomic with concurrent
+/// student/teacher/branch/membership creates or releases happening on the same tenant at the
+/// same time — the counts it reads are a snapshot, not a transactionally-consistent view
+/// against those other writers. Run it during a quiet period for the affected tenant (no
+/// in-flight create/release/invitation-accept activity), not as a routine background job.
+///
+/// Only <see cref="TenantUsageCounter.StudentsCount"/>/<c>UsersCount</c>/<c>BranchesCount</c>/
+/// <c>TeachersCount</c> are recomputed here (via <see cref="TenantUsageCounter.UpdateCounts"/>
+/// when the row already exists); the <c>EffectiveMax*</c> fields are left untouched on that
+/// path by design — <see cref="ILimitService.GetEffectiveMaxAsync"/> is the single source of
+/// truth for capacity (TenantLimitOverride → TenantPlan snapshot) and never reads them, so
+/// they are not kept in sync here. When this handler has to CREATE a missing counter row (the
+/// row should normally already exist from provisioning) it still populates <c>EffectiveMax*</c>
+/// with the tenant's current effective max per <see cref="ILimitService.GetEffectiveMaxAsync"/>
+/// (0 when no active subscription defines it) rather than hardcoding 0 regardless of the real
+/// subscription state — those fields are otherwise unused today, but a reconcile run is not the
+/// place to leave data that looks like "this tenant's capacity is zero" when it may not be.
 /// </summary>
 public record ReconcileUsageCountersCommand(Guid TenantId) : IRequest<Result<Updated>>;
 
 public class ReconcileUsageCountersHandler(
     IAppDbContext dbContext,
     IPlatformAdminGuard platformAdminGuard,
+    ILimitService limitService,
     IAuditWriter auditWriter) : IRequestHandler<ReconcileUsageCountersCommand, Result<Updated>>
 {
     public async Task<Result<Updated>> Handle(
@@ -63,6 +83,18 @@ public class ReconcileUsageCountersHandler(
 
         if (counter is null)
         {
+            // Normally provisioned already; this is a repair path. Populate EffectiveMax*
+            // from the tenant's real current effective max (0 only when none is defined)
+            // instead of hardcoding 0 regardless of subscription state — see the class doc.
+            var effectiveMaxStudents = await limitService.GetEffectiveMaxAsync(
+                tenantId, LimitTypeCodes.Students, cancellationToken) ?? 0;
+            var effectiveMaxUsers = await limitService.GetEffectiveMaxAsync(
+                tenantId, LimitTypeCodes.Users, cancellationToken) ?? 0;
+            var effectiveMaxBranches = await limitService.GetEffectiveMaxAsync(
+                tenantId, LimitTypeCodes.Branches, cancellationToken) ?? 0;
+            var effectiveMaxTeachers = await limitService.GetEffectiveMaxAsync(
+                tenantId, LimitTypeCodes.Teachers, cancellationToken) ?? 0;
+
             dbContext.TenantUsageCounters.Add(TenantUsageCounter.Create(
                 tenant.Id,
                 students,
@@ -71,10 +103,10 @@ public class ReconcileUsageCountersHandler(
                 teachers,
                 storageUsedMB: 0,
                 smsUsedThisCycle: 0,
-                effectiveMaxStudents: 0,
-                effectiveMaxUsers: 0,
-                effectiveMaxBranches: 0,
-                effectiveMaxTeachers: 0,
+                effectiveMaxStudents,
+                effectiveMaxUsers,
+                effectiveMaxBranches,
+                effectiveMaxTeachers,
                 calculatedAt: DateTime.UtcNow));
         }
         else

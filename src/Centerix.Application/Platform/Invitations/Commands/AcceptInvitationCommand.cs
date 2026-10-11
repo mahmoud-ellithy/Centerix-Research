@@ -137,7 +137,12 @@ public class AcceptInvitationHandler(
         // 8. REV-011: reserve a Users slot inside the same transaction (a returning revoked
         // member counts as a new user). Failure rolls everything back, so the invitation
         // stays usable. First-owner exemption: zero Active memberships never fail for a
-        // missing/inactive subscription; best-effort track instead.
+        // missing/inactive subscription; best-effort track via LimitService.IncrementAsync
+        // instead (a plain unconditional +1, which silently no-ops if the counter row
+        // doesn't exist yet). See RegisterFromInvitationCommand for this exemption's known
+        // limits (it skips the capacity check entirely, not just the "no subscription" case,
+        // and the zero-members read isn't atomic with the insert, so two concurrent "first"
+        // accepts for the same brand-new tenant can both claim it) — accepted, not fixed here.
         var activeMembers = await dbContext.TenantMemberships
             .CountAsync(
                 m => m.TenantId == invitation.TenantId
