@@ -188,22 +188,14 @@ public static class DependencyInjection
             configuration.GetSection(Centerix.Infrastructure.Tenancy.PlatformAdminBootstrapOptions.SectionName));
 
         // CFG-001 + REV-012: SMTP configuration.
-        //   * SmtpOptions.IsConfigured is the cheap shape check; deeper Validate() runs in
-        //     Program.cs when the effective email mode is Smtp (so it survives ASPNETCORE_ENVIRONMENT
-        //     being absent in some deployment hosts).
-        //   * Storing the env-mode conditional in Program.cs avoids building a second IServiceProvider
-        //     inside the validator and keeps the env-aware logic in one place.
+        //   * The real check runs in Program.cs (SmtpOptions.Validate()) when the effective
+        //     email mode is Smtp, and again eagerly in SmtpEmailSender's constructor — both
+        //     need IHostEnvironment / the resolved email mode, which an options validator
+        //     registered here cannot see without building a second IServiceProvider.
+        //   * No validator is registered here: there is nothing environment-agnostic to check
+        //     at this point, and a validator that always passes is dead weight.
         services.Configure<Centerix.Infrastructure.Email.SmtpOptions>(
             configuration.GetSection(Centerix.Infrastructure.Email.SmtpOptions.SectionName));
-        services.AddOptions<Centerix.Infrastructure.Email.SmtpOptions>()
-            .Bind(configuration.GetSection(Centerix.Infrastructure.Email.SmtpOptions.SectionName))
-            .Validate(options =>
-            {
-                // Shape check only: detailed Validate runs in Program.cs after we know the
-                // effective email mode. Keeps the validator free of IHostEnvironment injection.
-                return true;
-            }, "Smtp configuration is missing or invalid. Configure Smtp:Host, Smtp:Port, Smtp:FromAddress (and Smtp:Username/Smtp:Password when authentication is required). When the effective email mode is Smtp, this validation must pass.")
-            .ValidateOnStart();
 
         // REV-012: Email delivery mode. Default behaviour:
         //   * Unset -> Capture in Development/Testing, Smtp elsewhere.
@@ -221,11 +213,16 @@ public static class DependencyInjection
         services.AddScoped<IEmailSender>(sp =>
         {
             var env = sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>();
+            var resolvedConfiguration = sp.GetRequiredService<IConfiguration>();
             var emailOptions = sp
                 .GetRequiredService<Microsoft.Extensions.Options.IOptions<Centerix.Infrastructure.Email.EmailOptions>>()
                 .Value;
 
-            var resolvedMode = emailOptions.ResolveMode(env);
+            // REV-012 (A.1): the environment NAME "Testing" is never trusted by itself.
+            var allowTestingCapture = resolvedConfiguration.GetValue<bool>(
+                Centerix.Infrastructure.Common.TestHostMarkers.AllowCaptureAndSkipDbInitKey);
+
+            var resolvedMode = emailOptions.ResolveMode(env, allowTestingCapture);
             return resolvedMode switch
             {
                 Centerix.Infrastructure.Email.EmailMode.Capture =>

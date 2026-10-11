@@ -51,7 +51,13 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
                     ["ForwardedHeaders:KnownProxies:2"] = "192.0.2.1",
                     ["ForwardedHeaders:KnownProxies:3"] = "192.0.2.2",
                     ["ForwardedHeaders:KnownNetworks:0"] = "127.0.0.0/8",
-                    ["ForwardedHeaders:ForwardLimit"] = "5"
+                    ["ForwardedHeaders:ForwardLimit"] = "5",
+
+                    // REV-012 (A.1): explicit opt-in so this test host (environment "Testing")
+                    // may use Capture email mode and skip production database initialization.
+                    // The environment NAME "Testing" is never trusted by itself; see
+                    // Centerix.Infrastructure.Common.TestHostMarkers.
+                    [Centerix.Infrastructure.Common.TestHostMarkers.AllowCaptureAndSkipDbInitKey] = "true"
                 })
                 .Build();
 

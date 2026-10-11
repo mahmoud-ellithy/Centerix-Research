@@ -28,15 +28,20 @@ try
 
     var app = builder.Build();
 
+    // REV-012 (A.1): the environment NAME "Testing" is never trusted by itself — only a test
+    // host that explicitly sets this configuration key may unlock Capture/skip-db-init.
+    var allowTestingCapture = app.Configuration.GetValue<bool>(
+        Centerix.Infrastructure.Common.TestHostMarkers.AllowCaptureAndSkipDbInitKey);
+
     // REV-012: EmailOptions.Validate runs first so Capture-mode misuse outside
     // Development/Testing is rejected before any side-effecting startup work.
     var emailOptions = app.Services.GetRequiredService<IOptions<EmailOptions>>().Value;
-    emailOptions.Validate(app.Environment);
+    emailOptions.Validate(app.Environment, allowTestingCapture);
 
     // CFG-001 + REV-012: deterministic SMTP gate when the effective email mode is Smtp.
     // The previous code branched on Production only; Capture mode legitimately skips this
     // check, so the trigger is now the resolved email mode rather than the environment name.
-    if (emailOptions.ResolveMode(app.Environment) == EmailMode.Smtp)
+    if (emailOptions.ResolveMode(app.Environment, allowTestingCapture) == EmailMode.Smtp)
     {
         var smtp = app.Services.GetRequiredService<IOptions<SmtpOptions>>().Value;
         smtp.Validate();

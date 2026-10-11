@@ -1,8 +1,13 @@
 using System.Reflection;
+using Centerix.Infrastructure.Common;
 using Centerix.Infrastructure.Data;
 using Centerix.Infrastructure.Email;
+using Centerix.Infrastructure.Tenancy;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Xunit;
@@ -10,8 +15,10 @@ using Xunit;
 namespace Centerix.SecurityTests;
 
 // REV-012: environment handling must be driven by the Email:Mode option (not just
-// IsProduction()). Capture is permitted only in Development/Testing; bootstrap admin
-// seeding is gated on SeedDevelopmentData in every environment.
+// IsProduction()). Capture is permitted only in Development, or in "Testing" when the
+// test host has explicitly opted in via TestHostMarkers.AllowCaptureAndSkipDbInitKey
+// (REV-012 A.1: the environment NAME "Testing" is never trusted by itself). Bootstrap
+// admin seeding is gated on SeedDevelopmentData in every environment.
 [Collection("Integration")]
 public class Rev012EnvironmentHandlingTests : IClassFixture<TestWebApplicationFactory>
 {
@@ -27,15 +34,25 @@ public class Rev012EnvironmentHandlingTests : IClassFixture<TestWebApplicationFa
     // ================================================================
 
     [Fact]
-    public void EmailOptions_Unset_DefaultsToCapture_InDevelopmentOrTesting()
+    public void EmailOptions_Unset_DefaultsToCapture_InDevelopment()
     {
         var env = NewHost("Development");
         var options = new EmailOptions();
 
+        // No marker needed: Development is always allowed.
         Assert.Equal(EmailMode.Capture, options.ResolveMode(env));
+    }
 
-        env.EnvironmentName = "Testing";
-        Assert.Equal(EmailMode.Capture, options.ResolveMode(env));
+    [Fact]
+    public void EmailOptions_Unset_InTesting_RequiresExplicitMarker()
+    {
+        // REV-012 (A.1): the environment NAME "Testing" is NOT trusted by itself anymore.
+        // Without the marker it must behave like any other non-Development environment.
+        var env = NewHost("Testing");
+        var options = new EmailOptions();
+
+        Assert.Equal(EmailMode.Smtp, options.ResolveMode(env, allowTestingCapture: false));
+        Assert.Equal(EmailMode.Capture, options.ResolveMode(env, allowTestingCapture: true));
     }
 
     [Fact]
@@ -52,7 +69,7 @@ public class Rev012EnvironmentHandlingTests : IClassFixture<TestWebApplicationFa
     }
 
     [Fact]
-    public void EmailOptions_Capture_RejectedOutsideDevelopmentOrTesting()
+    public void EmailOptions_Capture_RejectedOutsideDevelopmentOrAllowedTesting()
     {
         var env = NewHost("Staging");
         var options = new EmailOptions { Mode = EmailMode.Capture };
@@ -67,13 +84,25 @@ public class Rev012EnvironmentHandlingTests : IClassFixture<TestWebApplicationFa
     }
 
     [Fact]
-    public void EmailOptions_Capture_AllowedInDevelopmentOrTesting()
+    public void EmailOptions_Capture_RejectedInTesting_WithoutExplicitMarker()
+    {
+        // REV-012 (A.1): an operator naming a real deployment "Testing" must not be able to
+        // unlock Capture just by the environment name — only the test host marker can.
+        var env = NewHost("Testing");
+        var options = new EmailOptions { Mode = EmailMode.Capture };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => options.Validate(env, allowTestingCapture: false));
+        Assert.Contains("Development or Testing", ex.Message);
+    }
+
+    [Fact]
+    public void EmailOptions_Capture_AllowedInDevelopment_OrTestingWithMarker()
     {
         var dev = NewHost("Development");
-        new EmailOptions { Mode = EmailMode.Capture }.Validate(dev); // no throw
+        new EmailOptions { Mode = EmailMode.Capture }.Validate(dev); // no throw, no marker needed
 
         var test = NewHost("Testing");
-        new EmailOptions { Mode = EmailMode.Capture }.Validate(test); // no throw
+        new EmailOptions { Mode = EmailMode.Capture }.Validate(test, allowTestingCapture: true); // no throw
     }
 
     [Fact]
@@ -120,8 +149,208 @@ public class Rev012EnvironmentHandlingTests : IClassFixture<TestWebApplicationFa
     }
 
     // ================================================================
+    // Host-level email-mode resolution (REV-012 A.1, Item 1).
+    //
+    // These build a REAL host per Centerix.API.Program through WebApplicationFactory, so
+    // Program.cs's own startup gate (EmailOptions.Validate + the Smtp.Validate branch) and
+    // DependencyInjection's IEmailSender factory are exercised exactly as in production —
+    // not just the EmailOptions unit above. Database initialization is disabled via config
+    // (the InMemory DbContext double used by TestWebApplicationFactory doesn't support real
+    // migrations) so each test isolates email-mode behaviour only.
+    // ================================================================
+
+    [Fact]
+    public async Task Host_Staging_NoEmailModeNoSmtp_FailsStartup_WithClearMessage()
+    {
+        await using var factory = new EnvironmentOverrideWebApplicationFactory("Staging", NoDbInit());
+
+        var exception = await Record.ExceptionAsync(() => Task.Run(() => factory.CreateClient()));
+
+        Assert.NotNull(exception);
+        Assert.Contains("Smtp:Host must be configured", exception!.ToString());
+    }
+
+    [Fact]
+    public async Task Host_Staging_CaptureMode_FailsStartup_CaptureOnlyInDevOrTesting()
+    {
+        await using var factory = new EnvironmentOverrideWebApplicationFactory("Staging", NoDbInit(
+            ("Email:Mode", "Capture")));
+
+        var exception = await Record.ExceptionAsync(() => Task.Run(() => factory.CreateClient()));
+
+        Assert.NotNull(exception);
+        Assert.Contains("Development or Testing", exception!.ToString());
+    }
+
+    [Fact]
+    public async Task Host_Staging_ValidSmtp_ResolvesSmtpEmailSender()
+    {
+        var config = NoDbInit();
+        AddValidSmtp(config);
+        await using var factory = new EnvironmentOverrideWebApplicationFactory("Staging", config);
+
+        using var scope = factory.Services.CreateScope();
+        var sender = scope.ServiceProvider.GetRequiredService<Centerix.Application.Common.Interfaces.IEmailSender>();
+
+        Assert.IsType<SmtpEmailSender>(sender);
+    }
+
+    [Fact]
+    public async Task Host_Production_ValidSmtp_ResolvesSmtpEmailSender()
+    {
+        var config = NoDbInit();
+        AddValidSmtp(config);
+        await using var factory = new EnvironmentOverrideWebApplicationFactory("Production", config);
+
+        using var scope = factory.Services.CreateScope();
+        var sender = scope.ServiceProvider.GetRequiredService<Centerix.Application.Common.Interfaces.IEmailSender>();
+
+        Assert.IsType<SmtpEmailSender>(sender);
+    }
+
+    [Fact]
+    public async Task Host_Production_MissingSmtp_FailsStartup()
+    {
+        // CFG-001 regression: Production must never silently fall back to a development sender.
+        await using var factory = new EnvironmentOverrideWebApplicationFactory("Production", NoDbInit());
+
+        var exception = await Record.ExceptionAsync(() => Task.Run(() => factory.CreateClient()));
+
+        Assert.NotNull(exception);
+        Assert.Contains("Smtp:Host must be configured", exception!.ToString());
+    }
+
+    [Fact]
+    public async Task Host_Development_Defaults_ResolvesDevelopmentEmailSender()
+    {
+        await using var factory = new EnvironmentOverrideWebApplicationFactory("Development", NoDbInit());
+
+        using var scope = factory.Services.CreateScope();
+        var sender = scope.ServiceProvider.GetRequiredService<Centerix.Application.Common.Interfaces.IEmailSender>();
+
+        Assert.IsType<DevelopmentEmailSender>(sender);
+    }
+
+    // ================================================================
+    // Host-level "Testing" marker proof (REV-012 A.1, Item 3).
+    //
+    // An environment literally named "Testing" with NO marker set must behave like any
+    // other non-Development environment: Smtp required, Capture rejected, database
+    // initialization NOT skipped. Only TestWebApplicationFactory's own in-memory config
+    // (which this override factory inherits and here explicitly clears) may set the marker.
+    // ================================================================
+
+    [Fact]
+    public async Task Host_TestingEnvironment_WithoutMarker_RequiresSmtp_LikeAnyOtherEnvironment()
+    {
+        await using var factory = new EnvironmentOverrideWebApplicationFactory("Testing", NoDbInit(
+            (TestHostMarkers.AllowCaptureAndSkipDbInitKey, "false")));
+
+        var exception = await Record.ExceptionAsync(() => Task.Run(() => factory.CreateClient()));
+
+        Assert.NotNull(exception);
+        Assert.Contains("Smtp:Host must be configured", exception!.ToString());
+    }
+
+    [Fact]
+    public async Task Host_TestingEnvironment_WithoutMarker_RejectsCapture()
+    {
+        await using var factory = new EnvironmentOverrideWebApplicationFactory("Testing", NoDbInit(
+            (TestHostMarkers.AllowCaptureAndSkipDbInitKey, "false"),
+            ("Email:Mode", "Capture")));
+
+        var exception = await Record.ExceptionAsync(() => Task.Run(() => factory.CreateClient()));
+
+        Assert.NotNull(exception);
+        Assert.Contains("Development or Testing", exception!.ToString());
+    }
+
+    [Fact]
+    public async Task Host_TestingEnvironment_WithMarker_AllowsCapture_ResolvesDevelopmentEmailSender()
+    {
+        // The base TestWebApplicationFactory already sets the marker; this proves the
+        // positive case explicitly instead of relying on it implicitly.
+        await using var factory = new EnvironmentOverrideWebApplicationFactory("Testing", NoDbInit(
+            (TestHostMarkers.AllowCaptureAndSkipDbInitKey, "true")));
+
+        using var scope = factory.Services.CreateScope();
+        var sender = scope.ServiceProvider.GetRequiredService<Centerix.Application.Common.Interfaces.IEmailSender>();
+
+        Assert.IsType<DevelopmentEmailSender>(sender);
+    }
+
+    // ================================================================
+    // SeedDevelopmentData=true without BootstrapAdmin:TemporaryPassword still throws.
+    //
+    // Confirms the regression coverage required by Item 1 already exists at
+    // Batch2SqlServerTests.BootstrapSeed_WithoutExplicitPassword_FailsClearly (SQL Server
+    // suite) and adds the equivalent proof against the InMemory-backed test host so it runs
+    // without Docker/SQL Server too.
+    // ================================================================
+
+    [Fact]
+    public async Task SeedAsync_SeedDevelopmentDataTrue_WithoutTemporaryPassword_ThrowsClearly()
+    {
+        using var scope = _factory.Services.CreateScope();
+
+        var tenantInfo = new Centerix.Infrastructure.Tenancy.CenterixTenantInfo
+        {
+            Id = $"rev012a1-{Guid.NewGuid():N}",
+            Identifier = $"rev012a1-{Guid.NewGuid():N}",
+            Name = "Rev012 A.1 no-password tenant",
+            Email = $"rev012a1-{Guid.NewGuid():N}@example.test",
+            IsActive = true,
+            ValidUpTo = DateTime.UtcNow.AddYears(1),
+            CreatedAt = DateTime.UtcNow
+        };
+        scope.ServiceProvider.GetRequiredService<Finbuckle.MultiTenant.Abstractions.IMultiTenantContextSetter>()
+            .MultiTenantContext = new Finbuckle.MultiTenant.MultiTenantContext<Centerix.Infrastructure.Tenancy.CenterixTenantInfo>
+            {
+                TenantInfo = tenantInfo
+            };
+
+        var initialiser = new ApplicationDbContextInitialiser(
+            scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ApplicationDbContextInitialiser>>(),
+            scope.ServiceProvider.GetRequiredService<AppDbContext>(),
+            scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>(),
+            scope.ServiceProvider.GetRequiredService<RoleManager<Centerix.Infrastructure.Auth.ApplicationRole>>(),
+            scope.ServiceProvider.GetRequiredService<Finbuckle.MultiTenant.Abstractions.IMultiTenantContextAccessor<Centerix.Infrastructure.Tenancy.CenterixTenantInfo>>(),
+            NewHost("Development"),
+            Microsoft.Extensions.Options.Options.Create(new DatabaseInitializationOptions { SeedDevelopmentData = true }),
+            Microsoft.Extensions.Options.Options.Create(new Centerix.Infrastructure.Tenancy.BootstrapAdminOptions { TemporaryPassword = "" }),
+            Microsoft.Extensions.Options.Options.Create(new Centerix.Infrastructure.Tenancy.PlatformAdminBootstrapOptions()));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => initialiser.SeedAsync());
+        Assert.Contains("BootstrapAdmin:TemporaryPassword", ex.Message);
+    }
+
+    // ================================================================
     // Helpers
     // ================================================================
+
+    private static Dictionary<string, string?> NoDbInit(params (string Key, string Value)[] extra)
+    {
+        var config = new Dictionary<string, string?>
+        {
+            // The InMemory DbContext double from TestWebApplicationFactory doesn't support
+            // real relational migrations; these tests isolate email-mode behaviour only.
+            ["DatabaseInitialization:ApplyMigrations"] = "false",
+            ["DatabaseInitialization:Seed"] = "false",
+            ["DatabaseInitialization:ValidateSchema"] = "false",
+        };
+
+        foreach (var (key, value) in extra)
+            config[key] = value;
+
+        return config;
+    }
+
+    private static void AddValidSmtp(Dictionary<string, string?> config)
+    {
+        config["Smtp:Host"] = "smtp.rev012a1.test";
+        config["Smtp:Port"] = "587";
+        config["Smtp:FromAddress"] = "noreply@rev012a1.test";
+    }
 
     private static IHostEnvironment NewHost(string environmentName) => new HostingEnvironment
     {
@@ -160,5 +389,72 @@ public class Rev012EnvironmentHandlingTests : IClassFixture<TestWebApplicationFa
     private sealed class EmptyDisposable : IDisposable
     {
         public void Dispose() { }
+    }
+
+    /// <summary>
+    /// A minimal host-per-<see cref="Program"/> factory for the email-mode tests above.
+    /// Unlike <see cref="TestWebApplicationFactory"/>, it does NOT replace the production
+    /// <c>IEmailSender</c> registration with a capturing double — these tests exist
+    /// specifically to prove which concrete sender DependencyInjection's real resolution
+    /// logic picks for a given environment/config, so that registration must stay live.
+    /// It still swaps the two EF Core contexts for InMemory (no real SQL Server available
+    /// in the test process) and supplies the same baseline JWT/Invitations/ForwardedHeaders
+    /// configuration every host needs to pass its own startup validation.
+    /// </summary>
+    private sealed class EnvironmentOverrideWebApplicationFactory(
+        string environmentName,
+        Dictionary<string, string?> overrides) : WebApplicationFactory<Program>
+    {
+        private readonly string _databaseName = $"Rev012A1Db_{Guid.NewGuid():N}";
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.UseEnvironment(environmentName);
+
+            builder.ConfigureAppConfiguration((context, config) =>
+            {
+                var baseline = new Dictionary<string, string?>
+                {
+                    ["JwtSettings:Secret"] = "ThisIsATestSecretKeyThatIsAtLeast32CharsLong!!",
+                    ["JwtSettings:Issuer"] = "TestIssuer",
+                    ["JwtSettings:Audience"] = "TestAudience",
+                    ["JwtSettings:ExpirationInMinutes"] = "60",
+                    ["Invitations:BaseUrl"] = "https://app.securitytests.local",
+                    ["ConnectionStrings:DefaultConnection"] =
+                        $"Server=localhost;Database={_databaseName};Trusted_Connection=True;TrustServerCertificate=True;",
+                    ["ForwardedHeaders:KnownProxies:0"] = "127.0.0.1",
+                    ["ForwardedHeaders:KnownNetworks:0"] = "127.0.0.0/8",
+                    ["ForwardedHeaders:ForwardLimit"] = "5",
+                };
+                config.AddInMemoryCollection(baseline);
+                config.AddInMemoryCollection(overrides);
+            });
+
+            builder.ConfigureServices(services =>
+            {
+                ReplaceDbContext<AppDbContext>(services, (_, options) =>
+                    options.UseInMemoryDatabase(_databaseName));
+                ReplaceDbContext<TenantDbContext>(services, (_, options) =>
+                    options.UseInMemoryDatabase($"{_databaseName}_Tenant"));
+            });
+        }
+
+        private static void ReplaceDbContext<TContext>(
+            IServiceCollection services,
+            Action<IServiceProvider, DbContextOptionsBuilder> configureOptions) where TContext : DbContext
+        {
+            var toRemove = services.Where(d =>
+            {
+                var st = d.ServiceType;
+                if (st == typeof(DbContextOptions<TContext>)) return true;
+                if (st == typeof(TContext)) return true;
+                if (st.IsConstructedGenericType && st.GenericTypeArguments.Contains(typeof(TContext))) return true;
+                return false;
+            }).ToList();
+
+            foreach (var d in toRemove) services.Remove(d);
+
+            services.AddDbContext<TContext>(configureOptions);
+        }
     }
 }
