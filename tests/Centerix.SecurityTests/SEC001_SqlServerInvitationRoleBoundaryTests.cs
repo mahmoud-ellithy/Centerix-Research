@@ -113,7 +113,7 @@ public class SEC001_SqlServerInvitationRoleBoundaryTests
     {
         // REV-011: GUID tenant id + provisioned Users quota — consumption now reserves a
         // Users slot, so the positive control needs the production commercial preconditions.
-        var tenantId = $"f6-canonical-{Guid.NewGuid():N}";
+        var tenantId = Guid.NewGuid().ToString();
         await EnsureTenantAsync(tenantId);
         var adminToken = await SeedAdminAsync(tenantId);
         await EnsureUsersQuotaAsync(tenantId);

@@ -151,17 +151,43 @@ public class SqlServerAttendanceLogTests
 
     private async Task<Guid> SeedStudentRowAsync(string tenantId)
     {
+        var (branchId, stageId, yearId) = await SeedBranchStageYearAsync(tenantId);
         using var scope = _env.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var student = Student.Create(
-            Guid.NewGuid(), Guid.NewGuid(), 1, 1,
-            "طالب اختبار", "Test Student", null, Gender.Male, "01000000000",
+            Guid.NewGuid(), branchId, stageId, yearId,
+            "طالب اختبار", "Test Student", null, null, "01000000000",
             $"QR-{Guid.NewGuid():N}", null, null, StudentStatus.Active,
             DateOnly.FromDateTime(DateTime.UtcNow)).Value;
         db.Students.Add(student);
         db.StampAddedTenantIds(tenantId);
         await db.SaveChangesAsync();
         return student.Id;
+    }
+
+    private async Task<(Guid BranchId, int StageId, int YearId)> SeedBranchStageYearAsync(string tenantId)
+    {
+        using var scope = _env.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var branch = Centerix.Domain.Students.Branches.Branch.Create(
+            Guid.NewGuid(), "ATT Branch", "1 St", "01000000000", null, true).Value;
+        db.Branches.Add(branch);
+        db.StampAddedTenantIds(tenantId);
+
+        var stageCode = $"AS{Guid.NewGuid():N}"[..12].ToUpperInvariant();
+        var stage = Centerix.Domain.Students.Lookups.AcademicStage.Create(0, stageCode, "ATT Stage", (byte)1).Value;
+        db.AcademicStages.Add(stage);
+        db.StampAddedTenantIds(tenantId);
+        await db.SaveChangesAsync();
+
+        var yearCode = $"AY{Guid.NewGuid():N}"[..12].ToUpperInvariant();
+        var year = Centerix.Domain.Students.Lookups.AcademicYear.Create(0, stage.Id, yearCode, "ATT Year").Value;
+        db.AcademicYears.Add(year);
+        db.StampAddedTenantIds(tenantId);
+        await db.SaveChangesAsync();
+
+        return (branch.Id, stage.Id, year.Id);
     }
 
     private async Task EnsureTenantAsync(string id)

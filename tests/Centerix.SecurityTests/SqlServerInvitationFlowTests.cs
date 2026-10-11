@@ -88,7 +88,7 @@ public class SqlServerInvitationFlowTests
         // REV-011: the tenant id must be a valid GUID (usage-counter PK) and the tenant needs
         // the production commercial preconditions (Active subscription + counter row) because
         // registration now reserves a Users quota slot.
-        var tenantId = $"sql-reg-{Guid.NewGuid():N}";
+        var tenantId = Guid.NewGuid().ToString();
         await EnsureTenantAsync(tenantId);
         var adminToken = await SeedAdminAsync(tenantId);
         await EnsureUsersQuotaAsync(tenantId);
@@ -270,7 +270,7 @@ public class SqlServerInvitationFlowTests
     public async Task Register_ConcurrentSameToken_ExactlyOneSucceeds_OneUserOneMembership()
     {
         // REV-011: GUID tenant id + provisioned Users quota (see Register_NewUser).
-        var tenantId = $"sql-race-{Guid.NewGuid():N}";
+        var tenantId = Guid.NewGuid().ToString();
         await EnsureTenantAsync(tenantId);
         var adminToken = await SeedAdminAsync(tenantId);
         await EnsureUsersQuotaAsync(tenantId);
@@ -305,7 +305,7 @@ public class SqlServerInvitationFlowTests
     public async Task Accept_ExistingUser_CreatesMembership_OnSqlServer()
     {
         // REV-011: GUID tenant id + provisioned Users quota (see Register_NewUser).
-        var tenantId = $"sql-accept-{Guid.NewGuid():N}";
+        var tenantId = Guid.NewGuid().ToString();
         await EnsureTenantAsync(tenantId);
         var adminToken = await SeedAdminAsync(tenantId);
         await EnsureUsersQuotaAsync(tenantId);
@@ -331,7 +331,7 @@ public class SqlServerInvitationFlowTests
         // REV-011: GUID tenant id + provisioned Users quota (see Register_NewUser).
         // The quota is seeded BEFORE the revoked row below, so the counter holds only the
         // admin; reactivation then reserves one more unit (a returning member counts anew).
-        var tenantId = $"sql-reactivate-{Guid.NewGuid():N}";
+        var tenantId = Guid.NewGuid().ToString();
         await EnsureTenantAsync(tenantId);
         var adminToken = await SeedAdminAsync(tenantId);
         await EnsureUsersQuotaAsync(tenantId);
@@ -521,7 +521,7 @@ public class SqlServerInvitationFlowTests
     public async Task Accept_ConcurrentDoubleAccept_ExactlyOneSucceeds_SingleMembership()
     {
         // REV-011: GUID tenant id + provisioned Users quota (see Register_NewUser).
-        var tenantId = $"sql-dblaccept-{Guid.NewGuid():N}";
+        var tenantId = Guid.NewGuid().ToString();
         await EnsureTenantAsync(tenantId);
         var adminToken = await SeedAdminAsync(tenantId);
         await EnsureUsersQuotaAsync(tenantId);

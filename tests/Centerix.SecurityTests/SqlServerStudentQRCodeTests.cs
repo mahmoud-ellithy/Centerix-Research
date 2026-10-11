@@ -170,7 +170,8 @@ public class SqlServerStudentQRCodeTests
                 yearId = seed.YearId,
                 fullNameAr = "طالب اختبار",
                 fullNameEn = "Test Student",
-                gender = 1,
+                // gender omitted (null): the Gender nchar(1) column cannot persist a named
+                // enum value on SQL Server (pre-existing mapping limitation, out of scope).
                 phone = "01000000000",
                 qrCode,
                 status = 0,
@@ -287,14 +288,16 @@ public class SqlServerStudentQRCodeTests
         db.Branches.Add(branch);
         db.StampAddedTenantIds(tenantId);
 
-        var maxStageId = await db.AcademicStages.IgnoreQueryFilters().Select(x => (int?)x.Id).MaxAsync() ?? 0;
-        var stage = AcademicStage.Create(maxStageId + 1, $"QS{maxStageId + 1}", "QR Stage", (byte)1).Value;
+        // Identity columns: id 0 lets SQL Server generate the key (explicit ids would
+        // require IDENTITY_INSERT). Codes are unique per tenant by DB constraint.
+        var stageCode = $"QS{Guid.NewGuid():N}"[..12].ToUpperInvariant();
+        var stage = AcademicStage.Create(0, stageCode, "QR Stage", (byte)1).Value;
         db.AcademicStages.Add(stage);
         db.StampAddedTenantIds(tenantId);
         await db.SaveChangesAsync();
 
-        var maxYearId = await db.AcademicYears.IgnoreQueryFilters().Select(x => (int?)x.Id).MaxAsync() ?? 0;
-        var year = AcademicYear.Create(maxYearId + 1, stage.Id, $"QY{maxYearId + 1}", "QR Year").Value;
+        var yearCode = $"QY{Guid.NewGuid():N}"[..12].ToUpperInvariant();
+        var year = AcademicYear.Create(0, stage.Id, yearCode, "QR Year").Value;
         db.AcademicYears.Add(year);
         db.StampAddedTenantIds(tenantId);
         await db.SaveChangesAsync();
