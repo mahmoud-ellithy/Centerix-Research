@@ -43,6 +43,13 @@ public static class StudentErrors
     public static Error QRCodeTooLong =>
         Error.Validation("Student.QRCode_TooLong", "QR code cannot exceed 100 characters");
 
+    /// <summary>
+    /// REV-009: the QR code is already taken by another student (including a soft-deleted
+    /// one) in the SAME tenant. Same codes in other tenants are allowed.
+    /// </summary>
+    public static Error DuplicateQRCode =>
+        Error.Conflict("Student.DuplicateQRCode", "This QR code is already used by another student in this center");
+
     public static Error NotFound =>
         Error.NotFound("Student.NotFound", "Student was not found");
 
