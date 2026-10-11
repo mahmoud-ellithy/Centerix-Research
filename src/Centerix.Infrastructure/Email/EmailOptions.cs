@@ -54,8 +54,10 @@ public sealed class EmailOptions
     }
 
     /// <summary>
-    /// Validate the resolved configuration against the hosting environment.
-    /// Called by the options pipeline at startup (<c>ValidateOnStart</c>).
+    /// Validate the resolved configuration against the hosting environment. Called explicitly
+    /// from <c>Program.cs</c> once <see cref="IHostEnvironment"/> is available at startup — NOT
+    /// via <c>ValidateOnStart</c> (the options pipeline cannot inject <see cref="IHostEnvironment"/>
+    /// into a validator without building a second <see cref="IServiceProvider"/>).
     /// </summary>
     public void Validate(IHostEnvironment environment, bool allowTestingCapture = false)
     {
@@ -64,9 +66,13 @@ public sealed class EmailOptions
         if (resolved == EmailMode.Capture && !IsDevelopmentOrAllowedTesting(environment, allowTestingCapture))
         {
             throw new InvalidOperationException(
-                $"Email:Mode=Capture is only permitted in Development or Testing. " +
-                $"Current environment is '{environment.EnvironmentName}'. " +
-                "Set Email:Mode=Smtp and configure Smtp:Host / Smtp:Port / Smtp:FromAddress.");
+                $"Email:Mode=Capture is only permitted in Development, or in an environment named " +
+                $"Testing when the test-host marker '{Centerix.Infrastructure.Common.TestHostMarkers.AllowCaptureAndSkipDbInitKey}' " +
+                $"is set. Current environment is '{environment.EnvironmentName}'" +
+                (string.Equals(environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase)
+                    ? " (marker not set)."
+                    : ".") +
+                " Set Email:Mode=Smtp and configure Smtp:Host / Smtp:Port / Smtp:FromAddress.");
         }
     }
 

@@ -75,7 +75,7 @@ public class Rev012EnvironmentHandlingTests : IClassFixture<TestWebApplicationFa
         var options = new EmailOptions { Mode = EmailMode.Capture };
 
         var ex = Assert.Throws<InvalidOperationException>(() => options.Validate(env));
-        Assert.Contains("Development or Testing", ex.Message);
+        Assert.Contains("only permitted in Development", ex.Message);
         Assert.Contains("Staging", ex.Message);
 
         env.EnvironmentName = "Production";
@@ -92,7 +92,9 @@ public class Rev012EnvironmentHandlingTests : IClassFixture<TestWebApplicationFa
         var options = new EmailOptions { Mode = EmailMode.Capture };
 
         var ex = Assert.Throws<InvalidOperationException>(() => options.Validate(env, allowTestingCapture: false));
-        Assert.Contains("Development or Testing", ex.Message);
+        Assert.Contains("only permitted in Development", ex.Message);
+        Assert.Contains(TestHostMarkers.AllowCaptureAndSkipDbInitKey, ex.Message);
+        Assert.Contains("marker not set", ex.Message);
     }
 
     [Fact]
@@ -179,7 +181,7 @@ public class Rev012EnvironmentHandlingTests : IClassFixture<TestWebApplicationFa
         var exception = await Record.ExceptionAsync(() => Task.Run(() => factory.CreateClient()));
 
         Assert.NotNull(exception);
-        Assert.Contains("Development or Testing", exception!.ToString());
+        Assert.Contains("only permitted in Development", exception!.ToString());
     }
 
     [Fact]
@@ -262,7 +264,8 @@ public class Rev012EnvironmentHandlingTests : IClassFixture<TestWebApplicationFa
         var exception = await Record.ExceptionAsync(() => Task.Run(() => factory.CreateClient()));
 
         Assert.NotNull(exception);
-        Assert.Contains("Development or Testing", exception!.ToString());
+        Assert.Contains("only permitted in Development", exception!.ToString());
+        Assert.Contains("marker not set", exception!.ToString());
     }
 
     [Fact]
