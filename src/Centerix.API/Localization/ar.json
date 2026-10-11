@@ -100,6 +100,7 @@
   "Tenant.CannotCancelFromSuspended": "لا يمكن إلغاء مستأجر متوقف مباشرة",
   "Tenant.NotFound": "المستأجر ذو المعرف '{0}' غير موجود",
   "Student.DuplicateQRCode": "رمز QR هذا مستخدم بالفعل من قبل طالب آخر في هذا المركز",
+  "Attendance.Duplicate": "يوجد سجل حضور بالفعل لهذا الطالب في هذا التاريخ",
   "Tenant.ProvisionOwnerNotAllowed": "تجهيز مالك المستأجر يتطلب مستأجرًا معتمدًا (قيد التجهيز أو نشط أو تجريبي)",
   "TenantPlan.SnapshotPrice_Invalid": "يجب أن يكون سعر اللقطة أكبر من صفر",
   "PlatformUser.Email_Required": "البريد الإلكتروني مطلوب",

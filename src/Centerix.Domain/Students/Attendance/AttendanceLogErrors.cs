@@ -21,4 +21,12 @@ public static class AttendanceLogErrors
 
     public static Error NotFound =>
         Error.NotFound("Attendance.NotFound", "Attendance log was not found");
+
+    /// <summary>
+    /// REV-010: an attendance log already exists for this student on this session date
+    /// (UX_AttendanceLogs_Student_Session). Returned instead of a 500 on concurrent
+    /// same-day duplicates.
+    /// </summary>
+    public static Error Duplicate =>
+        Error.Conflict("Attendance.Duplicate", "An attendance log already exists for this student on this date");
 }

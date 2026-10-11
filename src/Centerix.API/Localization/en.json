@@ -100,6 +100,7 @@
   "Tenant.CannotCancelFromSuspended": "Cannot cancel a suspended tenant directly",
   "Tenant.NotFound": "Tenant with id '{0}' was not found",
   "Student.DuplicateQRCode": "This QR code is already used by another student in this center",
+  "Attendance.Duplicate": "An attendance log already exists for this student on this date",
   "Tenant.ProvisionOwnerNotAllowed": "Tenant owner provisioning requires an approved tenant (Provisioning, Active or Trial)",
   "TenantPlan.SnapshotPrice_Invalid": "Snapshot price must be greater than zero",
   "PlatformUser.Email_Required": "Email is required",
