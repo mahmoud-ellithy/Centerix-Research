@@ -3,6 +3,7 @@ using Centerix.Infrastructure.Common;
 using Centerix.Infrastructure.Data;
 using Centerix.Infrastructure.Email;
 using Centerix.Infrastructure.Tenancy;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -283,6 +284,63 @@ public class Rev012EnvironmentHandlingTests : IClassFixture<TestWebApplicationFa
     }
 
     // ================================================================
+    // Database initialization is NOT skipped by the environment name alone (closeout item 2).
+    //
+    // RunDatabaseInitializationAsync's skip condition is "Testing" AND the marker — exactly
+    // the same condition EmailOptions uses for Capture. These two tests prove the DB-init
+    // side of that condition directly: a WebApplicationFactory<Program> host does NOT work
+    // here, because WebApplicationFactory captures the host as soon as the entry point's
+    // own async Main reaches ITS FIRST genuine await suspension — and that first suspension
+    // IS the "await app.RunDatabaseInitializationAsync()" call itself (everything before it
+    // in Program.cs is synchronous). Whatever that call does afterwards runs undetached and
+    // unobserved by the test, so neither its success nor its failure is ever visible through
+    // CreateClient()/Services. Building the WebApplication directly here and awaiting the
+    // extension method ourselves sidesteps that entirely and tests the real method with the
+    // real DI wiring (AddInfrastructure) from Centerix.API.Program. The connection string
+    // points at a loopback port nothing listens on, so a connection attempt fails fast and
+    // deterministically instead of needing an actual SQL Server.
+    // ================================================================
+
+    [Fact]
+    public async Task RunDatabaseInitializationAsync_TestingWithoutMarker_DoesNotSkip_FailsWithDbError()
+    {
+        var config = new Dictionary<string, string?>
+        {
+            [TestHostMarkers.AllowCaptureAndSkipDbInitKey] = "false",
+        };
+
+        // DatabaseInitialization:ApplyMigrations/Seed/ValidateSchema are left at their
+        // (true) appsettings.json defaults, so the method actually tries to migrate.
+        await using var app = BuildMinimalAppWithUnreachableDb("Testing", config);
+
+        var exception = await Record.ExceptionAsync(() => app.RunDatabaseInitializationAsync());
+
+        Assert.NotNull(exception);
+        var text = exception!.ToString();
+        Assert.True(
+            text.Contains("SqlException", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("network-related", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("SqlClient", StringComparison.OrdinalIgnoreCase),
+            $"Expected a SQL connectivity failure, got: {text}");
+    }
+
+    [Fact]
+    public async Task RunDatabaseInitializationAsync_TestingWithMarker_Skips_EvenWithUnreachableDb()
+    {
+        var config = new Dictionary<string, string?>
+        {
+            [TestHostMarkers.AllowCaptureAndSkipDbInitKey] = "true",
+        };
+
+        // Same unreachable connection string and same (true) DatabaseInitialization
+        // defaults as above — the only difference is the marker. The call must return
+        // cleanly because the skip check runs before anything ever opens a connection.
+        await using var app = BuildMinimalAppWithUnreachableDb("Testing", config);
+
+        await app.RunDatabaseInitializationAsync();
+    }
+
+    // ================================================================
     // SeedDevelopmentData=true without BootstrapAdmin:TemporaryPassword still throws.
     //
     // Confirms the regression coverage required by Item 1 already exists at
@@ -459,5 +517,42 @@ public class Rev012EnvironmentHandlingTests : IClassFixture<TestWebApplicationFa
 
             services.AddDbContext<TContext>(configureOptions);
         }
+    }
+
+    /// <summary>
+    /// Builds a real <see cref="WebApplication"/> via the SAME <c>AddInfrastructure</c> wiring
+    /// <c>Centerix.API.Program</c> uses — NOT through <see cref="WebApplicationFactory{TEntryPoint}"/>,
+    /// whose entry-point interception can't observe what happens after
+    /// <c>RunDatabaseInitializationAsync</c>'s first genuine await (see the comment above the
+    /// two tests that use this). The connection string points at a loopback port nothing
+    /// listens on with a short connect timeout, so a real connection attempt fails fast and
+    /// deterministically instead of needing an actual SQL Server. Caller awaits
+    /// <c>app.RunDatabaseInitializationAsync()</c> directly and disposes the app.
+    /// </summary>
+    private static WebApplication BuildMinimalAppWithUnreachableDb(
+        string environmentName, Dictionary<string, string?> overrides)
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = environmentName,
+        });
+
+        var baseline = new Dictionary<string, string?>
+        {
+            ["JwtSettings:Secret"] = "ThisIsATestSecretKeyThatIsAtLeast32CharsLong!!",
+            ["JwtSettings:Issuer"] = "TestIssuer",
+            ["JwtSettings:Audience"] = "TestAudience",
+            ["JwtSettings:ExpirationInMinutes"] = "60",
+            ["Invitations:BaseUrl"] = "https://app.securitytests.local",
+            ["ConnectionStrings:DefaultConnection"] =
+                "Server=127.0.0.1,1;Database=Rev012A1UnreachableDb;TrustServerCertificate=True;" +
+                "Encrypt=False;Connect Timeout=3;",
+        };
+        builder.Configuration.AddInMemoryCollection(baseline);
+        builder.Configuration.AddInMemoryCollection(overrides);
+
+        builder.Services.AddInfrastructure(builder.Configuration);
+
+        return builder.Build();
     }
 }
